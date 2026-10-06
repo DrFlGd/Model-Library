@@ -1,0 +1,31 @@
+[dependencies.proc-macro2]
+version = "1.0"
+
+[dependencies.quote]
+version = "1.0"
+
+[dependencies.syn]
+features = ["derive", "parsing", "extra-traits"]
+version = "3"
+
+[lib]
+path = "src/lib.rs"
+
+[package]
+authors = ["The Rust-Fuzz Project Developers", "Nick Fitzgerald <fitzgen@gmail.com>", "Manish Goregaokar <manishsmail@gmail.com>", "Andre Bogus <bogusandre@gmail.com>", "Corey Farwell <coreyf@rwell.org>"]
+autobenches = false
+autobins = false
+autoexamples = false
+autolib = false
+autotests = false
+categories = ["development-tools::testing"]
+description = "Derives arbitrary traits"
+documentation = "https://docs.rs/arbitrary/"
+edition = "2021"
+keywords = ["arbitrary", "testing", "derive", "macro"]
+license = "MIT OR Apache-2.0"
+name = "derive_arbitrary"
+readme = "README.md"
+repository = "https://github.com/rust-fuzz/arbitrary"
+rust-version = "1.71.0"
+version = "1.5.0"

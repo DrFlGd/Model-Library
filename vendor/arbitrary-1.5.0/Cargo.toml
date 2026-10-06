@@ -1,0 +1,32 @@
+[dependencies.derive_arbitrary]
+optional = true
+version = "~1.5.0"
+
+[dev-dependencies.exhaustigen]
+version = "0.1.0"
+
+[features]
+derive = ["derive_arbitrary"]
+
+[lib]
+path = "src/lib.rs"
+
+[package]
+authors = ["The Rust-Fuzz Project Developers", "Nick Fitzgerald <fitzgen@gmail.com>", "Manish Goregaokar <manishsmail@gmail.com>", "Simonas Kazlauskas <arbitrary@kazlauskas.me>", "Brian L. Troutwine <brian@troutwine.us>", "Corey Farwell <coreyf@rwell.org>"]
+autobenches = false
+autobins = false
+autoexamples = false
+autolib = false
+autotests = false
+categories = ["development-tools::testing"]
+description = "The trait for generating structured data from unstructured data"
+documentation = "https://docs.rs/arbitrary/"
+edition = "2021"
+include = ["Cargo.toml", "CHANGELOG.md", "LICENSE-MIT", "LICENSE-APACHE", "README.md", "src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs"]
+keywords = ["arbitrary", "testing"]
+license = "MIT OR Apache-2.0"
+name = "arbitrary"
+readme = "README.md"
+repository = "https://github.com/rust-fuzz/arbitrary/"
+rust-version = "1.71.0"
+version = "1.5.0"
