@@ -154,6 +154,24 @@ pub fn normalise(field: &str, v: &Value) -> Value {
     }
 }
 
+/// A model.json's place: `path`, or an older file's `category` values in order.
+pub fn path_of(side: &Value) -> Option<Vec<String>> {
+    if let Some(a) = side["path"].as_array() {
+        return Some(
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect(),
+        );
+    }
+    side["category"].as_object().map(|c| {
+        c.values()
+            .filter_map(Value::as_str)
+            .map(String::from)
+            .collect()
+    })
+}
+
 /// Write a model's details: `patch` holds details (null removes one) and maybe
 /// "fields" (the schema's own; null removes one). Creates the sidecar (with an id,
 /// `added`, and the given name/category) if the folder has none. Returns the sidecar.
@@ -213,20 +231,21 @@ pub fn update(dir: &Path, patch: &Value, defaults: &Value) -> Result<Value> {
     Ok(side)
 }
 
-/// Record where a model now lives: its schema (None: Unsorted) and category values.
-/// The folder path stays the truth; this keeps model.json in step with it, so a
-/// library re-imported elsewhere knows each model's place.
-pub fn set_place(dir: &Path, schema: Option<&str>, category: &Map<String, Value>) -> Result<Value> {
+/// Record where a model now lives: its schema (None: Unsorted) and its path of
+/// subcategories. The folder path stays the truth; this keeps model.json in step
+/// with it, so a library re-imported elsewhere knows each model's place.
+pub fn set_place(dir: &Path, schema: Option<&str>, path: &[String]) -> Result<Value> {
     let mut side = read_sidecar(dir);
     let obj = side.as_object_mut().unwrap();
+    obj.shift_remove("category"); // older files: {level: value}
     match schema {
         Some(s) => {
             obj.insert("schema".into(), json!(s));
-            obj.insert("category".into(), Value::Object(category.clone()));
+            obj.insert("path".into(), json!(path));
         }
         None => {
             obj.shift_remove("schema");
-            obj.shift_remove("category");
+            obj.shift_remove("path");
         }
     }
     write_json(&dir.join(SIDECAR), &side)?;

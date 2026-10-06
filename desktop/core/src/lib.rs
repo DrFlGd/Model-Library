@@ -4,7 +4,7 @@
 //!
 //! - [`config`]: what the app keeps on this computer (open library, preferences)
 //! - [`library`]: the portable library folder
-//! - [`schema`]: schemas, with their folder levels, model folder names and fields
+//! - [`schema`]: schemas (categories), with their tree of subcategory folders, model folder names and fields
 //! - [`model`]: one model folder and its model.json
 //! - [`index`]: every model in the library, searched in memory, cached on this computer
 //! - [`archive`], [`mesh`], [`thumb`]: inside ZIPs, 3D files as triangles, thumbnails

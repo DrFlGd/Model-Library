@@ -38,7 +38,7 @@ folder has a model.json with its details, so the library can be moved, copied\n\
 or synced, and opened again by any version of the app.\n\
 \n\
   _library/library.json   name, favourites and library-wide settings\n\
-  _library/schemas/       your schemas: the folder levels and fields for each kind of model\n\
+  _library/schemas/       your categories: their subcategory folders and fields\n\
   Unsorted/               imported models that have no schema yet\n\
 \n\
 The app's search index and caches are kept on each computer, not here.\n";

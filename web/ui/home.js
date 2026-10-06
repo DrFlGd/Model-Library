@@ -10,9 +10,9 @@ import { sortFolder } from "./import.js";
 const TREE = `_library/                  the app's own files
 Unsorted/                  models with no category yet
 Category/                  a category's top folder
-  Subcategory/             one folder per level,
-    Subcategory/           as many at each level as you like
-      Model name (Author)/   one folder per model
+  Subcategory/             as many as you like,
+    Subcategory/           inside each other, as deep as each needs
+      Model name (Author)/   one folder per model, at any level
         model.json           author, source, date…
         Model name.stl
         Parts/               parts keep their folders
@@ -67,7 +67,7 @@ const NEXT = [
   ["Phase 1", "Categories, model details and search"],
   ["Phase 2", "Importing models: files, folders and ZIPs, moved or copied into place, and moving models between categories"],
   ["Phase 3", "Viewing models: a 3D viewer, parts and variants, previews, pictures, readmes, PDFs and videos"],
-  ["Phase 4", "Editing categories: rename, merge and move them, change their levels, with folders moved to match and undo", true],
+  ["Phase 4", "Editing categories: a tree of subcategories, renamed, merged and moved with folders to match, and undo", true],
   ["Phase 5", "Large collections: adopting tidy folders in place, finding duplicates, noticing changes made outside the app"],
 ];
 

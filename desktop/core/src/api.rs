@@ -108,6 +108,8 @@ impl App {
 
     fn open_library(&self, path: &Path) -> Result<Library> {
         let lib = Library::open(path)?;
+        // categories from before subcategory trees become trees (nothing moves)
+        schema::upgrade_all(&lib);
         let mut cfg = self.config();
         if cfg.library.as_deref() != Some(path)
             || cfg.recent_libraries.first().map(PathBuf::as_path) != Some(path)
@@ -695,7 +697,7 @@ impl App {
                         let m = ix.get(&id).ok_or_else(|| anyhow!("That model isn't in the library any more."))?;
                         let dir = lib.resolve(m.rel())?;
                         // a first model.json starts from what the folder says
-                        let defaults = json!({ "name": m.v["name"], "schema": m.v["schema"], "category": m.v["category"],
+                        let defaults = json!({ "name": m.v["name"], "schema": m.v["schema"], "path": if m.v["schema"].is_null() { Value::Null } else { m.v["path"].clone() },
                             "authors": m.v["authors"].as_array().filter(|a| !a.is_empty()).map(|a| a.iter().map(|n| json!({ "name": n })).collect::<Vec<_>>()) });
                         model::update(&dir, &patch, &defaults)?;
                         let v = ix.refresh(lib, &id).ok_or_else(|| anyhow!("couldn't read the model again"))?;
@@ -842,7 +844,7 @@ impl App {
                             if let Some(f) = edit["fields"].as_object().filter(|f| !f.is_empty()) {
                                 patch["fields"] = Value::Object(f.clone());
                             }
-                            let defaults = json!({ "name": m.v["name"], "schema": m.v["schema"], "category": m.v["category"],
+                            let defaults = json!({ "name": m.v["name"], "schema": m.v["schema"], "path": if m.v["schema"].is_null() { Value::Null } else { m.v["path"].clone() },
                                 "authors": m.v["authors"].as_array().filter(|a| !a.is_empty()).map(|a| a.iter().map(|n| json!({ "name": n })).collect::<Vec<_>>()) });
                             match model::update(&dir, &patch, &defaults) {
                                 Ok(_) => {
@@ -1120,9 +1122,33 @@ mod tests {
             serde_json::from_slice(&std::fs::read(d.join("model.json")).unwrap()).unwrap();
         assert_eq!(side["name"], "Hive Tyrant");
         assert_eq!(side["authors"], json!([{ "name": "Jo Smith" }]));
+        assert_eq!(side["path"], json!(["Warhammer 40k", "Tyranid"]));
+        // opening the library again turns the fixed levels into a tree; nothing moves
+        call(
+            &app,
+            "library_open",
+            json!({ "path": lib.display().to_string() }),
+        )
+        .await;
+        let sc: Value = serde_json::from_slice(
+            &std::fs::read(lib.join("_library/schemas/wargames.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(sc.get("levels").is_none(), "{sc}");
         assert_eq!(
-            side["category"],
-            json!({ "game": "Warhammer 40k", "faction": "Tyranid" })
+            sc["subcategories"],
+            json!([{ "name": "Warhammer 40k", "subcategories": [{ "name": "Tyranid" }] }])
+        );
+        call(&app, "library_scan", json!({ "full": true })).await;
+        let q = call(
+            &app,
+            "models_query",
+            json!({ "scope": "all", "q": "in:tyranid" }),
+        )
+        .await;
+        assert_eq!(
+            q["items"][0]["rel"],
+            "Wargames/Warhammer 40k/Tyranid/Hive Tyrant (Jo Smith)"
         );
         let v = call(
             &app,
@@ -1450,9 +1476,13 @@ mod tests {
             json!({ "path": lib.display().to_string() }),
         )
         .await;
-        call(&app, "schema_create", json!({ "schema": { "name": "Prints", "levels": [{ "label": "Group" }, { "label": "Kind" }, { "label": "Style" }] } })).await;
+        call(
+            &app,
+            "schema_create",
+            json!({ "schema": { "name": "Prints", "subcategories": [{ "name": "1" }] } }),
+        )
+        .await;
         for (path, name) in [
-            (json!([]), "1"),
             (json!([]), "2"),
             (json!(["2"]), "A"),
             (json!(["2"]), "B"),
@@ -1467,14 +1497,32 @@ mod tests {
             )
             .await;
         }
+        // any depth, on any branch
+        call(
+            &app,
+            "subcategory_add",
+            json!({ "schema": "prints", "path": ["2", "A", "1"], "name": "x" }),
+        )
+        .await;
         assert!(app
             .call(
                 "subcategory_add",
-                json!({ "schema": "prints", "path": ["2", "A", "1"], "name": "x" })
+                json!({ "schema": "prints", "path": ["2"], "name": "_x" })
             )
             .await
             .is_err());
-        assert!(lib.join("Prints/2/A/2").is_dir());
+        std::fs::create_dir_all(lib.join("Prints/2/Bench")).unwrap();
+        std::fs::write(lib.join("Prints/2/Bench/b.stl"), "solid").unwrap();
+        assert!(app
+            .call(
+                "subcategory_add",
+                json!({ "schema": "prints", "path": ["2", "Bench"], "name": "x" })
+            )
+            .await
+            .is_err());
+        std::fs::remove_dir_all(lib.join("Prints/2/Bench")).unwrap();
+        assert!(lib.join("Prints/2/A/2").is_dir() && lib.join("Prints/1").is_dir());
+        assert!(lib.join("Prints/2/A/1/x").is_dir());
         let ov = call(&app, "library_overview", json!({})).await;
         let tree = &ov["schemas"][0]["tree"];
         assert_eq!(tree[1]["value"], "2");

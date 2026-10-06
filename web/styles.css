@@ -469,3 +469,17 @@ input:invalid { border-color: var(--danger); }
 #change-broken p { margin: 0 0 8px; }
 .field-block .field-row select { width: auto; }
 .field-block .field-row input:not([type="checkbox"]), .field-block .level-row input:not([type="checkbox"]) { width: auto; flex: 1 1 120px; }
+/* Subcategory trees: the editor in New and Edit category, and the picker */
+.cat-place { flex: 1 1 160px; max-width: 280px; }
+.cat-new { flex: 1 1 160px; }
+.st { display: grid; gap: 6px; }
+.st-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.st-list .st-list { margin-top: 4px; }
+.st-row { display: flex; gap: 4px; align-items: center; }
+.st-dot { flex: none; width: 14px; text-align: center; color: var(--graphite); font-size: 12px; }
+.field-block .st-row input.st-name { flex: 1 1 140px; width: auto; min-width: 0; }
+.st-row button { flex: none; padding: 4px 7px; }
+.st-count { flex: none; font-size: 12px; width: 28px; text-align: right; }
+.st-row button:disabled { opacity: .35; }
+.st-twin { flex: none; font-size: 12px; }
+.st-empty { margin: 0; font-size: 13px; }

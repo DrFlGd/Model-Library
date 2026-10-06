@@ -8,7 +8,7 @@ use crate::library::Library;
 use crate::model::{self, SIDECAR};
 use crate::schema::{self, Schema};
 use serde_json::{json, Map, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -195,36 +195,98 @@ fn subdirs(dir: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// Every model folder: (folder, schema, category values).
-fn find_models(lib: &Library, schemas: &[Schema]) -> Vec<(PathBuf, Option<usize>, Vec<String>)> {
-    fn under(
-        dir: &Path,
-        si: usize,
-        depth: usize,
-        levels: usize,
-        cats: &mut Vec<String>,
-        out: &mut Vec<(PathBuf, Option<usize>, Vec<String>)>,
-    ) {
-        for d in subdirs(dir) {
-            if depth >= levels || d.join(SIDECAR).is_file() {
-                out.push((d, Some(si), cats.clone()));
-            } else {
-                cats.push(d.file_name().unwrap().to_string_lossy().into_owned());
-                under(&d, si, depth + 1, levels, cats, out);
-                cats.pop();
+/// What a folder that isn't in a category's tree and has no model.json is.
+#[derive(PartialEq)]
+enum Probe {
+    /// model folders inside it: a subcategory made by hand
+    Category,
+    /// files: a model dropped in by hand
+    Model,
+    Empty,
+}
+
+fn probe(dir: &Path) -> Probe {
+    fn walk(dir: &Path, depth: usize, files: &mut bool) -> bool {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return false;
+        };
+        for e in rd.flatten() {
+            match e.file_type() {
+                Ok(t) if t.is_dir() => {
+                    if e.path().join(SIDECAR).is_file()
+                        || (depth < 4 && walk(&e.path(), depth + 1, files))
+                    {
+                        return true;
+                    }
+                }
+                Ok(_) => *files = true,
+                Err(_) => {}
             }
+        }
+        false
+    }
+    let mut files = false;
+    if walk(dir, 0, &mut files) {
+        Probe::Category
+    } else if files {
+        Probe::Model
+    } else {
+        Probe::Empty
+    }
+}
+
+/// Every model folder: (folder, schema, path of subcategories). Under a category's
+/// folder, a folder with a model.json is a model; one in the category's tree (or
+/// at an older schema's fixed levels) is a subcategory; otherwise one with model
+/// folders inside is a subcategory and one with files is a model.
+fn find_models(lib: &Library, schemas: &[Schema]) -> Vec<(PathBuf, Option<usize>, Vec<String>)> {
+    struct Walk<'a> {
+        si: usize,
+        levels: usize,
+        tree: &'a HashSet<Vec<String>>,
+        out: Vec<(PathBuf, Option<usize>, Vec<String>)>,
+    }
+    fn under(w: &mut Walk, dir: &Path, cats: &mut Vec<String>) {
+        for d in subdirs(dir) {
+            if d.join(SIDECAR).is_file() {
+                w.out.push((d, Some(w.si), cats.clone()));
+                continue;
+            }
+            let name = d.file_name().unwrap().to_string_lossy().into_owned();
+            cats.push(name);
+            let key: Vec<String> = cats.iter().map(|c| c.to_lowercase()).collect();
+            let what = if cats.len() <= w.levels || w.tree.contains(&key) {
+                Probe::Category
+            } else {
+                probe(&d)
+            };
+            match what {
+                Probe::Category => under(w, &d, cats),
+                Probe::Model => {
+                    cats.pop();
+                    w.out.push((d, Some(w.si), cats.clone()));
+                    continue;
+                }
+                Probe::Empty => {}
+            }
+            cats.pop();
         }
     }
     let mut out = vec![];
     for (si, s) in schemas.iter().enumerate() {
-        under(
-            &lib.root().join(&s.folder),
+        let tree: HashSet<Vec<String>> = s
+            .tree()
+            .into_iter()
+            .map(|p| p.iter().map(|c| c.to_lowercase()).collect())
+            .collect();
+        let mut w = Walk {
             si,
-            0,
-            s.levels.len(),
-            &mut vec![],
-            &mut out,
-        );
+            levels: s.levels.len(),
+            tree: &tree,
+            out: vec![],
+        };
+        under(&mut w, &lib.root().join(&s.folder), &mut vec![]);
+        out.extend(w.out);
     }
     for d in subdirs(&lib.root().join(UNSORTED)) {
         out.push((d, None, vec![]));
@@ -470,6 +532,11 @@ impl Index {
                         .is_some_and(|sc| fold(&sc.name).starts_with(want))
             }),
             "kind" => m.v["files"]["kinds"].get(want).is_some(),
+            "in" => has(&mut m.v["path"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)),
             other => {
                 m.v["category"]
                     .get(other)
@@ -572,15 +639,10 @@ impl Tree {
 }
 
 /// A library of `n` made-up models for timing (`modlib-cli make-test-library`):
-/// one schema, Game > Faction, each model a folder with a model.json and two small files.
+/// one schema with a tree of games and their factions, each model a folder with a
+/// model.json and two small files.
 pub fn make_test_library(dir: &Path, n: usize) -> anyhow::Result<()> {
     let lib = Library::open(dir)?;
-    if schema::list(&lib).is_empty() {
-        schema::create(
-            &lib,
-            &json!({ "name": "Wargames", "levels": [{ "label": "Game" }, { "label": "Faction" }], "fields": [{ "label": "Scale", "type": "choice", "choices": "28mm, 32mm, 75mm" }] }),
-        )?;
-    }
     let games = [
         "Warhammer 40k",
         "Age of Sigmar",
@@ -598,6 +660,16 @@ pub fn make_test_library(dir: &Path, n: usize) -> anyhow::Result<()> {
         "Tau",
         "Imperial Guard",
     ];
+    if schema::list(&lib).is_empty() {
+        let tree: Vec<Value> = games
+            .iter()
+            .map(|g| json!({ "name": g, "subcategories": factions.iter().map(|f| json!({ "name": f })).collect::<Vec<_>>() }))
+            .collect();
+        schema::create(
+            &lib,
+            &json!({ "name": "Wargames", "subcategories": tree, "fields": [{ "label": "Scale", "type": "choice", "choices": "28mm, 32mm, 75mm" }] }),
+        )?;
+    }
     let nouns = [
         "Warrior", "Tyrant", "Walker", "Tank", "Hero", "Beast", "Squad", "Drone", "Lord", "Swarm",
     ];

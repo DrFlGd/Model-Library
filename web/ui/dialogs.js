@@ -6,7 +6,7 @@ import { ui } from "./state.js";
 import { routeHash, schemaScope } from "./context.js";
 import { Icon } from "./icons.js";
 import { api, loadOverview, saveDetails, moveModels, toast } from "./library.js";
-import { CategoryPicker } from "./category.js";
+import { CategoryPicker, SubcategoryTree, treeSpec, treeReady, firstBranch } from "./category.js";
 import { RenameNode, EditSchema, DeleteSchema, EditPicked, AddSubcategory } from "./categories.js";
 
 export const FIELD_TYPES = [["text", "Text"], ["number", "Number"], ["choice", "Choice"], ["yes-no", "Yes or no"], ["date", "Date"]];
@@ -38,20 +38,19 @@ const folderish = (s) => s.replace(/[<>:"/\\|?*]/g, "-").replace(/\s+/g, " ").tr
 function NewSchema() {
   const [name, setName] = useState("");
   const [folder, setFolder] = useState("");
-  const [levels, setLevels] = useState(["", ""]);
+  const [tree, setTree] = useState([]);
   const [fields, setFields] = useState([]);
   const [template, setTemplate] = useState("{name} ({author})");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const top = folderish(folder || name) || "Category";
-  const shownLevels = levels.map((l, i) => l.trim() || `Level ${i + 1}`);
   const sample = (template.includes("{name}") ? template : "{name} ({author})").replace("{name}", "Model name").replace("{author}", "Author");
   const setAt = (list, set, i, v) => set(list.map((x, j) => (j === i ? v : x)));
   const submit = async () => {
     setBusy(true);
     setError("");
     try {
-      const s = await api("schema_create", { schema: { name, folder, levels: levels.map((label) => ({ label })), model_folder: template, fields } });
+      const s = await api("schema_create", { schema: { name, folder, subcategories: treeSpec(tree), model_folder: template, fields } });
       await loadOverview();
       close();
       location.hash = routeHash(`browse:${schemaScope(s.id)}`);
@@ -62,22 +61,17 @@ function NewSchema() {
       setBusy(false);
     }
   };
-  return html`<${Dialog} title="New category" id="schema-dialog" onSubmit=${submit} busy=${busy} error=${error} submitLabel="Make category">
-    <p class="muted">A category has its own top folder. Its levels are the folders below that: name each level here, then add as many subcategories at each level as you like from the category's page (or let importing make them). Every model gets its own folder at the bottom.</p>
+  return html`<${Dialog} title="New category" id="schema-dialog" onSubmit=${submit} busy=${busy || !treeReady(tree)} error=${error} submitLabel="Make category">
+    <p class="muted">A category has its own top folder, and its subcategories are folders inside it. Add as many as you like, inside each other as deep as each needs. Every model gets its own folder, in any subcategory or at the top.</p>
     <div class="form-two">
       <label class="field-block"><span>Name</span>
         <input id="schema-name" type="text" required maxlength="60" placeholder="Category name" value=${name} onInput=${(e) => setName(e.target.value)} /></label>
       <label class="field-block"><span>Top folder</span>
         <input id="schema-folder" type="text" maxlength="60" placeholder=${folderish(name) || "Same as the name"} value=${folder} onInput=${(e) => setFolder(e.target.value)} /></label>
     </div>
-    <div class="field-block"><span class="field-label">Levels</span>
-      ${levels.map((l, i) => html`<div class="level-row" key=${i}>
-        <input type="text" class="schema-level" maxlength="40" placeholder=${`Level ${i + 1}, such as ${["Type", "Subtype", "Group", "Set", "Part", "Size"][i] || "Group"}`} value=${l} aria-label=${`Level ${i + 1}`}
-          onInput=${(e) => setAt(levels, setLevels, i, e.target.value)} />
-        <button type="button" class="ghost" aria-label=${`Remove level ${i + 1}`} onClick=${() => setLevels(levels.filter((_, j) => j !== i))}>${Icon.close(13)}</button>
-      </div>`)}
-      <div><button type="button" class="ghost" id="add-level" onClick=${() => setLevels([...levels, ""])} disabled=${levels.length >= 6}>${Icon.plus(13)} Add a level</button></div>
-    </div>
+    <div class="field-block"><span class="field-label">Subcategories</span>
+      <small class="muted">Press Enter to add the next one beside it. ← and → move one out a level, or into the one above it.</small>
+      <${SubcategoryTree} nodes=${tree} onChange=${(t) => setTree(t)} /></div>
     <label class="field-block"><span>Model folder name</span>
       <input id="schema-template" type="text" maxlength="80" value=${template} onInput=${(e) => setTemplate(e.target.value)} />
       <small class="muted">Use {name} and {author}. Folders already named this way are read back into a model's name and author.</small></label>
@@ -94,7 +88,7 @@ function NewSchema() {
       <div><button type="button" class="ghost" id="add-field" onClick=${() => setFields([...fields, { label: "", type: "text" }])}>${Icon.plus(13)} Add a field</button></div>
     </div>
     <div class="field-block"><span class="field-label">Models will go in</span>
-      <code class="preview-path" id="schema-preview">${[top, ...shownLevels.map((l) => `<${l}>`), sample].join(" / ")}</code></div>
+      <code class="preview-path" id="schema-preview">${[top, ...firstBranch(tree), sample].join(" / ")}</code></div>
   <//>`;
 }
 
@@ -177,7 +171,7 @@ function MoveModels({ models }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const sc = overview?.schemas?.find((s) => s.id === schema);
-  const where = sc ? [sc.folder, ...sc.levels.map((l, i) => values[i]?.trim() || `<${l.label}>`)].join(" / ") : "Unsorted";
+  const where = sc ? [sc.folder, ...values].join(" / ") : "Unsorted";
   const submit = async () => {
     setBusy(true);
     setError("");
@@ -196,7 +190,7 @@ function MoveModels({ models }) {
     }
   };
   return html`<${Dialog} title=${models.length === 1 ? `Move ${first.name}` : `Move ${models.length} models`} id="move-dialog" onSubmit=${submit} busy=${busy} error=${error} submitLabel="Move">
-    <p class="muted">${models.length === 1 ? "Its folder moves" : "Their folders move"} into the category's folder and ${models.length === 1 ? "keeps its" : "keep their"} name. Category folders left empty are removed.</p>
+    <p class="muted">${models.length === 1 ? "Its folder moves" : "Their folders move"} into the subcategory's folder and ${models.length === 1 ? "keeps its" : "keep their"} name. A new subcategory is added to the category.</p>
     <div class="field-block"><span class="field-label">Category</span>
       <${CategoryPicker} overview=${overview} schema=${schema} values=${values} idPrefix="move" onChange=${(s, v) => { setSchema(s); setValues(v); }} /></div>
     <div class="field-block"><span class="field-label">Goes to</span><code class="preview-path" id="move-preview">${where} / …</code></div>

@@ -1,5 +1,6 @@
-// Changing categories after the fact (docs/PLAN.md, "Phase 4 design"): renaming,
-// merging or moving a category value, editing a category (schema), deleting one,
+// Changing categories after the fact (docs/PLAN.md, "Phase 4 design" and
+// "Subcategory tree design"): renaming, merging or moving a subcategory, adding
+// one, editing a category (schema) and its tree of subcategories, deleting one,
 // and editing several models' details at once. Every change that moves folders
 // shows a preview from the core first, then runs as a job that can be undone
 // from Home.
@@ -8,8 +9,11 @@ import { useStore } from "../lib/store.js";
 import { ui } from "./state.js";
 import { routeHash, schemaScope } from "./context.js";
 import { Icon } from "./icons.js";
-import { api, planChange, runChange, valuesAt, loadOverview, toast } from "./library.js";
+import { api, planChange, runChange, loadOverview, toast } from "./library.js";
 import { Dialog, close, FieldInput, FIELD_TYPES } from "./dialogs.js";
+import { SubcategoryTree, editorTree, treeSpec, treeReady, treeList, nodeAt } from "./category.js";
+
+const KEY = "\u001f";
 
 /** What a change would move, from the core, refreshed as the form changes. */
 function ChangePreview({ change, onPlan }) {
@@ -50,36 +54,41 @@ async function run(change, setBusy, setError, after) {
   }
 }
 
-/** Rename, merge or move one category value (and everything under it). */
+/** Rename, merge or move one subcategory (and everything in it). */
 export function RenameNode({ schemaId, path }) {
   const overview = useStore(ui, (s) => s.overview);
   const sc = overview?.schemas?.find((s) => s.id === schemaId);
-  const [values, setValues] = useState([...path]);
+  const [name, setName] = useState(path[path.length - 1]);
+  const [parent, setParent] = useState(path.slice(0, -1).join(KEY));
   const [plan, setPlan] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   if (!sc) return null;
-  const levels = sc.levels.slice(0, path.length);
-  const last = levels[levels.length - 1];
-  const changed = values.some((v, i) => v.trim() !== path[i]) && values.every((v) => v.trim());
-  const change = changed ? { kind: "category", schema: schemaId, from: path, to: values.map((v) => v.trim()) } : null;
-  const merges = changed && valuesAt(sc, values, path.length - 1).some((v) => v.toLowerCase() === values[path.length - 1].trim().toLowerCase())
-    && values.slice(0, -1).every((v, i) => v.trim() === path[i]);
+  const inside = (p) => p.length >= path.length && path.every((v, i) => v.toLowerCase() === p[i].toLowerCase());
+  const to = [...(parent ? parent.split(KEY) : []), name.trim()];
+  const changed = name.trim() && to.join(KEY) !== path.join(KEY);
+  const change = changed ? { kind: "category", schema: schemaId, from: path, to } : null;
+  const merges = changed && !inside(to) && !!nodeAt(sc, to);
   const submit = () => run(change, setBusy, setError, () => {
-    location.hash = routeHash(`browse:${schemaScope(schemaId, values.map((v) => v.trim()))}`);
+    location.hash = routeHash(`browse:${schemaScope(schemaId, to)}`);
     toast(`${plan?.label || "Done"}. You can undo it from Home.`, 5000);
   });
   return html`<${Dialog} title=${`Rename or move ${path[path.length - 1]}`} id="rename-dialog" onSubmit=${submit} busy=${busy || !plan} error=${error} submitLabel="Move folders">
-    <p class="muted">Change the ${last.label.toLowerCase()} to rename it. Use a ${last.label.toLowerCase()} that's already there to merge the two. Change a level above to move it. Every model below it moves to match.</p>
-    <div class="cat-picker">${levels.map((l, i) => html`<label class="field-block" key=${l.key}><span>${l.label}</span>
-      <input type="text" id=${`rename-${l.key}`} value=${values[i]} list=${`rename-list-${i}`} onInput=${(e) => setValues(values.map((v, j) => (j === i ? e.target.value : v)))} />
-      <datalist id=${`rename-list-${i}`}>${valuesAt(sc, values, i).map((v) => html`<option value=${v} key=${v} />`)}</datalist></label>`)}</div>
-    ${merges ? html`<p class="warn-note" id="rename-merge">${values[path.length - 1].trim()} is already there: the two will be merged.</p>` : null}
+    <p class="muted">Change the name to rename it, or use the name of one that's already there to merge the two. Choose another place to move it, with everything in it.</p>
+    <div class="form-two">
+      <label class="field-block"><span>Name</span><input type="text" id="rename-name" required maxlength="80" value=${name} onInput=${(e) => setName(e.target.value)} /></label>
+      <label class="field-block"><span>Inside</span>
+        <select id="rename-parent" value=${parent} onChange=${(e) => setParent(e.target.value)}>
+          <option value="">${`Top of ${sc.name}`}</option>
+          ${treeList(sc).filter((n) => !inside(n.path)).map((n) => html`<option value=${n.path.join(KEY)} key=${n.path.join(KEY)}>${n.path.join(" › ")}</option>`)}
+        </select></label>
+    </div>
+    ${merges ? html`<p class="warn-note" id="rename-merge">${[sc.name, ...to].join(" › ")} is already there: the two will be merged.</p>` : null}
     ${change ? html`<${ChangePreview} change=${change} onPlan=${setPlan} />` : null}
   <//>`;
 }
 
-/** Add a subcategory below a category or one of its subcategories (its folder is made too). */
+/** Add a subcategory to a category or inside one of its subcategories (its folder is made too). */
 export function AddSubcategory({ schemaId, path }) {
   const overview = useStore(ui, (s) => s.overview);
   const sc = overview?.schemas?.find((s) => s.id === schemaId);
@@ -87,7 +96,6 @@ export function AddSubcategory({ schemaId, path }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   if (!sc) return null;
-  const level = sc.levels[path.length];
   const submit = async () => {
     setBusy(true);
     setError("");
@@ -102,20 +110,21 @@ export function AddSubcategory({ schemaId, path }) {
       setBusy(false);
     }
   };
-  return html`<${Dialog} title=${`Add a ${level?.label.toLowerCase() || "subcategory"}`} id="subcat-dialog" onSubmit=${submit} busy=${busy || !name.trim()} error=${error} submitLabel="Add">
-    <p class="muted">A new ${level?.label.toLowerCase()} in ${[sc.name, ...path].join(" › ")}. Its folder is made now, so it's there to import or move models into, even before it has any.</p>
+  return html`<${Dialog} title="Add a subcategory" id="subcat-dialog" onSubmit=${submit} busy=${busy || !name.trim()} error=${error} submitLabel="Add">
+    <p class="muted">A new subcategory in ${[sc.name, ...path].join(" › ")}. Its folder is made now, so it's there to import or move models into, even before it has any.</p>
     <label class="field-block"><span>Name</span><input id="subcat-name" type="text" required maxlength="80" value=${name} onInput=${(e) => setName(e.target.value)} /></label>
     <div class="field-block"><span class="field-label">Folder</span><code class="preview-path">${[sc.folder, ...path, name.trim() || "…"].join(" / ")}</code></div>
   <//>`;
 }
 
-/** Edit a category: name, top folder, levels, model folder names and fields. */
+/** Edit a category: name, top folder, its tree of subcategories, model folder names and fields. */
 export function EditSchema({ schemaId }) {
   const overview = useStore(ui, (s) => s.overview);
   const sc = overview?.schemas?.find((s) => s.id === schemaId);
   const [name, setName] = useState(sc?.name || "");
   const [folder, setFolder] = useState(sc?.folder || "");
-  const [levels, setLevels] = useState((sc?.levels || []).map((l) => ({ key: l.key, label: l.label })));
+  const [tree, setTree] = useState(() => editorTree(sc));
+  const [removed, setRemoved] = useState([]);
   const [template, setTemplate] = useState(sc?.model_folder || "{name} ({author})");
   const [renameFolders, setRenameFolders] = useState(false);
   const [fields, setFields] = useState((sc?.fields || []).map((f) => ({ ...f, choices: (f.choices || []).join(", ") })));
@@ -124,12 +133,10 @@ export function EditSchema({ schemaId }) {
   const [error, setError] = useState("");
   if (!sc) return null;
   const setAt = (list, set, i, v) => set(list.map((x, j) => (j === i ? v : x)));
-  const swap = (i, d) => { const l = [...levels]; [l[i], l[i + d]] = [l[i + d], l[i]]; setLevels(l); };
-  const spec = { name, folder, model_folder: template, levels, fields };
-  const sameLevels = levels.length === sc.levels.length && levels.every((l, i) => l.key === sc.levels[i].key);
-  const moves = folder.trim() !== sc.folder || !sameLevels || (renameFolders && template !== sc.model_folder);
+  const spec = { name, folder, model_folder: template, fields, subcategories: treeSpec(tree), removed };
+  const moves = !!plan?.moving;
   const change = { kind: "schema", schema: sc.id, spec, rename_folders: renameFolders };
-  const ready = name.trim() && levels.every((l) => l.label.trim() && (l.key || l.value?.trim()));
+  const ready = name.trim() && treeReady(tree);
   const submit = async () => {
     await run(change, setBusy, setError, () => toast(`Saved the category ${name.trim()}.${moves ? " You can undo it from Home." : ""}`, 5000));
   };
@@ -138,18 +145,9 @@ export function EditSchema({ schemaId }) {
       <label class="field-block"><span>Name</span><input id="es-name" type="text" required maxlength="60" value=${name} onInput=${(e) => setName(e.target.value)} /></label>
       <label class="field-block"><span>Top folder</span><input id="es-folder" type="text" maxlength="60" value=${folder} onInput=${(e) => setFolder(e.target.value)} /></label>
     </div>
-    <div class="field-block"><span class="field-label">Levels</span>
-      <small class="muted">Renaming a level only changes its label. Adding, removing or reordering levels moves the folders.</small>
-      ${levels.map((l, i) => html`<div class="level-row" key=${l.key || `new-${i}`}>
-        <input type="text" class="es-level" maxlength="40" value=${l.label} aria-label=${`Level ${i + 1}`} onInput=${(e) => setAt(levels, setLevels, i, { ...l, label: e.target.value })} />
-        ${l.key ? null : html`<input type="text" class="es-level-value" maxlength="80" placeholder="Value for models already there" value=${l.value || ""} aria-label=${`Level ${i + 1} value for existing models`}
-          onInput=${(e) => setAt(levels, setLevels, i, { ...l, value: e.target.value })} />`}
-        <button type="button" class="ghost" aria-label=${`Move level ${i + 1} up`} disabled=${i === 0} onClick=${() => swap(i, -1)}>↑</button>
-        <button type="button" class="ghost" aria-label=${`Move level ${i + 1} down`} disabled=${i === levels.length - 1} onClick=${() => swap(i, 1)}>↓</button>
-        <button type="button" class="ghost" aria-label=${`Remove level ${i + 1}`} onClick=${() => setLevels(levels.filter((_, j) => j !== i))}>${Icon.close(13)}</button>
-      </div>`)}
-      <div><button type="button" class="ghost" id="es-add-level" onClick=${() => setLevels([...levels, { key: null, label: "", value: "" }])} disabled=${levels.length >= 6}>${Icon.plus(13)} Add a level</button></div>
-    </div>
+    <div class="field-block"><span class="field-label">Subcategories</span>
+      <small class="muted">Renaming, moving or removing one moves its folders; a removed one's models move up to the one above it. The numbers are how many models each holds.</small>
+      <${SubcategoryTree} id="es-tree" counts=${true} nodes=${tree} onChange=${(t, r) => { setTree(t); if (r.length) setRemoved([...removed, ...r]); }} /></div>
     <label class="field-block"><span>Model folder name</span>
       <input id="es-template" type="text" maxlength="80" value=${template} onInput=${(e) => setTemplate(e.target.value)} />
       <label class="check-row"><input type="checkbox" id="es-rename-folders" checked=${renameFolders} onChange=${(e) => setRenameFolders(e.target.checked)} /> Rename the model folders already there to match</label></label>

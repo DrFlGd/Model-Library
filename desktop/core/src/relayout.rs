@@ -1,17 +1,18 @@
-//! Re-laying out the library (docs/PLAN.md, "Phase 4 design"): renaming, merging or
-//! moving a category value, editing a schema (its folder, levels, model-folder
-//! template) and deleting one all move model folders. Each is planned (every
-//! model's old and new folder and category), written to a journal in
+//! Re-laying out the library (docs/PLAN.md, "Phase 4 design" and "Subcategory tree
+//! design"): renaming, merging or moving a subcategory, editing a schema (its
+//! folder, its tree of subcategories, model-folder template) and deleting one all
+//! move model folders. Each is planned (every model's old and new folder and path
+//! of subcategories), written to a journal in
 //! `_library/journal/` before anything moves, then run as a job. The newest
 //! change can be undone; an interrupted one can be finished or put back.
 
-use crate::import::{destination, folder_name, transfer, Progress};
+use crate::import::{destination, folder_name, place_of, transfer, Progress};
 use crate::index::{Index, UNSORTED};
 use crate::library::{Library, APP_DIR};
 use crate::model;
-use crate::schema::{self, LevelFrom, Schema};
+use crate::schema::{self, Remap, Schema};
 use anyhow::{anyhow, bail, Result};
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -31,31 +32,26 @@ fn strings(v: &Value) -> Vec<String> {
         .collect()
 }
 
-/// The category values of a folder under a schema, from its place on disk.
-fn values_of(lib: &Library, schema: &Schema, dir: &Path) -> Vec<String> {
-    let top = lib.root().join(&schema.folder);
-    dir.parent()
-        .and_then(|p| p.strip_prefix(&top).ok())
-        .map(|r| {
-            r.components()
-                .map(|c| c.as_os_str().to_string_lossy().into_owned())
-                .collect()
-        })
-        .unwrap_or_default()
+/// A move's path of subcategories (`path_before`/`path_after`), or an older
+/// journal's category values in order.
+fn path_in(m: &Value, side: &str) -> Vec<String> {
+    match m[format!("path_{side}")].as_array() {
+        Some(_) => strings(&m[format!("path_{side}")]),
+        None => m[format!("category_{side}")]
+            .as_object()
+            .map(|c| {
+                c.values()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default(),
+    }
 }
 
-fn category_of(schema: &Schema, values: &[String]) -> Value {
-    let m: Map<String, Value> = schema
-        .levels
-        .iter()
-        .zip(values)
-        .map(|((k, _), v)| (k.clone(), json!(v)))
-        .collect();
-    Value::Object(m)
-}
-
-/// Plan a change. `change`: {kind: "category", schema, from: [values], to: [values]}
-/// | {kind: "schema", schema, spec, rename_folders} | {kind: "delete", schema}.
+/// Plan a change. `change`: {kind: "category", schema, from: [path], to: [path]}
+/// (rename, merge or move a subcategory) | {kind: "schema", schema, spec,
+/// rename_folders} | {kind: "delete", schema}.
 /// Returns the journal to be (label, schemas before and after, moves).
 pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
     let sid = change["schema"].as_str().unwrap_or("");
@@ -75,81 +71,57 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
     let (label, after): (String, Option<Schema>) = match kind {
         "category" => {
             let from = strings(&change["from"]);
-            let to = strings(&change["to"]);
-            if from.is_empty() || from.len() != to.len() || from.len() > old.levels.len() {
-                bail!("Give a value for each level down to the one you're changing.");
-            }
-            if let Some(i) = to.iter().position(String::is_empty) {
-                bail!("Choose a {}.", old.levels[i].1);
+            let to = strings(&change["to"])
+                .iter()
+                .map(|n| schema::subcategory_name(n))
+                .collect::<Result<Vec<String>>>()?;
+            if from.is_empty() || to.is_empty() {
+                bail!("Choose a subcategory and where it goes.");
             }
             if from == to {
-                bail!("Nothing changes: the values are the same.");
+                bail!("Nothing changes: the names are the same.");
             }
+            if to.len() > from.len() && schema::starts_with(&to, &from) {
+                bail!("A subcategory can't go inside itself.");
+            }
+            let maps = [Remap {
+                from: from.clone(),
+                to: to.clone(),
+                keep_below: true,
+            }];
             for m in &models {
                 let p = path_of(m);
-                if p.len() >= from.len() && p[..from.len()] == from[..] {
-                    let mut v = to.clone();
-                    v.extend_from_slice(&p[from.len()..]);
-                    wanted.push((m, v, None));
+                if schema::starts_with(&p, &from) {
+                    wanted.push((m, schema::remap(&p, &maps), None));
                 }
             }
-            let under = |p: &Vec<String>| p.len() >= from.len() && p[..from.len()] == from[..];
-            let pinned = schema::subcategories(&old.raw);
-            if wanted.is_empty() && !pinned.iter().any(under) {
+            let mut v = schema::as_tree(lib, &old);
+            let tree = schema::subcategories(&v);
+            if wanted.is_empty() && !tree.iter().any(|p| schema::starts_with(p, &from)) {
                 bail!("There's nothing in {}.", from.join(" › "));
+            }
+            if !schema::in_tree(&tree, &to) {
+                schema::check_path(lib, &old.folder, &tree, &to)?;
             }
             let what = if from[..from.len() - 1] == to[..to.len() - 1] {
                 format!("Renamed {} to {}", from.last().unwrap(), to.last().unwrap())
             } else {
                 format!("Moved {} to {}", from.join(" › "), to.join(" › "))
             };
-            // subcategories made in the app follow too
-            let moved: Vec<Vec<String>> = pinned
-                .iter()
-                .map(|p| {
-                    if under(p) {
-                        let mut v = to.clone();
-                        v.extend_from_slice(&p[from.len()..]);
-                        v
-                    } else {
-                        p.clone()
-                    }
-                })
-                .collect();
-            let mut v = old.to_json();
+            // the tree follows: everything below it moves with it
+            let mut moved: Vec<Vec<String>> =
+                tree.iter().map(|p| schema::remap(p, &maps)).collect();
+            moved.push(to.clone());
             schema::set_subcategories(&mut v, &moved);
             (what, Schema::from_value(&v))
         }
         "schema" => {
-            let (mut v, levels) = schema::edited(lib, &old, &change["spec"])?;
-            let mapped: Vec<Vec<String>> = schema::subcategories(&old.raw)
-                .iter()
-                .map(|p| {
-                    let mut out = vec![];
-                    for l in &levels {
-                        match l {
-                            LevelFrom::Old(i) if *i < p.len() => out.push(p[*i].clone()),
-                            LevelFrom::Old(_) => break,
-                            LevelFrom::New(x) => out.push(x.clone()),
-                        }
-                    }
-                    out
-                })
-                .filter(|p| !p.is_empty())
-                .collect();
-            schema::set_subcategories(&mut v, &mapped);
+            let (v, maps) = schema::edited(lib, &old, &change["spec"])?;
             let new =
                 Schema::from_value(&v).ok_or_else(|| anyhow!("That category isn't valid."))?;
             let rename = change["rename_folders"].as_bool() == Some(true);
             for m in &models {
-                let p = path_of(m);
-                let values: Vec<String> = levels
-                    .iter()
-                    .map(|l| match l {
-                        LevelFrom::Old(i) => p.get(*i).cloned().unwrap_or_default(),
-                        LevelFrom::New(v) => v.clone(),
-                    })
-                    .collect();
+                let values = schema::remap(&path_of(m), &maps);
                 let name = rename.then(|| {
                     let author = m.v["authors"][0].as_str().unwrap_or("");
                     folder_name(
@@ -187,21 +159,19 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
         });
         let dest = destination(lib, after.as_ref(), &values, &folder, Some(&dir), &taken)?;
         taken.insert(dest.clone());
-        let (schema_after, cat_after) = match &after {
-            Some(s) => (json!(s.id), category_of(s, &values_of(lib, s, &dest))),
-            None => (Value::Null, json!({})),
-        };
+        let schema_after = after.as_ref().map(|s| json!(s.id)).unwrap_or(Value::Null);
+        let path_after = place_of(lib, after.as_ref(), &dest);
         let to = lib.relative(&dest).unwrap_or_default();
-        let cat_before = category_of(&old, &path_of(m));
-        if to == m.rel() && schema_after == json!(sid) && cat_after == cat_before {
-            continue; // nothing changes for this one (a label or a field edit)
+        let path_before = path_of(m);
+        if to == m.rel() && schema_after == json!(sid) && path_after == path_before {
+            continue; // nothing changes for this one (a name or a field edit)
         }
         moves.push(json!({
             "id": m.id(), "name": m.v["name"],
             "authors": m.v["authors"],
             "from": m.rel(), "to": to,
-            "schema_before": sid, "category_before": cat_before,
-            "schema_after": schema_after, "category_after": cat_after,
+            "schema_before": sid, "path_before": path_before,
+            "schema_after": schema_after, "path_after": path_after,
         }));
     }
     Ok(json!({
@@ -358,15 +328,7 @@ fn stops(lib: &Library, j: &Value) -> Vec<PathBuf> {
 }
 
 /// Put one model folder in place and record its place in model.json.
-fn place(
-    lib: &Library,
-    from: &str,
-    to: &str,
-    m: &Value,
-    schema: &Value,
-    category: &Value,
-    p: &Progress,
-) -> Result<()> {
+fn place(lib: &Library, from: &str, to: &str, m: &Value, side: &str, p: &Progress) -> Result<()> {
     let (src, dest) = (lib.resolve(from)?, lib.resolve(to)?);
     if src != dest && !(dest.is_dir() && !src.exists()) {
         if !src.is_dir() {
@@ -385,8 +347,11 @@ fn place(
         .collect();
     let defaults = json!({ "name": m["name"], "authors": if authors.is_empty() { Value::Null } else { json!(authors) } });
     model::update(&dest, &json!({}), &defaults)?;
-    let cat = category.as_object().cloned().unwrap_or_default();
-    model::set_place(&dest, schema.as_str(), &cat)?;
+    model::set_place(
+        &dest,
+        m[format!("schema_{side}")].as_str(),
+        &path_in(m, side),
+    )?;
     Ok(())
 }
 
@@ -422,15 +387,7 @@ pub fn apply(
             m["from"].as_str().unwrap_or(""),
             m["to"].as_str().unwrap_or(""),
         );
-        match place(
-            lib,
-            from,
-            to,
-            m,
-            &m["schema_after"],
-            &m["category_after"],
-            &p,
-        ) {
+        match place(lib, from, to, m, "after", &p) {
             Ok(()) => {
                 moved += 1;
                 if from != to {
@@ -512,28 +469,12 @@ pub fn undo(
         let back = lib.resolve(to).map(|d| d.is_dir()).unwrap_or(false);
         if !back && lib.resolve(from).map(|d| d.is_dir()).unwrap_or(false) {
             // never moved: just put its model.json back
-            if let Err(e) = place(
-                lib,
-                from,
-                from,
-                m,
-                &m["schema_before"],
-                &m["category_before"],
-                &p,
-            ) {
+            if let Err(e) = place(lib, from, from, m, "before", &p) {
                 failed.push(json!({ "name": m["name"], "error": format!("{e:#}") }));
             }
             continue;
         }
-        match place(
-            lib,
-            to,
-            from,
-            m,
-            &m["schema_before"],
-            &m["category_before"],
-            &p,
-        ) {
+        match place(lib, to, from, m, "before", &p) {
             Ok(()) => {
                 moved += 1;
                 if from != to {
@@ -588,9 +529,158 @@ mod tests {
         (r, id)
     }
 
+    fn tree(lib: &Library) -> Vec<String> {
+        schema::list(lib)[0]
+            .tree()
+            .iter()
+            .map(|p| p.join("/"))
+            .collect()
+    }
+
     #[test]
-    fn renames_merges_edits_and_undoes() {
+    fn renames_merges_moves_edits_and_undoes() {
         let root = temp_dir("relayout");
+        let lib = Library::open(&root).unwrap();
+        schema::create(
+            &lib,
+            &json!({ "name": "Home items", "subcategories": [
+                { "name": "Office", "subcategories": [{ "name": "Desk items" }, { "name": "Computer models" }] },
+                { "name": "Kitchen" }, { "name": "Garage" }] }),
+        )
+        .unwrap();
+        assert!(root.join("Home items/Office/Computer models").is_dir());
+        put(&root.join("Home items/Office/Desk items/Lamp (Jo)/l.stl"));
+        put(&root.join("Home items/Office/Desk items/Tray/t.stl"));
+        put(&root.join("Home items/Office/Pen pot/p.stl"));
+        put(&root.join("Home items/Kitchen/Tray/t2.stl"));
+        put(&root.join("Home items/Hook/h.stl"));
+        let ix = Index::build(&lib, None, true);
+        let mut places: Vec<String> = ix
+            .models
+            .iter()
+            .map(|m| {
+                format!(
+                    "{} @ {}",
+                    m.v["name"].as_str().unwrap(),
+                    strings(&m.v["path"]).join("/")
+                )
+            })
+            .collect();
+        places.sort();
+        assert_eq!(
+            places,
+            [
+                "Hook @ ",
+                "Lamp @ Office/Desk items",
+                "Pen pot @ Office",
+                "Tray @ Kitchen",
+                "Tray @ Office/Desk items"
+            ]
+        );
+        // merge Desk items into Kitchen, a level up: a clash gets (2)
+        let change = json!({ "kind": "category", "schema": "home-items", "from": ["Office", "Desk items"], "to": ["Kitchen"] });
+        let s = summary(&plan(&lib, &ix, &change).unwrap());
+        assert_eq!(
+            (s["moving"].clone(), s["clashes"].clone()),
+            (json!(2), json!(1)),
+            "{s}"
+        );
+        assert!(plan(&lib, &ix, &json!({ "kind": "category", "schema": "home-items", "from": ["Office"], "to": ["Office", "Desk items", "Office"] })).is_err());
+        // nor into a model's folder
+        let e = plan(&lib, &ix, &json!({ "kind": "category", "schema": "home-items", "from": ["Kitchen"], "to": ["Hook"] })).unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "Hook is a model's folder, not a subcategory."
+        );
+        let (r, id) = run(&lib, change);
+        assert_eq!(r["state"], "done", "{r}");
+        assert!(
+            root.join("Home items/Kitchen/Tray (2)/t.stl").is_file()
+                && !root.join("Home items/Office/Desk items").exists()
+        );
+        let side = model::read_sidecar(&root.join("Home items/Kitchen/Lamp (Jo)"));
+        assert_eq!(side["path"], json!(["Kitchen"]));
+        assert_eq!(
+            tree(&lib),
+            ["Garage", "Kitchen", "Office", "Office/Computer models"]
+        );
+        // undo puts it back
+        undo(&lib, &id, &AtomicBool::new(false), &|_, _, _| {}).unwrap();
+        assert!(
+            root.join("Home items/Office/Desk items/Tray/t.stl")
+                .is_file()
+                && !root.join("Home items/Kitchen/Tray (2)").exists()
+        );
+        let side = model::read_sidecar(&root.join("Home items/Office/Desk items/Lamp (Jo)"));
+        assert_eq!(side["path"], json!(["Office", "Desk items"]));
+        assert!(tree(&lib).contains(&"Office/Desk items".to_string()));
+        // edit the category: new top folder and folder names, Office renamed to Study
+        // with Garage moved into it, Kitchen removed (its models go to the top), and
+        // a new branch two deep
+        let ix = Index::build(&lib, None, true);
+        let spec = json!({ "name": "Rooms", "folder": "Rooms", "model_folder": "{author} - {name}",
+            "subcategories": [
+                { "name": "Study", "orig": ["Office"], "subcategories": [
+                    { "name": "Desk items", "orig": ["Office", "Desk items"] },
+                    { "name": "Computer models", "orig": ["Office", "Computer models"] },
+                    { "name": "Garage", "orig": ["Garage"] }] },
+                { "name": "Bathroom", "subcategories": [{ "name": "Shelves" }] }],
+            "removed": [["Kitchen"]] });
+        let change = json!({ "kind": "schema", "schema": "home-items", "spec": spec, "rename_folders": true });
+        let p = plan(&lib, &ix, &change).unwrap();
+        assert!(p["schema_after"].get("levels").is_none());
+        let (r, edit) = run(&lib, change);
+        assert_eq!(r["moved"], 5, "{r}");
+        for f in [
+            "Rooms/Study/Desk items/Jo - Lamp/l.stl",
+            "Rooms/Study/Desk items/Tray/t.stl",
+            "Rooms/Study/Pen pot/p.stl",
+            "Rooms/Tray/t2.stl",
+            "Rooms/Hook/h.stl",
+        ] {
+            assert!(root.join(f).is_file(), "{f}");
+        }
+        assert!(
+            root.join("Rooms/Bathroom/Shelves").is_dir()
+                && root.join("Rooms/Study/Garage").is_dir()
+        );
+        assert!(!root.join("Home items").exists() && !root.join("Rooms/Kitchen").exists());
+        assert_eq!(
+            tree(&lib),
+            [
+                "Bathroom",
+                "Bathroom/Shelves",
+                "Study",
+                "Study/Computer models",
+                "Study/Desk items",
+                "Study/Garage"
+            ]
+        );
+        assert_eq!(schema::list(&lib)[0].folder, "Rooms");
+        // only the newest change can be undone
+        assert!(undo(&lib, &id, &AtomicBool::new(false), &|_, _, _| {}).is_err());
+        undo(&lib, &edit, &AtomicBool::new(false), &|_, _, _| {}).unwrap();
+        assert!(
+            root.join("Home items/Office/Desk items/Lamp (Jo)/l.stl")
+                .is_file()
+                && root.join("Home items/Kitchen/Tray/t2.stl").is_file()
+                && !root.join("Rooms").exists()
+        );
+        assert!(tree(&lib).contains(&"Kitchen".to_string()));
+        // delete: models go to Unsorted
+        let (r, _) = run(&lib, json!({ "kind": "delete", "schema": "home-items" }));
+        assert_eq!(r["state"], "done");
+        assert!(root.join("Unsorted/Hook/h.stl").is_file() && schema::list(&lib).is_empty());
+        let side = model::read_sidecar(&root.join("Unsorted/Hook"));
+        assert!(
+            side.get("schema").is_none() && side.get("path").is_none() && side["id"].is_string()
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn older_categories_with_levels_still_move() {
+        let root = temp_dir("relayout-levels");
         let lib = Library::open(&root).unwrap();
         schema::create(
             &lib,
@@ -598,72 +688,26 @@ mod tests {
         )
         .unwrap();
         put(&root.join("Wargames/40k/Tyranid/Hive Tyrant (Jo)/t.stl"));
-        put(&root.join("Wargames/40k/Tyranid/Carnifex/c.stl"));
         put(&root.join("Wargames/40k/Tyranids/Lictor/l.stl"));
-        put(&root.join("Wargames/40k/Tyranids/Carnifex/c2.stl"));
-        // merge Tyranid into Tyranids: a clash gets (2)
-        let ix = Index::build(&lib, None, true);
-        let p = plan(&lib, &ix, &json!({ "kind": "category", "schema": "wargames", "from": ["40k", "Tyranid"], "to": ["40k", "Tyranids"] })).unwrap();
-        let s = summary(&p);
-        assert_eq!(
-            (s["moving"].clone(), s["clashes"].clone()),
-            (json!(2), json!(1)),
-            "{s}"
-        );
+        std::fs::create_dir_all(root.join("Wargames/40k/Orks")).unwrap();
+        // a move to another depth makes it a tree; the empty Orks folder is kept in it
         let (r, id) = run(
             &lib,
-            json!({ "kind": "category", "schema": "wargames", "from": ["40k", "Tyranid"], "to": ["40k", "Tyranids"] }),
+            json!({ "kind": "category", "schema": "wargames", "from": ["40k", "Tyranid"], "to": ["Tyranid"] }),
         );
         assert_eq!(r["state"], "done", "{r}");
-        assert!(
-            root.join("Wargames/40k/Tyranids/Carnifex (2)/c.stl")
-                .is_file()
-                && !root.join("Wargames/40k/Tyranid").exists()
-        );
-        let side = model::read_sidecar(&root.join("Wargames/40k/Tyranids/Hive Tyrant (Jo)"));
-        assert_eq!(
-            side["category"],
-            json!({ "game": "40k", "faction": "Tyranids" })
-        );
-        // undo puts it back
-        undo(&lib, &id, &AtomicBool::new(false), &|_, _, _| {}).unwrap();
-        assert!(
-            root.join("Wargames/40k/Tyranid/Carnifex/c.stl").is_file()
-                && !root.join("Wargames/40k/Tyranids/Carnifex (2)").exists()
-        );
-        let side = model::read_sidecar(&root.join("Wargames/40k/Tyranid/Hive Tyrant (Jo)"));
-        assert_eq!(side["category"]["faction"], "Tyranid");
-        // edit the schema: new top folder, a level added at the top, folders renamed to the template
+        assert!(root
+            .join("Wargames/Tyranid/Hive Tyrant (Jo)/t.stl")
+            .is_file());
+        assert_eq!(tree(&lib), ["40k", "40k/Orks", "40k/Tyranids", "Tyranid"]);
         let ix = Index::build(&lib, None, true);
-        let spec = json!({ "name": "Minis", "folder": "Minis", "model_folder": "{author} - {name}",
-            "levels": [{ "label": "Kind", "value": "Wargames" }, { "key": "game", "label": "Game" }, { "key": "faction", "label": "Army" }] });
-        let p = plan(&lib, &ix, &json!({ "kind": "schema", "schema": "wargames", "spec": spec, "rename_folders": true })).unwrap();
-        assert_eq!(p["schema_after"]["levels"][2]["key"], "faction");
-        let (r, edit) = run(
-            &lib,
-            json!({ "kind": "schema", "schema": "wargames", "spec": spec, "rename_folders": true }),
-        );
-        assert_eq!(r["moved"], 4, "{r}");
-        assert!(
-            root.join("Minis/Wargames/40k/Tyranid/Jo - Hive Tyrant/t.stl")
-                .is_file()
-                && !root.join("Wargames").exists()
-        );
-        assert_eq!(schema::list(&lib)[0].folder, "Minis");
-        // only the newest change can be undone
-        assert!(undo(&lib, &id, &AtomicBool::new(false), &|_, _, _| {}).is_err());
-        undo(&lib, &edit, &AtomicBool::new(false), &|_, _, _| {}).unwrap();
-        assert!(
-            root.join("Wargames/40k/Tyranid/Hive Tyrant (Jo)/t.stl")
-                .is_file()
-                && !root.join("Minis").exists()
-        );
-        // delete: models go to Unsorted
-        let (r, _) = run(&lib, json!({ "kind": "delete", "schema": "wargames" }));
-        assert_eq!(r["state"], "done");
-        assert!(root.join("Unsorted/Lictor/l.stl").is_file() && schema::list(&lib).is_empty());
-        let side = model::read_sidecar(&root.join("Unsorted/Lictor"));
-        assert!(side.get("schema").is_none() && side["id"].is_string());
+        assert_eq!(ix.models.len(), 2);
+        // undo brings the levels back
+        undo(&lib, &id, &AtomicBool::new(false), &|_, _, _| {}).unwrap();
+        assert_eq!(schema::list(&lib)[0].levels.len(), 2);
+        assert!(root
+            .join("Wargames/40k/Tyranid/Hive Tyrant (Jo)/t.stl")
+            .is_file());
         let _ = std::fs::remove_dir_all(&root);
     }
 }

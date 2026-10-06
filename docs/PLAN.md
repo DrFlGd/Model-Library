@@ -354,3 +354,28 @@ Built 2026-10-06, as designed above, with these details:
 - Not done: undo of older changes, merging two categories (schemas) into one, renaming one model's folder by itself.
 - **Subcategories made in the app** (owner's request after Phase 4, 2026-10-06): a schema file can hold `subcategories`, a nested list of `{name, subcategories}`, for category values made in the app before any model is in them. Their folders are made at once and kept when the last model leaves (`schema::kept_folder` stops the tidy-up); the overview lists them with a count of 0. Commands `subcategory_add {schema, path, name}` and `subcategory_remove {schema, path}` (only when nothing is in it). A re-layout maps them like models: a rename or merge moves their paths, a schema edit maps them through the new levels, and the folders follow (`relayout::sync_folders`).
 - Interface wording is general: no wargaming examples (owner's request).
+
+## Subcategory tree design
+
+Written before the code (2026-10-06), after the owner tried v0.4.1: a category's subcategories should be a free tree, built in the New and Edit category dialogs, where each branch can go as deep as it needs ("Home items" › Office › Desk items, Computer models; "Home items" › Kitchen; "Home items" › Garage). Named levels (Game, Faction) go: they forced every branch to the same depth.
+
+- **The schema file holds the tree**: `subcategories`, a nested list of `{name, subcategories}`, is every subcategory of the category, at any depth. A model can sit at any node, including the category's top folder.
+- **Where models are**, under a category's folder: a folder with a `model.json` is a model; otherwise a folder in the tree is a subcategory; otherwise a folder with model folders inside it is a subcategory (moved there by hand); otherwise a folder with files is a model (dropped there by hand); an empty folder is skipped.
+- **Older categories** (with `levels`) are converted when a library that can be written is opened: every folder at those levels becomes a node in the tree and `levels` is dropped. Nothing moves. A library that can't be written is still read by its levels.
+- **`model.json`** records `"path": ["Office", "Desk items"]` for its place (it was `"category": {level: value}`, still read when importing older files).
+- **New category**: name, top folder, a subcategory tree editor (add a subcategory at the top or inside any node; Enter adds the next one beside it; remove a node with what's inside it), model folder names and fields.
+- **Edit category**: the same editor, filled from the library (with each node's model count). Renaming a node, moving it to another parent (indent and outdent) or removing it moves the folders, through the Phase 4 re-layout (preview, journal, undo). A removed node's models move up to the nearest node that's kept. Each node from the library carries its original path, so the core can map every model's old path to its new one.
+- **Choosing a place** (Import, Move to category): the category, then a subcategory from a list of the whole tree (or the top of the category), and an optional new subcategory to make inside it (a "/" makes several levels at once).
+- **Rename or move…** on a subcategory's page: a new name and a new parent anywhere in the tree (not inside itself). A name that's already there merges the two.
+- **Add subcategory…** works on every node, at any depth.
+- **Search**: `in:office` finds models with Office anywhere in their path.
+
+## Subcategory tree notes
+
+Built 2026-10-06, as designed above, with these details:
+
+- **Core:** `schema.rs` has the tree (`Schema::tree`, `subcategories`/`set_subcategories`), the form's tree (`tree_spec`: nodes with `orig` map their old path to the new one), `Remap` and `remap` (the longest matching old path decides; a removed node's paths collapse onto the nearest kept node above it), `as_tree`/`upgrade`/`upgrade_all` (older schemas), `define_path` (an import or move adds its path to the tree) and `check_path` (a path can't run into a model's folder). `index::find_models` follows the rules above, with `probe` looking up to four folders down for model folders. `model::set_place` writes `path`; `model::path_of` reads `path` or an older `category`.
+- **Commands** keep their shapes: `schema_create {schema: {name, folder, subcategories, model_folder, fields}}`; `relayout_plan`/`relayout_apply` with `{kind: "category", from, to}` (paths of any length) or `{kind: "schema", spec: {…, subcategories: [{name, orig?, subcategories}], removed: [[path]]}}`. A spec without `subcategories` keeps the tree as it is. Journal moves record `path_before`/`path_after`; older journals' `category_*` are still read for undo.
+- **Older libraries:** opening a library that can be written converts its schemas (`App::open_library` calls `schema::upgrade_all`). Undoing a change made to an older schema writes the older schema back, levels and all.
+- **Interface:** `category.js` has `CategoryPicker` (category, subcategory list with full paths, new subcategory box) and `SubcategoryTree` (the editor; a new node gets focus as soon as it's drawn so typing straight on lands in it). Unnamed new nodes with nothing in them are dropped when saving.
+- **Tests:** `relayout.rs` (merge across depths with a clash, undo, a tree edit with renames, a move, a removal, a new branch and a new top folder, delete; an older schema moved across depths and undone), `schema.rs` (remapping), `import.rs` (any depth, the top of a category, a model's folder refused), `api.rs` (converting an older library on open, `in:` search, subcategories at any depth), and page checks 9, 15–18 and 25–28b reworked for trees.

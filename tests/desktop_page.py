@@ -114,12 +114,18 @@ async def search(pg, q):
 
 
 async def phase1(pg):
-    # 9. a new schema, from the menu
+    # 9. a new schema, from the menu, with a tree of subcategories of different depths
     await pg.click("#new-schema")
     await pg.fill("#schema-name", "Wargames")
-    levels = pg.locator(".schema-level")
-    await levels.nth(0).fill("Game")
-    await levels.nth(1).fill("Faction")
+    await pg.click("#subcat-tree-add")
+    await pg.keyboard.type("Warhammer 40k")
+    await pg.click('.st-row[data-path="Warhammer 40k"] .st-add')
+    await pg.keyboard.type("Tyranid")
+    await pg.keyboard.press("Enter")  # the next one beside it
+    await pg.keyboard.type("Space Marines")
+    await pg.click("#subcat-tree-add")
+    await pg.keyboard.type("Terrain")
+    await pg.click("#subcat-tree-add")  # left empty: dropped
     await pg.click("#add-field")
     await pg.locator(".schema-field").nth(0).fill("Scale")
     await pg.locator(".schema-field-type").nth(0).select_option("choice")
@@ -132,8 +138,10 @@ async def phase1(pg):
     await pg.wait_for_selector("#schema-dialog", state="detached")
     await pg.wait_for_function("() => location.hash === '#/browse/schema/wargames'")
     schema = json.loads((library / "_library/schemas/wargames.json").read_text())
-    check("a category (schema) is made from the menu", (library / "Wargames").is_dir() and [l["label"] for l in schema["levels"]] == ["Game", "Faction"]
-          and schema["fields"][0]["choices"] == ["28mm", "32mm"] and preview == "Wargames / <Game> / <Faction> / Model name (Author)"
+    want = [{"name": "Terrain"}, {"name": "Warhammer 40k", "subcategories": [{"name": "Space Marines"}, {"name": "Tyranid"}]}]
+    check("a category (schema) is made from the menu, with its subcategory tree", (library / "Wargames/Warhammer 40k/Space Marines").is_dir() and (library / "Wargames/Terrain").is_dir()
+          and schema.get("subcategories") == want and "levels" not in schema
+          and schema["fields"][0]["choices"] == ["28mm", "32mm"] and preview == "Wargames / Warhammer 40k / Tyranid / Model name (Author)"
           and head.lower() == "categories" and dtitle == "New category", (preview, head, dtitle, schema))
 
     # 10. model folders made by hand are found under their categories
@@ -150,14 +158,14 @@ async def phase1(pg):
     n = await count(pg)
     names = await pg.eval_on_selector_all(".card .card-name", "els => els.map(e => e.textContent)")
     crumbs = await pg.inner_text(".crumbs")
-    check("model folders are listed under their categories", tree == ["Wargames3", "Warhammer 40k3"] and n == "2 models" and names == ["Carnifex", "Hive Tyrant"] and "Tyranid" in crumbs, (tree, n, names, crumbs))
+    check("model folders are listed under their categories", tree == ["Wargames3", "Terrain0", "Warhammer 40k3"] and n == "2 models" and names == ["Carnifex", "Hive Tyrant"] and "Tyranid" in crumbs, (tree, n, names, crumbs))
     await pg.screenshot(path=str(out / "06-browse.png"))
 
     # 11. search, with typed filters
     await pg.goto(B + "#/browse/all")
     await pg.wait_for_selector(".browse-title h1:has-text('All models')")
     await count(pg)
-    found = [await search(pg, "tyrant"), await search(pg, "author:\"jo smith\""), await search(pg, "schema:wargames carni"), await search(pg, "faction:space")]
+    found = [await search(pg, "tyrant"), await search(pg, "author:\"jo smith\""), await search(pg, "schema:wargames carni"), await search(pg, "in:\"space marines\"")]
     await search(pg, "nothing-like-this")
     none = await pg.is_visible("#no-results")
     check("search finds models by words and filters", found == ["1 model", "2 models", "1 model", "1 model"] and none, (found, none))
@@ -234,15 +242,14 @@ async def phase2(pg):
     row = lambda folder: pg.locator(f'#import-list .imp-row[data-source$="{folder}"]')
     several = await row("Armour Set").locator("[data-warn=several]").count()
     dup = await row("Copy of Captain").locator("[data-warn=duplicate]").count()
-    prime = await row("Other Library Model").locator(".cat-value").evaluate_all("els => els.map(e => e.value)")
+    prime = await row("Other Library Model").locator(".cat-place").input_value()
     left = await pg.inner_text(".imp-left summary")
     check("a messy folder is proposed as models, with warnings and guesses", names == ["Armour Set", "Copy of Captain", "Hive Guard", "Tyrant Prime", "benchy", "dragon"]
-          and several == 1 and dup == 1 and prime == ["Warhammer 40k", "Tyranid"] and "1 loose file" in left, (names, several, dup, prime, left))
+          and several == 1 and dup == 1 and prime == "Warhammer 40k\x1fTyranid" and "1 loose file" in left, (names, several, dup, prime, left))
     await row("Hive Guard (Jo Smith)").locator(".imp-pick").check()
     await row("Armour Set").locator(".imp-pick").check()
     await pg.select_option("#batch-schema", "wargames")
-    await pg.fill("#batch-game", "Warhammer 40k")
-    await pg.fill("#batch-faction", "Tyranid")
+    await pg.select_option("#batch-place", "Warhammer 40k\x1fTyranid")
     await pg.click("#batch-apply")
     await row("Copy of Captain").locator(".imp-skip").click()
     await pg.wait_for_function("() => [...document.querySelectorAll('#import-list .imp-row:not(.skipped)')].every(r => r.querySelector('.imp-dest code'))")
@@ -257,7 +264,7 @@ async def phase2(pg):
     prime_side = json.loads((library / t / "Tyrant Prime/model.json").read_text())
     remaining = sorted(x.name for x in dl.iterdir())
     check("importing moves models into their category folders", title.startswith("5 models moved") and all(on_disk) and side["schema"] == "wargames"
-          and side["category"] == {"game": "Warhammer 40k", "faction": "Tyranid"} and side["authors"] == [{"name": "Jo Smith"}] and prime_side.get("kept") is True
+          and side["path"] == ["Warhammer 40k", "Tyranid"] and "category" not in prime_side and side["authors"] == [{"name": "Jo Smith"}] and prime_side.get("kept") is True
           and remaining == ["Copy of Captain", "readme.txt"] and dests[0] == f"{t}/Armour Set", (title, on_disk, remaining, dests, side))
     await pg.screenshot(path=str(out / "10-imported.png"), full_page=True)
 
@@ -278,8 +285,8 @@ async def phase2(pg):
     await pg.click(".card:has(.card-name:text-is('benchy'))")
     await pg.click("#details-move")
     await pg.select_option("#move-schema", "wargames")
-    await pg.fill("#move-game", "Warhammer 40k")
-    await pg.fill("#move-faction", "Necrons")
+    await pg.select_option("#move-place", "Warhammer 40k")
+    await pg.fill("#move-new", "Necrons")  # a new subcategory, made as it moves
     await pg.click("#move-dialog button[type=submit]")
     await pg.wait_for_selector("#move-dialog", state="detached")
     one = (library / "Wargames/Warhammer 40k/Necrons/benchy/benchy.stl").is_file() and not (library / "Unsorted/benchy").exists()
@@ -290,8 +297,7 @@ async def phase2(pg):
     await pg.wait_for_selector("#picked-panel")
     await pg.click("#move-picked")
     await pg.select_option("#move-schema", "wargames")
-    await pg.fill("#move-game", "Warhammer 40k")
-    await pg.fill("#move-faction", "Necrons")
+    await pg.select_option("#move-place", "Warhammer 40k\x1fNecrons")
     await pg.click("#move-dialog button[type=submit]")
     await pg.wait_for_selector("#move-dialog", state="detached")
     nec = sorted(x.name for x in (library / "Wargames/Warhammer 40k/Necrons").iterdir())
@@ -306,8 +312,7 @@ async def phase2(pg):
     await pg.click("#home-loose .sort-loose")
     await pg.wait_for_function("() => document.querySelectorAll('#import-list .imp-row').length === 1")
     await pg.select_option("#imp-0-schema", "wargames")
-    await pg.fill("#imp-0-game", "Warhammer 40k")
-    await pg.fill("#imp-0-faction", "Tyranid")
+    await pg.select_option("#imp-0-place", "Warhammer 40k\x1fTyranid")
     title = await import_and_wait(pg)
     await pg.goto(B + "#/")
     await pg.wait_for_selector("#home-counts")
@@ -445,10 +450,10 @@ async def phase3(pg):
 async def phase4(pg):
     t = library / "Wargames/Warhammer 40k"
     before = sorted(x.name for x in (t / "Tyranid").iterdir())
-    # 25. renaming a faction moves its folders (with a preview first)
+    # 25. renaming a subcategory moves its folders (with a preview first)
     await pg.goto(B + "#/browse/schema/wargames/Warhammer%2040k/Tyranid")
     await pg.click("#rename-node")
-    await pg.fill("#rename-faction", "Tyranids")
+    await pg.fill("#rename-name", "Tyranids")
     await pg.wait_for_selector("#change-preview[data-moving]")
     preview = await pg.inner_text("#change-preview")
     await pg.screenshot(path=str(out / "15-rename.png"))
@@ -458,7 +463,7 @@ async def phase4(pg):
     n = await count(pg)
     after = sorted(x.name for x in (t / "Tyranids").iterdir()) if (t / "Tyranids").is_dir() else []
     side = json.loads((t / "Tyranids/Hive Guard (Jo Smith)/model.json").read_text())
-    check("renaming a faction moves its folders, after a preview", after == before and not (t / "Tyranid").exists() and side["category"]["faction"] == "Tyranids"
+    check("renaming a subcategory moves its folders, after a preview", after == before and not (t / "Tyranid").exists() and side["path"] == ["Warhammer 40k", "Tyranids"]
           and f"{len(before)} model folders move" in preview and n == f"{len(before)} models", (preview, before, after, n))
 
     # 26. undo from Home
@@ -469,56 +474,77 @@ async def phase4(pg):
     await pg.wait_for_function("() => /Undone/.test(document.querySelector('.toast')?.textContent || '')", timeout=60000)
     side = json.loads((t / "Tyranid/Hive Guard (Jo Smith)/model.json").read_text())
     check("the rename is undone from Home", sorted(x.name for x in (t / "Tyranid").iterdir()) == before and not (t / "Tyranids").exists()
-          and side["category"]["faction"] == "Tyranid", side.get("category"))
+          and side["path"] == ["Warhammer 40k", "Tyranid"], side.get("path"))
 
     # 27. merging: Necrons into Tyranid
     nec = sorted(x.name for x in (t / "Necrons").iterdir())
     await pg.goto(B + "#/browse/schema/wargames/Warhammer%2040k/Necrons")
     await pg.click("#rename-node")
-    await pg.fill("#rename-faction", "Tyranid")
+    await pg.fill("#rename-name", "Tyranid")
     await pg.wait_for_selector("#rename-merge")
     await pg.wait_for_selector("#change-preview[data-moving]")
     await pg.click("#rename-dialog button[type=submit]")
     await pg.wait_for_selector("#rename-dialog", state="detached", timeout=60000)
     merged = sorted(x.name for x in (t / "Tyranid").iterdir())
-    check("a faction renamed to one that exists merges into it", merged == sorted(before + nec) and not (t / "Necrons").exists(), merged)
+    check("a subcategory renamed to one that exists merges into it", merged == sorted(before + nec) and not (t / "Necrons").exists(), merged)
 
-    # 28. editing the category: a level renamed (nothing moves), then a new top folder (everything moves)
+    # 28. editing the category's tree: a new branch three deep and another at the
+    # top (nothing moves), then Space Marines moved out a level and a new top folder
     await pg.goto(B + "#/browse/schema/wargames")
     await pg.click("#edit-schema")
-    await pg.fill(".es-level >> nth=1", "Army")
+    await pg.wait_for_selector("#es-tree")
+    await pg.click('#es-tree .st-row[data-path="Terrain"] .st-add')
+    await pg.keyboard.type("Buildings")
+    await pg.click('#es-tree .st-row[data-path="Terrain/Buildings"] .st-add')
+    await pg.keyboard.type("Ruins")
+    await pg.click("#es-tree-add")
+    await pg.keyboard.type("Board games")
     await pg.wait_for_selector("#change-preview[data-moving='0']")
-    await pg.click("#edit-schema-dialog button[type=submit]")
-    await pg.wait_for_selector("#edit-schema-dialog", state="detached", timeout=60000)
-    sch = json.loads((library / "_library/schemas/wargames.json").read_text())
-    relabelled = [l["label"] for l in sch["levels"]] == ["Game", "Army"] and t.is_dir()
-    await pg.click("#edit-schema")
-    await pg.fill("#es-folder", "Tabletop")
-    await pg.wait_for_function("() => +document.querySelector('#change-preview')?.dataset.moving > 0")
     await pg.screenshot(path=str(out / "17-edit-category.png"))
     await pg.click("#edit-schema-dialog button[type=submit]")
     await pg.wait_for_selector("#edit-schema-dialog", state="detached", timeout=60000)
-    moved = (library / "Tabletop/Warhammer 40k/Tyranid/Hive Guard (Jo Smith)/guard.stl").is_file() and not (library / "Wargames").exists()
-    check("editing a category relabels a level, and a new top folder moves its models", relabelled and moved, (sch["levels"], moved))
+    sch = json.loads((library / "_library/schemas/wargames.json").read_text())
+    deep = (library / "Wargames/Terrain/Buildings/Ruins").is_dir() and (library / "Wargames/Board games").is_dir() and t.is_dir()
+    tops = [x["name"] for x in sch["subcategories"]]
+    await pg.click("#edit-schema")
+    await pg.wait_for_selector("#es-tree")
+    counted = await pg.inner_text('#es-tree .st-row[data-path="Warhammer 40k"] .st-count')
+    await pg.click('#es-tree .st-row[data-path="Warhammer 40k/Space Marines"] .st-out')
+    await pg.fill("#es-folder", "Tabletop")
+    await pg.wait_for_function("() => +document.querySelector('#change-preview')?.dataset.moving > 0")
+    await pg.screenshot(path=str(out / "17b-edit-category-move.png"))
+    await pg.click("#edit-schema-dialog button[type=submit]")
+    await pg.wait_for_selector("#edit-schema-dialog", state="detached", timeout=60000)
+    moved = (library / "Tabletop/Warhammer 40k/Tyranid/Hive Guard (Jo Smith)/guard.stl").is_file() and not (library / "Wargames").exists() \
+        and (library / "Tabletop/Space Marines/Captain (Jo Smith)").is_dir() and (library / "Tabletop/Terrain/Buildings/Ruins").is_dir()
+    sch = json.loads((library / "_library/schemas/wargames.json").read_text())
+    check("the category's tree is edited: new branches of any depth, and a moved subcategory and new top folder move its models",
+          deep and tops == ["Board games", "Terrain", "Warhammer 40k"] and counted.strip().isdigit() and moved
+          and [x["name"] for x in sch["subcategories"]] == ["Board games", "Space Marines", "Terrain", "Warhammer 40k"], (deep, tops, counted, moved, sch.get("subcategories")))
 
-    # 28b. subcategories made in the app, at any level, kept with no models
+    # 28b. subcategories added on a category's pages, at any depth, kept with no models
+    t = library / "Tabletop/Warhammer 40k"
     await pg.goto(B + "#/browse/schema/wargames/Warhammer%2040k")
     for name in ("Orks", "Aeldari"):
         await pg.click("#add-subcategory")
         await pg.fill("#subcat-name", name)
         await pg.click("#subcat-dialog button[type=submit]")
         await pg.wait_for_selector("#subcat-dialog", state="detached")
+    await pg.goto(B + "#/browse/schema/wargames/Terrain/Buildings/Ruins")
+    await pg.click("#add-subcategory")
+    await pg.fill("#subcat-name", "Gothic")
+    await pg.click("#subcat-dialog button[type=submit]")
+    await pg.wait_for_selector("#subcat-dialog", state="detached")
     await pg.goto(B + "#/browse/schema/wargames/Warhammer%2040k/Orks")
     await pg.wait_for_selector("#remove-subcategory")
-    tops = await pg.evaluate("async () => (await window.__modlib.platform.api('library_overview')).schemas[0].tree[0].children.map(c => c.value)")
-    made = (library / "Tabletop/Warhammer 40k/Orks").is_dir() and (library / "Tabletop/Warhammer 40k/Aeldari").is_dir()
-    sch = json.loads((library / "_library/schemas/wargames.json").read_text())
+    ov = await pg.evaluate("async () => (await window.__modlib.platform.api('library_overview')).schemas[0].tree")
+    w40k = [c["value"] for c in next(x for x in ov if x["value"] == "Warhammer 40k")["children"]]
+    made = (t / "Orks").is_dir() and (t / "Aeldari").is_dir() and (library / "Tabletop/Terrain/Buildings/Ruins/Gothic").is_dir()
     await pg.screenshot(path=str(out / "18-subcategories.png"))
     await pg.click("#remove-subcategory")
     await pg.wait_for_function("() => !location.hash.includes('Orks')")
-    gone = not (library / "Tabletop/Warhammer 40k/Orks").exists()
-    check("subcategories are added in the app, kept with no models, and removed", made and gone and "Orks" in tops and "Aeldari" in tops
-          and [n["name"] for n in sch["subcategories"][0]["subcategories"]] == ["Aeldari", "Orks"], (made, gone, tops, sch.get("subcategories")))
+    gone = not (t / "Orks").exists()
+    check("subcategories are added at any depth, kept with no models, and removed", made and gone and "Orks" in w40k and "Aeldari" in w40k, (made, gone, w40k))
 
     # 29. several models' details at once
     await pg.goto(B + "#/browse/schema/wargames")

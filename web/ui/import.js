@@ -18,7 +18,7 @@ const KIND = { model: "3D", slicer: "slicer", image: "pictures", doc: "documents
 
 function fromScan(it, overview) {
   const sc = overview?.schemas?.find((s) => s.id === it.guess?.schema);
-  const values = sc ? sc.levels.map((_, i) => it.guess.values[i] || "") : [];
+  const values = sc ? [...(it.guess.values || [])] : [];
   return { ...it, key: ++keySeq, author: it.author || "", schema: sc ? sc.id : null, values, skip: it.warnings.some((w) => w.kind === "empty"), picked: false };
 }
 

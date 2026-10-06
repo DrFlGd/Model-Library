@@ -138,29 +138,13 @@ export async function followJob(id, label, onProgress) {
   }
 }
 
-/** Move models into a category (schema id and level values), or to Unsorted (schema null). */
+/** Move models into a category (schema id and path of subcategories), or to Unsorted (schema null). */
 export async function moveModels(ids, schema, values) {
   const r = await api("models_move", { ids, schema, values });
   const remap = Object.fromEntries(r.moved.map((m) => [m.id, m.new_id]));
   ui.set((s) => ({ favs: r.favourites, picked: [], selection: remap[s.selection] || s.selection }));
   await loadOverview();
   return r;
-}
-
-/** The values a schema already has at `level`, below the chosen values above it. */
-export function valuesAt(schema, values, level) {
-  let nodes = schema?.tree || [];
-  for (let i = 0; i < level; i++) {
-    const n = nodes.find((x) => x.value.toLowerCase() === (values[i] || "").trim().toLowerCase());
-    if (!n) {
-      // an unknown value above: offer every value at this depth
-      let all = schema?.tree || [];
-      for (let j = 0; j < level; j++) all = all.flatMap((x) => x.children);
-      return [...new Set(all.map((x) => x.value))].sort();
-    }
-    nodes = n.children;
-  }
-  return nodes.map((x) => x.value);
 }
 
 /** What a category change would move: { label, models, moving, clashes, sample }. */

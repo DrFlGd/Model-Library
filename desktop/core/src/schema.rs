@@ -1,7 +1,9 @@
-//! Schemas (docs/PLAN.md, "Schemas and categories"): one file per schema in
-//! `_library/schemas/<id>.json`. A schema names a top folder, the category levels
-//! below it ("Game", "Faction"), the template for each model's folder name
-//! ("{name} ({author})") and the fields its models have.
+//! Schemas (docs/PLAN.md, "Schemas and categories" and "Subcategory tree design"):
+//! one file per schema (a category, in the app) in `_library/schemas/<id>.json`. A
+//! schema names a top folder, the tree of subcategories below it (any depth), the
+//! template for each model's folder name ("{name} ({author})") and the fields its
+//! models have. Older schema files name fixed `levels` instead of a tree; they're
+//! converted to a tree when the library can be written ([`upgrade`]).
 
 use crate::config::{read_json_object, write_json};
 use crate::library::{slug, Library, APP_DIR};
@@ -19,7 +21,8 @@ pub struct Schema {
     pub name: String,
     /// The schema's top folder, relative to the library ("Wargames").
     pub folder: String,
-    /// Level keys and labels, top first: [("game", "Game"), ("faction", "Faction")].
+    /// Older schema files only: fixed level keys and labels, top first
+    /// ([("game", "Game"), ("faction", "Faction")]). Empty for a tree.
     pub levels: Vec<(String, String)>,
     pub model_folder: String,
     /// The schema file as stored (fields, and anything a newer app added).
@@ -30,8 +33,9 @@ impl Schema {
     pub fn from_value(v: &Value) -> Option<Schema> {
         let id = v["id"].as_str()?.to_string();
         let levels = v["levels"]
-            .as_array()?
-            .iter()
+            .as_array()
+            .into_iter()
+            .flatten()
             .filter_map(|l| {
                 let key = l["key"].as_str()?.to_string();
                 let label = l["label"]
@@ -57,12 +61,23 @@ impl Schema {
         v["name"] = json!(self.name);
         v["folder"] = json!(self.folder);
         v["model_folder"] = json!(self.model_folder);
-        v["levels"] = json!(self
-            .levels
-            .iter()
-            .map(|(k, l)| json!({ "key": k, "label": l }))
-            .collect::<Vec<_>>());
+        if self.levels.is_empty() {
+            if let Some(o) = v.as_object_mut() {
+                o.shift_remove("levels");
+            }
+        } else {
+            v["levels"] = json!(self
+                .levels
+                .iter()
+                .map(|(k, l)| json!({ "key": k, "label": l }))
+                .collect::<Vec<_>>());
+        }
         v
+    }
+
+    /// Every subcategory's path, from the top (see [`subcategories`]).
+    pub fn tree(&self) -> Vec<Vec<String>> {
+        subcategories(&self.raw)
     }
 
     /// The schema's own fields: [{ key, label, type, choices? }].
@@ -155,7 +170,9 @@ pub fn list(lib: &Library) -> Vec<Schema> {
     out
 }
 
-/// Make a new schema from the form (name, folder, levels [{label}], model_folder, fields).
+/// Make a new schema from the form (name, folder, subcategories [{name,
+/// subcategories}], model_folder, fields). `levels` [{label}] makes an older,
+/// fixed-level schema (kept for reading older libraries in tests).
 pub fn create(lib: &Library, spec: &Value) -> Result<Schema> {
     lib.writable()?;
     let name = spec["name"].as_str().unwrap_or("").trim().to_string();
@@ -253,14 +270,148 @@ pub fn create(lib: &Library, spec: &Value) -> Result<Schema> {
     v.insert("id".into(), json!(id));
     v.insert("name".into(), json!(name));
     v.insert("folder".into(), json!(folder));
-    v.insert("levels".into(), json!(levels));
+    if !levels.is_empty() {
+        v.insert("levels".into(), json!(levels));
+    }
     v.insert("model_folder".into(), json!(template));
     v.insert("fields".into(), json!(fields));
     v.insert("created".into(), json!(crate::library::now()));
-    let v = Value::Object(v);
+    let mut v = Value::Object(v);
+    let mut paths = vec![];
+    tree_spec(&spec["subcategories"], &[], &mut paths, &mut vec![])?;
+    for p in &paths {
+        check_path(lib, &folder, &[], p)?;
+    }
+    set_subcategories(&mut v, &paths);
     write_json(&schemas_dir(lib).join(format!("{id}.json")), &v)?;
     std::fs::create_dir_all(lib.root().join(&folder))?;
+    for p in subcategories(&v) {
+        std::fs::create_dir_all(p.iter().fold(lib.root().join(&folder), |d, x| d.join(x)))?;
+    }
     Ok(Schema::from_value(&v).unwrap())
+}
+
+/// A subcategory name as its folder will have it; refuses an empty one or one the
+/// app keeps for itself.
+pub fn subcategory_name(name: &str) -> Result<String> {
+    if name.trim().is_empty() {
+        bail!("Give every subcategory a name.");
+    }
+    let c = clean_folder_name(name.trim(), 80);
+    if c.starts_with('_') {
+        bail!("A subcategory can't start with _ (those folders are the app's): {c}.");
+    }
+    Ok(c)
+}
+
+/// Refuse a subcategory path that runs into a model's folder: one with a
+/// model.json, or one with files that isn't a subcategory already (in `tree`).
+pub fn check_path(
+    lib: &Library,
+    folder: &str,
+    tree: &[Vec<String>],
+    path: &[String],
+) -> Result<()> {
+    let mut dir = lib.root().join(folder);
+    for i in 0..path.len() {
+        dir.push(&path[i]);
+        if !dir.is_dir() {
+            return Ok(());
+        }
+        let known = tree
+            .iter()
+            .any(|p| p.len() == i + 1 && starts_with(p, &path[..=i]));
+        let files = std::fs::read_dir(&dir)
+            .map(|rd| {
+                rd.flatten()
+                    .any(|e| e.file_type().is_ok_and(|t| t.is_file()))
+            })
+            .unwrap_or(false);
+        if dir.join(crate::model::SIDECAR).is_file() || (!known && files) {
+            bail!(
+                "{} is a model's folder, not a subcategory.",
+                path[..=i].join(" › ")
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Whether `path` is in `tree` (names compared without case).
+pub fn in_tree(tree: &[Vec<String>], path: &[String]) -> bool {
+    tree.iter()
+        .any(|p| p.len() == path.len() && starts_with(p, path))
+}
+
+/// The paths of a tree from the form ([{name, orig?, subcategories}]), with each
+/// node that came from the library (`orig`: its path before) mapped to its path now.
+fn tree_spec(
+    nodes: &Value,
+    parent: &[String],
+    paths: &mut Vec<Vec<String>>,
+    kept: &mut Vec<Remap>,
+) -> Result<()> {
+    for n in nodes.as_array().into_iter().flatten() {
+        let mut path = parent.to_vec();
+        path.push(subcategory_name(n["name"].as_str().unwrap_or(""))?);
+        let orig = strings(&n["orig"]);
+        if !orig.is_empty() {
+            kept.push(Remap {
+                from: orig,
+                to: path.clone(),
+                keep_below: true,
+            });
+        }
+        paths.push(path.clone());
+        tree_spec(&n["subcategories"], &path, paths, kept)?;
+    }
+    Ok(())
+}
+
+fn strings(v: &Value) -> Vec<String> {
+    v.as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(String::from)
+        .collect()
+}
+
+/// Where a subcategory (and what's below it) goes in an edit: the longest `from`
+/// that a path starts with decides; `keep_below` keeps the rest of the path under
+/// `to` (a renamed or moved node), otherwise everything lands on `to` (a removed node).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Remap {
+    pub from: Vec<String>,
+    pub to: Vec<String>,
+    pub keep_below: bool,
+}
+
+/// Whether `path` starts with `prefix` (names compared without case).
+pub fn starts_with(path: &[String], prefix: &[String]) -> bool {
+    path.len() >= prefix.len()
+        && path
+            .iter()
+            .zip(prefix)
+            .all(|(a, b)| a.eq_ignore_ascii_case(b))
+}
+
+fn best<'a>(path: &[String], maps: &'a [Remap]) -> Option<&'a Remap> {
+    maps.iter()
+        .filter(|m| !m.from.is_empty() && starts_with(path, &m.from))
+        .max_by_key(|m| m.from.len())
+}
+
+/// A path after an edit (unchanged when no `from` matches it).
+pub fn remap(path: &[String], maps: &[Remap]) -> Vec<String> {
+    let Some(m) = best(path, maps) else {
+        return path.to_vec();
+    };
+    let mut out = m.to.clone();
+    if m.keep_below {
+        out.extend_from_slice(&path[m.from.len()..]);
+    }
+    out
 }
 
 // ------------------------------------------------------------ subcategories
@@ -348,7 +499,118 @@ pub fn kept_folder(lib: &Library, dir: &std::path::Path) -> bool {
     })
 }
 
-/// Add a subcategory under `path` (values from the top) as `name`; makes its folder.
+fn find(lib: &Library, id: &str) -> Result<Schema> {
+    list(lib)
+        .into_iter()
+        .find(|s| s.id == id)
+        .ok_or_else(|| anyhow::anyhow!("There's no category {id} any more."))
+}
+
+/// The folders of an older, fixed-level schema that are category values (every
+/// folder above its last level that isn't a model), as tree paths.
+fn level_paths(lib: &Library, s: &Schema) -> Vec<Vec<String>> {
+    fn walk(
+        dir: &std::path::Path,
+        depth: usize,
+        levels: usize,
+        prefix: &mut Vec<String>,
+        out: &mut Vec<Vec<String>>,
+    ) {
+        if depth >= levels {
+            return;
+        }
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        let mut dirs: Vec<std::path::PathBuf> = rd
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .filter(|e| !e.file_name().to_string_lossy().starts_with(['_', '.']))
+            .map(|e| e.path())
+            .collect();
+        dirs.sort();
+        for d in dirs {
+            if d.join(crate::model::SIDECAR).is_file() {
+                continue;
+            }
+            prefix.push(d.file_name().unwrap().to_string_lossy().into_owned());
+            out.push(prefix.clone());
+            walk(&d, depth + 1, levels, prefix, out);
+            prefix.pop();
+        }
+    }
+    let mut out = vec![];
+    walk(
+        &lib.root().join(&s.folder),
+        0,
+        s.levels.len(),
+        &mut vec![],
+        &mut out,
+    );
+    out
+}
+
+/// The schema file of an older, fixed-level schema as a tree: its level folders
+/// become subcategories and the levels go. Nothing on disk moves.
+pub fn as_tree(lib: &Library, s: &Schema) -> Value {
+    let mut v = s.to_json();
+    if s.levels.is_empty() {
+        return v;
+    }
+    let mut paths = s.tree();
+    paths.extend(level_paths(lib, s));
+    if let Some(o) = v.as_object_mut() {
+        o.shift_remove("levels");
+    }
+    set_subcategories(&mut v, &paths);
+    v
+}
+
+fn as_tree_paths(lib: &Library, s: &Schema) -> Vec<Vec<String>> {
+    subcategories(&as_tree(lib, s))
+}
+
+/// Convert an older, fixed-level schema to a tree, when the library can be written.
+pub fn upgrade(lib: &Library, s: Schema) -> Result<Schema> {
+    if s.levels.is_empty() || lib.writable().is_err() {
+        return Ok(s);
+    }
+    let v = as_tree(lib, &s);
+    save(lib, &v)?;
+    Schema::from_value(&v).ok_or_else(|| anyhow::anyhow!("That category isn't valid."))
+}
+
+/// Convert every older schema in a library that can be written; how many were.
+pub fn upgrade_all(lib: &Library) -> usize {
+    if lib.writable().is_err() {
+        return 0;
+    }
+    list(lib)
+        .into_iter()
+        .filter(|s| !s.levels.is_empty())
+        .filter(|s| upgrade(lib, s.clone()).is_ok())
+        .count()
+}
+
+/// Make sure `path` (and every node above it) is in schema `id`'s tree, as a model
+/// is placed there (an import, a move).
+pub fn define_path(lib: &Library, id: &str, path: &[String]) -> Result<()> {
+    let s = upgrade(lib, find(lib, id)?)?;
+    let mut all = s.tree();
+    if path.is_empty()
+        || all
+            .iter()
+            .any(|p| p.len() == path.len() && starts_with(p, path))
+    {
+        return Ok(());
+    }
+    all.push(path.to_vec());
+    let mut v = s.to_json();
+    set_subcategories(&mut v, &all);
+    save(lib, &v)
+}
+
+/// Add a subcategory under `path` (names from the top) as `name`; makes its folder.
 pub fn add_subcategory(
     lib: &Library,
     id: &str,
@@ -356,57 +618,28 @@ pub fn add_subcategory(
     name: &str,
 ) -> Result<Vec<String>> {
     lib.writable()?;
-    let s = list(lib)
-        .into_iter()
-        .find(|s| s.id == id)
-        .ok_or_else(|| anyhow::anyhow!("There's no category {id} any more."))?;
-    if path.len() >= s.levels.len() {
-        bail!(
-            "{} is the last level: models go below it, not subcategories.",
-            s.levels.last().map(|l| l.1.as_str()).unwrap_or("This")
-        );
-    }
-    let label = &s.levels[path.len()].1;
-    let name = clean_folder_name(name.trim(), 80);
-    if name.is_empty() {
-        bail!("Give the {label} a name.");
-    }
-    if name.starts_with('_') {
-        bail!("A {label} can't start with _ (those folders are the app's).");
-    }
+    let s = find(lib, id)?;
     let mut full: Vec<String> = path.iter().map(|v| clean_folder_name(v, 80)).collect();
-    full.push(name);
-    let mut v = s.to_json();
-    let mut all = subcategories(&v);
-    if !all.iter().any(|p| {
-        p.len() == full.len() && p.iter().zip(&full).all(|(a, b)| a.eq_ignore_ascii_case(b))
-    }) {
-        all.push(full.clone());
+    full.push(subcategory_name(name)?);
+    if !in_tree(&s.tree(), &full) {
+        check_path(lib, &s.folder, &as_tree_paths(lib, &s), &full)?;
     }
-    set_subcategories(&mut v, &all);
-    save(lib, &v)?;
-    let mut dir = lib.root().join(&s.folder);
-    for x in &full {
-        dir.push(x);
-    }
-    std::fs::create_dir_all(dir)?;
+    define_path(lib, id, &full)?;
+    std::fs::create_dir_all(
+        full.iter()
+            .fold(lib.root().join(&s.folder), |d, x| d.join(x)),
+    )?;
     Ok(full)
 }
 
 /// Remove an empty subcategory (and the ones below it): its folders go if they're empty.
 pub fn remove_subcategory(lib: &Library, id: &str, path: &[String]) -> Result<()> {
     lib.writable()?;
-    let s = list(lib)
-        .into_iter()
-        .find(|s| s.id == id)
-        .ok_or_else(|| anyhow::anyhow!("There's no category {id} any more."))?;
+    let s = upgrade(lib, find(lib, id)?)?;
     let mut v = s.to_json();
-    let below = |p: &Vec<String>| {
-        p.len() >= path.len() && p.iter().zip(path).all(|(a, b)| a.eq_ignore_ascii_case(b))
-    };
     let all: Vec<Vec<String>> = subcategories(&v)
         .into_iter()
-        .filter(|p| !below(p))
+        .filter(|p| !starts_with(p, path))
         .collect();
     set_subcategories(&mut v, &all);
     save(lib, &v)?;
@@ -432,19 +665,12 @@ pub fn remove_empty_tree(dir: &std::path::Path) -> bool {
     empty && std::fs::remove_dir(dir).is_ok()
 }
 
-/// Where a level of an edited schema takes its values from: an old level (by
-/// index), or a value given for every model already there (a new level).
-#[derive(Clone, Debug, PartialEq)]
-pub enum LevelFrom {
-    Old(usize),
-    New(String),
-}
-
-/// The schema file after an edit from the form (name, folder, levels
-/// [{key?, label, value?}], model_folder, fields [{key?, label, type, choices}]),
-/// and where each new level's values come from. Keys of kept levels and fields
-/// stay, so model.json values stay attached.
-pub fn edited(lib: &Library, old: &Schema, spec: &Value) -> Result<(Value, Vec<LevelFrom>)> {
+/// The schema file after an edit from the form (name, folder, model_folder, fields
+/// [{key?, label, type, choices}], and maybe the whole tree: subcategories [{name,
+/// orig?, subcategories}] with removed [[orig path]]), and where every old path goes.
+/// Keys of kept fields stay, so model.json values stay attached. An older schema
+/// becomes a tree.
+pub fn edited(lib: &Library, old: &Schema, spec: &Value) -> Result<(Value, Vec<Remap>)> {
     let name = spec["name"]
         .as_str()
         .unwrap_or(&old.name)
@@ -468,38 +694,6 @@ pub fn edited(lib: &Library, old: &Schema, spec: &Value) -> Result<(Value, Vec<L
         .any(|s| s.id != old.id && s.folder.eq_ignore_ascii_case(&folder))
     {
         bail!("Another category already uses the folder {folder}.");
-    }
-    let mut levels: Vec<Value> = vec![];
-    let mut from = vec![];
-    for l in spec["levels"].as_array().into_iter().flatten() {
-        let label = l["label"].as_str().unwrap_or("").trim().to_string();
-        if label.is_empty() {
-            continue;
-        }
-        let kept = l["key"]
-            .as_str()
-            .and_then(|k| old.levels.iter().position(|(ok, _)| ok == k));
-        let key = match kept {
-            Some(i) if !levels.iter().any(|x| x["key"] == json!(old.levels[i].0)) => {
-                from.push(LevelFrom::Old(i));
-                old.levels[i].0.clone()
-            }
-            _ => {
-                let value = l["value"].as_str().unwrap_or("").trim().to_string();
-                if value.is_empty() {
-                    bail!("Give the new level {label} a value for the models already there.");
-                }
-                from.push(LevelFrom::New(value));
-                unique_key(
-                    &slug(&label).replace('-', "_"),
-                    levels
-                        .iter()
-                        .map(|l| l["key"].as_str().unwrap_or(""))
-                        .chain(old.levels.iter().map(|(k, _)| k.as_str())),
-                )
-            }
-        };
-        levels.push(json!({ "key": key, "label": label }));
     }
     let old_fields = old.fields();
     let mut fields: Vec<Value> = vec![];
@@ -536,14 +730,54 @@ pub fn edited(lib: &Library, old: &Schema, spec: &Value) -> Result<(Value, Vec<L
         .map(str::trim)
         .filter(|t| t.contains("{name}"))
         .unwrap_or(&old.model_folder);
-    let mut v = old.to_json();
+    let mut v = as_tree(lib, old);
+    let old_tree = subcategories(&v);
+    let mut maps = vec![];
+    if spec.get("subcategories").is_some() {
+        let mut paths = vec![];
+        tree_spec(&spec["subcategories"], &[], &mut paths, &mut maps)?;
+        // a removed node's models go up to the nearest node that's kept
+        let removed: Vec<Vec<String>> = spec["removed"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(strings)
+            .filter(|p| !p.is_empty())
+            .collect();
+        for r in &removed {
+            let up = (0..r.len())
+                .rev()
+                .map(|n| &r[..n])
+                .find_map(|a| {
+                    maps.iter()
+                        .find(|m| m.from.len() == a.len() && starts_with(&m.from, a))
+                        .map(|m| m.to.clone())
+                })
+                .unwrap_or_default();
+            maps.push(Remap {
+                from: r.clone(),
+                to: up,
+                keep_below: false,
+            });
+        }
+        // nodes the form didn't know of follow the node above them
+        for p in &old_tree {
+            if best(p, &maps).is_none_or(|m| m.keep_below) {
+                paths.push(remap(p, &maps));
+            }
+        }
+        let known: &[Vec<String>] = if folder == old.folder { &old_tree } else { &[] };
+        for p in paths.iter().filter(|p| !in_tree(&old_tree, p)) {
+            check_path(lib, &folder, known, p)?;
+        }
+        set_subcategories(&mut v, &paths);
+    }
     v["name"] = json!(name);
     v["folder"] = json!(folder);
-    v["levels"] = json!(levels);
     v["model_folder"] = json!(template);
     v["fields"] = json!(fields);
     v["updated"] = json!(crate::library::now());
-    Ok((v, from))
+    Ok((v, maps))
 }
 
 fn choices(v: &Value) -> Vec<String> {
@@ -628,6 +862,33 @@ mod tests {
         assert_eq!(clean_folder_name("com1.txt", 60), "com1.txt_");
         assert_eq!(clean_folder_name("", 60), "Untitled");
         assert_eq!(clean_folder_name("abcdef", 3), "abc");
+    }
+
+    #[test]
+    fn paths_follow_an_edit_of_the_tree() {
+        let v = |x: &[&str]| x.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+        // Office removed, but Desk moved out of it first
+        let maps = [
+            Remap {
+                from: v(&["Office", "Desk"]),
+                to: v(&["Desk"]),
+                keep_below: true,
+            },
+            Remap {
+                from: v(&["office"]),
+                to: vec![],
+                keep_below: false,
+            },
+        ];
+        assert_eq!(
+            remap(&v(&["Office", "Desk", "Lamps"]), &maps),
+            v(&["Desk", "Lamps"])
+        );
+        assert_eq!(
+            remap(&v(&["Office", "Pens", "Blue"]), &maps),
+            Vec::<String>::new()
+        );
+        assert_eq!(remap(&v(&["Kitchen"]), &maps), v(&["Kitchen"]));
     }
 
     #[test]

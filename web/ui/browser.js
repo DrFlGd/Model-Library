@@ -28,20 +28,20 @@ function Title({ scope, overview }) {
     i === crumbs.length - 1 ? label : html`<a href=${routeHash(`browse:${schemaScope(id, path)}`)}>${label}</a>`}`)}</h1>`;
 }
 
-/** Changing the category shown: edit it (its own page), or rename or move a value. */
+/** Changing the category shown: edit it (its own page), add a subcategory, or rename, move or remove one. */
 function PlaceTools({ scope, readOnly, overview, empty }) {
   if (readOnly || !scope.startsWith("schema:")) return null;
   const [id, ...values] = scope.slice(7).split("/").map(decodeURIComponent);
   const sc = overview?.schemas?.find((s) => s.id === id);
-  const add = sc && values.length < sc.levels.length
-    ? html`<button type="button" class="ghost" id="add-subcategory" title=${`Add a ${sc.levels[values.length].label.toLowerCase()} here`} onClick=${() => ui.set({ dialog: { type: "add-subcategory", schemaId: id, path: values } })}>${Icon.plus(14)} Add ${sc.levels[values.length].label.toLowerCase()}…</button>` : null;
+  const add = sc
+    ? html`<button type="button" class="ghost" id="add-subcategory" title="Add a subcategory here" onClick=${() => ui.set({ dialog: { type: "add-subcategory", schemaId: id, path: values } })}>${Icon.plus(14)} Add subcategory…</button>` : null;
   const remove = values.length && empty
     ? html`<button type="button" class="ghost" id="remove-subcategory" title="Remove this empty subcategory and its folder" onClick=${async () => {
       try { await api("subcategory_remove", { schema: id, path: values }); await loadOverview(); location.hash = routeHash(`browse:${schemaScope(id, values.slice(0, -1))}`); toast(`Removed ${values[values.length - 1]}.`); }
       catch (e) { toast(e.message || String(e), 6000); } }}>Remove</button>` : null;
   return values.length
     ? html`${add}<button type="button" class="ghost" id="rename-node" title="Rename, merge or move this category, with its folders" onClick=${() => ui.set({ dialog: { type: "rename-node", schemaId: id, path: values } })}>${Icon.edit(14)} Rename or move…</button>${remove}`
-    : html`${add}<button type="button" class="ghost" id="edit-schema" title="Edit this category: its levels, folders and fields" onClick=${() => ui.set({ dialog: { type: "edit-schema", schemaId: id } })}>${Icon.edit(14)} Edit category…</button>`;
+    : html`${add}<button type="button" class="ghost" id="edit-schema" title="Edit this category: its subcategories, folders and fields" onClick=${() => ui.set({ dialog: { type: "edit-schema", schemaId: id } })}>${Icon.edit(14)} Edit category…</button>`;
 }
 
 /** A model's cover picture, or an icon for the kind of files it has. */

@@ -6,9 +6,9 @@
 use crate::index::{fold, Index, UNSORTED};
 use crate::library::{Library, APP_DIR};
 use crate::model::{self, file_kind, SIDECAR};
-use crate::schema::{clean_folder_name, parse_folder_name, Schema};
+use crate::schema::{self, clean_folder_name, parse_folder_name, Schema};
 use anyhow::{anyhow, bail, Context, Result};
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -124,6 +124,7 @@ fn known_paths(ix: &Index, schema: &str) -> Vec<Vec<String>> {
         .iter()
         .filter(|m| m.v["schema"] == json!(schema))
         .filter_map(|m| serde_json::from_value::<Vec<String>>(m.v["path"].clone()).ok())
+        .chain(ix.schema(schema).map(Schema::tree).unwrap_or_default())
         .filter(|p| seen.insert(p.clone()))
         .collect()
 }
@@ -257,11 +258,9 @@ fn describe(lib: &Library, ix: &Index, f: &Found) -> Value {
     }
     let guess = match (
         side["schema"].as_str().and_then(|s| ix.schema(s)),
-        side["category"].as_object(),
+        model::path_of(&side),
     ) {
-        (Some(s), Some(cat)) => {
-            json!({ "schema": s.id, "values": s.levels.iter().map(|(k, _)| cat.get(k).and_then(Value::as_str).unwrap_or("")).collect::<Vec<_>>() })
-        }
+        (Some(s), Some(path)) => json!({ "schema": s.id, "values": path }),
         _ => guess_category(ix, &f.path, &name),
     };
     json!({
@@ -328,7 +327,7 @@ pub fn scan(lib: &Library, ix: &Index, paths: &[PathBuf], contents: bool) -> Res
     Ok(json!({ "items": items, "left_behind": left }))
 }
 
-/// Where one model goes: `<schema folder>/<values…>/<model folder name>` or
+/// Where one model goes: `<schema folder>/<subcategories…>/<model folder name>` or
 /// `Unsorted/<model folder name>`, unique among `taken` and what's on disk
 /// (`own` is the model's current folder, which doesn't count as taken).
 pub fn destination(
@@ -343,16 +342,16 @@ pub fn destination(
     match schema {
         Some(s) => {
             dir.push(&s.folder);
-            for (i, (_, label)) in s.levels.iter().enumerate() {
-                let v = values.get(i).map(|v| v.trim()).unwrap_or("");
-                if v.is_empty() {
-                    bail!("Choose a {label}.");
-                }
-                let c = clean_folder_name(v, 80);
-                if c.starts_with('_') {
-                    bail!("A {label} can't start with _ (those folders are the app's).");
-                }
-                dir.push(c);
+            let path = values
+                .iter()
+                .map(|v| schema::subcategory_name(v))
+                .collect::<Result<Vec<String>>>()?;
+            let tree = s.tree();
+            if !schema::in_tree(&tree, &path) && path.len() > s.levels.len() {
+                schema::check_path(lib, &s.folder, &tree, &path)?;
+            }
+            for v in path {
+                dir.push(v);
             }
         }
         None => dir.push(UNSORTED),
@@ -638,15 +637,7 @@ pub fn commit_one(
         side.as_object_mut().unwrap().remove("id");
         crate::config::write_json(&dest.join(SIDECAR), &side)?;
     }
-    let category: Map<String, Value> = schema
-        .map(|s| {
-            s.levels
-                .iter()
-                .zip(item["values"].as_array().into_iter().flatten())
-                .map(|((k, _), v)| (k.clone(), json!(v.as_str().unwrap_or("").trim())))
-                .collect()
-        })
-        .unwrap_or_default();
+    let path = place_of(lib, schema, dest);
     let mut patch = json!({ "name": item["name"], "authors": item["author"].as_str().unwrap_or(""), "tags": item["tags"].as_str().unwrap_or("") });
     if let Some(f) = item["fields"].as_object() {
         patch["fields"] = json!(f);
@@ -656,7 +647,10 @@ pub fn commit_one(
         &patch,
         &json!({ "imported_from": src.display().to_string() }),
     )?;
-    let side = model::set_place(dest, schema.map(|s| s.id.as_str()), &category)?;
+    let side = model::set_place(dest, schema.map(|s| s.id.as_str()), &path)?;
+    if let Some(s) = schema {
+        schema::define_path(lib, &s.id, &path)?;
+    }
     Ok(
         json!({ "id": side["id"], "dest": dest.display().to_string(), "rel": lib.relative(dest), "note": if notes.is_empty() { Value::Null } else { json!(notes.join(" ")) } }),
     )
@@ -694,17 +688,27 @@ pub fn move_model(
     // a first model.json starts from what the folder said
     let defaults = json!({ "name": m.v["name"], "authors": m.v["authors"].as_array().filter(|a| !a.is_empty()).map(|a| a.iter().map(|n| json!({ "name": n })).collect::<Vec<_>>()) });
     model::update(&dest, &json!({}), &defaults)?;
-    let category: Map<String, Value> = schema
-        .map(|s| {
-            s.levels
-                .iter()
-                .zip(values)
-                .map(|((k, _), v)| (k.clone(), json!(v.trim())))
+    let path = place_of(lib, schema, &dest);
+    model::set_place(&dest, schema.map(|s| s.id.as_str()), &path)?;
+    if let Some(s) = schema {
+        schema::define_path(lib, &s.id, &path)?;
+    }
+    Ok(dest)
+}
+
+/// A model folder's path of subcategories under its schema's folder.
+pub fn place_of(lib: &Library, schema: Option<&Schema>, dir: &Path) -> Vec<String> {
+    let Some(s) = schema else {
+        return vec![];
+    };
+    dir.parent()
+        .and_then(|p| p.strip_prefix(lib.root().join(&s.folder)).ok())
+        .map(|r| {
+            r.components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
                 .collect()
         })
-        .unwrap_or_default();
-    model::set_place(&dest, schema.map(|s| s.id.as_str()), &category)?;
-    Ok(dest)
+        .unwrap_or_default()
 }
 
 /// Remove empty category folders from `dir` upwards, stopping at a schema's own
@@ -853,12 +857,9 @@ mod tests {
     fn plans_destinations() {
         let d = tmp("plan");
         let lib = Library::open(d.join("Lib")).unwrap();
-        schema::create(
-            &lib,
-            &json!({ "name": "Wargames", "levels": [{ "label": "Game" }, { "label": "Faction" }] }),
-        )
-        .unwrap();
+        schema::create(&lib, &json!({ "name": "Wargames" })).unwrap();
         std::fs::create_dir_all(lib.root().join("Unsorted/Benchy")).unwrap();
+        put(&lib.root().join("Wargames/Lamp (Jo)/model.json"), "{}");
         let ix = Index::build(&lib, None, false);
         let p = plan(
             &lib,
@@ -866,8 +867,11 @@ mod tests {
             &[
                 json!({ "source": "/x/a", "schema": "wargames", "values": ["40k", "Tyranid: Hive?"], "name": "Hive Tyrant", "author": "Jo" }),
                 json!({ "source": "/x/b", "schema": "wargames", "values": ["40k", "Tyranid: Hive?"], "name": "Hive Tyrant", "author": "Jo" }),
-                json!({ "source": "/x/c", "schema": "wargames", "values": ["40k"], "name": "X" }),
+                json!({ "source": "/x/c", "schema": "wargames", "values": ["40k", " "], "name": "X" }),
                 json!({ "source": "/x/d", "schema": null, "name": "Benchy", "author": "" }),
+                json!({ "source": "/x/e", "schema": "wargames", "values": [], "name": "Top" }),
+                json!({ "source": "/x/f", "schema": "wargames", "values": ["40k", "_x"], "name": "Y" }),
+                json!({ "source": "/x/g", "schema": "wargames", "values": ["Lamp (Jo)", "Bits"], "name": "Z" }),
             ],
         );
         assert_eq!(p[0]["rel"], "Wargames/40k/Tyranid- Hive-/Hive Tyrant (Jo)");
@@ -875,8 +879,14 @@ mod tests {
             p[1]["rel"],
             "Wargames/40k/Tyranid- Hive-/Hive Tyrant (Jo) (2)"
         );
-        assert_eq!(p[2]["error"], "Choose a Faction.");
+        assert_eq!(p[2]["error"], "Give every subcategory a name.");
         assert_eq!(p[3]["rel"], "Unsorted/Benchy (2)");
+        // a model can sit at the top of a category, but not in an app folder
+        assert_eq!(p[4]["rel"], "Wargames/Top");
+        assert!(p[5]["error"]
+            .as_str()
+            .unwrap()
+            .contains("can't start with _"));
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -884,11 +894,7 @@ mod tests {
     fn imports_by_move_and_by_checked_copy() {
         let d = tmp("commit");
         let lib = Library::open(d.join("Lib")).unwrap();
-        let s = schema::create(
-            &lib,
-            &json!({ "name": "Wargames", "levels": [{ "label": "Game" }, { "label": "Faction" }] }),
-        )
-        .unwrap();
+        let s = schema::create(&lib, &json!({ "name": "Wargames" })).unwrap();
         let src = d.join("Downloads");
         put(&src.join("Tyrant/body.stl"), "solid");
         put(&src.join("Tyrant/Arms/arm.stl"), "solid arm");
@@ -910,9 +916,14 @@ mod tests {
         let r = commit_one(&lib, &item, &dest, Some(&s), true, true, &ids, &p).unwrap();
         assert!(dest.join("Arms/arm.stl").is_file() && !src.join("Tyrant").exists());
         let side = model::read_sidecar(&dest);
+        assert_eq!(side["path"], json!(["40k", "Tyranid"]));
+        // the place is in the category's tree now
         assert_eq!(
-            side["category"],
-            json!({ "game": "40k", "faction": "Tyranid" })
+            schema::list(&lib)[0].tree(),
+            vec![
+                vec!["40k".to_string()],
+                vec!["40k".into(), "Tyranid".into()]
+            ]
         );
         assert_eq!(
             (
@@ -930,7 +941,7 @@ mod tests {
         assert!(src.join("Old/old.stl").is_file() && dest.join("old.stl").is_file());
         assert_ne!(side["id"], "m1");
         assert_eq!(side["future"], 1);
-        assert!(side["schema"].is_null() && side.get("category").is_none());
+        assert!(side["schema"].is_null() && side.get("path").is_none());
         // loose files get a folder
         let item = json!({ "source": src.join("benchy.stl").display().to_string(), "files": [src.join("benchy.stl").display().to_string(), src.join("benchy.png").display().to_string()], "name": "Benchy", "author": "" });
         let dest = lib.root().join("Unsorted/Benchy");
@@ -963,11 +974,7 @@ mod tests {
     fn moves_models_between_categories() {
         let d = tmp("move");
         let lib = Library::open(d.join("Lib")).unwrap();
-        schema::create(
-            &lib,
-            &json!({ "name": "Wargames", "levels": [{ "label": "Game" }, { "label": "Faction" }] }),
-        )
-        .unwrap();
+        schema::create(&lib, &json!({ "name": "Wargames" })).unwrap();
         put(&lib.root().join("Unsorted/Carnifex (Al)/c.stl"), "x");
         put(&lib.root().join("Old stuff/x.stl"), "x");
         let ix = Index::build(&lib, None, false);
@@ -991,12 +998,21 @@ mod tests {
             (side["name"].as_str(), side["authors"][0]["name"].as_str()),
             (Some("Carnifex"), Some("Al"))
         );
-        // and back to Unsorted: the emptied category folders go
+        assert_eq!(side["path"], json!(["40k", "Tyranid"]));
+        // up a level: branches can be any depth
         let ix = Index::build(&lib, None, false);
         let id = ix.models[0].id().to_string();
+        let dest = move_model(&lib, &ix, &id, s.as_ref(), &["40k".into()]).unwrap();
+        assert_eq!(lib.relative(&dest).unwrap(), "Wargames/40k/Carnifex (Al)");
+        let ix = Index::build(&lib, None, false);
+        assert_eq!(ix.models[0].v["path"], json!(["40k"]));
+        // and back to Unsorted: the subcategories stay, as they're in the tree
         move_model(&lib, &ix, &id, None, &[]).unwrap();
         assert!(lib.root().join("Unsorted/Carnifex (Al)/c.stl").is_file());
-        assert!(!lib.root().join("Wargames/40k").exists() && lib.root().join("Wargames").is_dir());
+        assert!(lib.root().join("Wargames/40k/Tyranid").is_dir());
+        let ix = Index::build(&lib, None, false);
+        assert_eq!(ix.models.len(), 1);
+        assert_eq!(ix.models[0].rel(), "Unsorted/Carnifex (Al)");
         let _ = std::fs::remove_dir_all(&d);
     }
 }
