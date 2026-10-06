@@ -144,6 +144,8 @@ async def phase1(pg):
 
     # 11. search, with typed filters
     await pg.goto(B + "#/browse/all")
+    await pg.wait_for_selector(".browse-title h1:has-text('All models')")
+    await count(pg)
     found = [await search(pg, "tyrant"), await search(pg, "author:\"jo smith\""), await search(pg, "schema:wargames carni"), await search(pg, "faction:space")]
     await search(pg, "nothing-like-this")
     none = await pg.is_visible("#no-results")
