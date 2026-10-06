@@ -379,3 +379,62 @@ Built 2026-10-06, as designed above, with these details:
 - **Older libraries:** opening a library that can be written converts its schemas (`App::open_library` calls `schema::upgrade_all`). Undoing a change made to an older schema writes the older schema back, levels and all.
 - **Interface:** `category.js` has `CategoryPicker` (category, subcategory list with full paths, new subcategory box) and `SubcategoryTree` (the editor; a new node gets focus as soon as it's drawn so typing straight on lands in it). Unnamed new nodes with nothing in them are dropped when saving.
 - **Tests:** `relayout.rs` (merge across depths with a clash, undo, a tree edit with renames, a move, a removal, a new branch and a new top folder, delete; an older schema moved across depths and undone), `schema.rs` (remapping), `import.rs` (any depth, the top of a category, a model's folder refused), `api.rs` (converting an older library on open, `in:` search, subcategories at any depth), and page checks 9, 15–18 and 25–28b reworked for trees.
+
+## Phase 5 design
+
+Written before the code (2026-10-06). Goal: a whole NAS share of models gets into the library. The owner's direction for the first part: "import a folder as is and provide a UI to go through and quickly apply categories and subcategories to each item shown in its existing folder structure", with several views, single or multiple selection, sending items to a subcategory, grouping files into one model, and several views of a model's parts. The duplicate report and noticing outside changes are as planned.
+
+**1. The sorting workspace (the Import page).**
+
+- **Sort a folder…** reads the whole folder tree (a job with progress, as a share can be large) and shows it as it is on disk. Inside it the app proposes which folders and files are models, all the way down:
+  - a folder with a `model.json`, or with 3D, slicer or archive files of its own, is a model, and its sub-folders are its parts;
+  - a folder whose sub-folders are all variants (Presupported, Resin…) is a model;
+  - loose 3D, slicer and archive files are models, grouped by name with the pictures and documents whose names start the same way (as in Phase 2);
+  - any other folder is just a folder, and its contents are looked at the same way;
+  - files that belong to no model are shown greyed; they can be grouped into one.
+- **Views:** *Folders* (the tree as on disk), *List* (every model in a table: name, folder, files, size, where it goes; sortable, with a filter), *Grid* (cards with a preview of each model's main 3D file or picture) and *By category* (grouped by where each will go, "Not sorted yet" first). A filter for To sort, Sorted, Skipped and Imported, and a search by name.
+- **Selecting:** click, Ctrl- or Shift-click, or tick; ticking a folder ticks everything in it.
+- **Actions on the selection:**
+  - *Send to…*: a category and subcategory (or a new one), or Unsorted. For a folder, *Keep its folders as subcategories* makes the folder and the folders inside it subcategories below the chosen place, so a tidy tree comes in as it is.
+  - *Group into one model*: the selected models, folders and files become one model (folders become its part folders, files go at its top), named after the folder they're in.
+  - *Make one model*: a folder that was read as several models becomes one (its contents become parts).
+  - *Split*: a model becomes a model per sub-folder and per group of loose files.
+  - *Ungroup*, *Skip*, *Clear*, and name, author and tags.
+- **Details pane:** the focused model's files in the parts views (below) and its main 3D file or picture, to recognise it before sorting it.
+- **Import sorted** moves (or copies) every model that has a place into the library, writing its `model.json`, and marks it imported. Import some, carry on sorting, import more. The session is saved on this computer (the app's data folder, one per library) and comes back when the Import page opens; *Read again* picks up changes in the folder and keeps what was decided, by each item's path.
+- *Add a model folder…*, *Add a file…* and dropping on the window add to the same workspace.
+
+**2. Views of a model's parts** (the model page and the workspace's details pane): *Folders* (the part tree, with the variant switch), *All files* (one list: each file's folder, kind and size, sortable, with a filter), *By type* (3D models, slicer projects, pictures, documents, videos, archives, other) and *Grid* (a preview of every 3D file and picture). The choice is remembered. Previews of single files are drawn by the core's renderer and cached in the app's data folder, not in the library.
+
+**3. Duplicates.**
+
+- *Find duplicates* is a job. Files of the same size are compared by a quick fingerprint (the size and the first and last 64 KB), then those that still match by SHA-256. Hashes are kept in each model's `model.json` (`hashes: {file: {size, modified, sha256}}`), so a file is hashed once until it changes.
+- The **Duplicates** page lists models whose files are all the same as another model's, and files found in more than one model.
+- *Set aside* moves an extra copy's folder to `_library/set-aside/`, out of the library's lists. It's journalled like a re-layout, so Recent changes on Home can undo it. *Delete set-aside copies…* empties that folder after asking.
+- Import's duplicate warning uses sizes, then the same fingerprints.
+
+**4. Changes made outside the app.**
+
+- A watcher on the library folder (the `notify` crate) notices changes made in Explorer or a file manager. When they've settled (2 s) the index is read again (only changed models are re-read) and the page refreshes.
+- Network shares don't always report changes, so the library is also checked when the window comes back to the front and every few minutes.
+- A model folder moved by hand keeps its id (it's in its `model.json`), so its star and details follow it, and its `model.json` is told its new place.
+
+**Done when:** a folder tree of models can be sorted into the library from one workspace, over more than one sitting; duplicates across the library are found and set aside with undo; and folders changed outside the app show up without reading the library again by hand.
+
+Not in this phase: unpacking 7z and RAR, details fetched from websites.
+
+## Phase 5 notes
+
+Built 2026-10-06, as designed above, with these details:
+
+- **The workspace** (`sort.rs`, page `web/ui/sort.js`): a session of roots (folders read), folders, items (`folder`, `files` or `group`, each with its sources, name, author, tags, place, skip, and once imported `done`) and loose files left over. It's kept in `<data dir>/sorting/<library id>.json`. Commands: `sort_get`, `sort_add {paths, contents}` and `sort_rescan` (jobs), `sort_send {ids, folders, schema, values, keep, keep_self}`, `sort_update`, `sort_group`, `sort_join`, `sort_split`, `sort_clear`, `sort_files`, `sort_preview`, `sort_commit {mode}` (a job, through import's `plan` and `commit_one`). The workspace can't be changed while its folders are read or its models imported.
+- **What's a model**, in the walk: a folder with a `model.json`; a folder with 3D, slicer or archive files of its own, unless a sub-folder is plainly a model itself; a folder whose sub-folders are all variants or "parts by kind" folders (STL, Images, Renders…). Loose files are grouped by name with the pictures and documents that start the same way; anything else is left over. NAS clutter (`@eaDir`, `#recycle`, `#snapshot`, `$RECYCLE.BIN`, `__MACOSX`, `Thumbs.db`, hidden files) and links are skipped.
+- **Keep folders as subcategories** adds the folder names between the picked folder (or the one below it, unticking "Starting with … itself") and each model to the chosen place; they're made as the models are imported.
+- **Decisions carry over** when the folders are read again, by each item's path. A group's sources and imported items stay as they were.
+- **Parts views** (`web/ui/parts.js`) are shared by the model page and the workspace; previews of single files are drawn by `thumb::file_preview` into `<data dir>/previews/` and served as `~preview/<name>.png`; workspace files are served as `~sort/<item>/<file>`.
+- **Duplicates** (`dupes.rs`, page `web/ui/dupes.js`): files of 3D, slicer and archive kinds (not `_media/`) are compared. Files of one size in two or more models get the quick fingerprint (SHA-256 of the size and the first and last 64 KB; a file of 128 KB or less is hashed whole, so its fingerprint is its SHA-256); those whose fingerprints still match get a full SHA-256. A model whose every such file is found in another model, with the same list of contents, is a copy. Hashes go into `model.json` (`hashes: {file: {size, modified, quick, sha256}}`) when the library can be written; models without a `model.json` keep theirs in `<data dir>/duplicates/<library id>-hashes.json`. The last search is in `<data dir>/duplicates/<library id>.json`; the page shows it with models no longer in the library dropped. Commands: `dupes_find` (a job), `dupes_get`, `dupes_set_aside {ids}` (a job), `dupes_empty`.
+- **The copy to keep** is suggested: one in a category before one in Unsorted, then the one with more files, then one with a `model.json`, then the shortest folder path.
+- **Setting aside** is a journal of kind `set-aside` run by `relayout::apply` (categories untouched); each folder goes to `_library/set-aside/<where it was>` and keeps its id (`keep_id`: a `model.json` made on the way uses the model's id), so undo brings it back as it was. *Delete set-aside copies* removes the folder and marks those journals `emptied`, which can't be undone or finished.
+- **Watching** (`watch.rs`, the `notify` crate): the library folder is watched recursively; changes under `_library/` and hidden files are ignored. After 2 s with no more changes, the index is read again (from the cache, so only changed folders are read) and models holding a changed path are read again too (a file added deep in a part folder doesn't change the model folder's time). A model whose `model.json` names a different place than its folder gets `model::set_place`. The check waits for any running job. The page asks `library_changes` every 4 s for a change counter, and `library_changes {check: true}` when the window comes back to the front (at most every 30 s) and every 5 minutes; a change reloads the lists.
+- **Tests:** `sort.rs` (reading a tree, send, group, join, split, keep choices, files of a group), `dupes.rs` (copies found, keep order, hashes kept, a second look reads nothing, set aside, undo, delete), `watch.rs` (one report for a burst, `_library/` ignored), `api.rs` (sorting over two sittings, duplicates through the commands, folders changed outside the app), and page checks 15–19 (rewritten for the workspace), 22b (parts views) and 30–32.
+- Not done: undo of an older set-aside, choosing which files decide a duplicate, a model without a `model.json` keeping its id when moved by hand (it gets one from its new path).

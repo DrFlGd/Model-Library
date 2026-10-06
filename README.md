@@ -10,7 +10,7 @@ The design and the phased plan are in [docs/PLAN.md](docs/PLAN.md). Built on the
 
 ## Status
 
-**Phase 4:** editing categories. Build each category's tree of subcategories, as deep as each branch needs; rename, merge or move them, and the model folders on disk move to match, with a preview first and undo afterwards. Edit several models' details at once. Before that: viewing models with a 3D viewer, parts and variants (Phase 3), importing and sorting (Phase 2), browsing and search (Phase 1). Large collections come in Phase 5.
+**Phase 5:** large collections. The Import page sorts a whole folder tree as it is on disk: it proposes which folders and files are models, shows them as folders, a list, a grid or by category, and you send one or many to a category (keeping their folders as subcategories if you like), group loose files into one model, and import what's sorted, over as many sittings as it takes. A model's files show as folders, one list, by type or as a grid of previews. A Duplicates page finds copies by their contents and sets extra ones aside, with undo. Folders changed outside the app show up by themselves. Before that: editing categories (Phase 4), viewing models (Phase 3), importing (Phase 2), browsing and search (Phase 1). A server (Docker) version comes in Phase 6.
 
 Installers are on the [releases page](https://github.com/DrFlGd/Model-Library/releases) once CI publishes one (Windows: the `-setup.exe`, unsigned, so SmartScreen asks once; Linux: the `.deb` or `.AppImage`).
 

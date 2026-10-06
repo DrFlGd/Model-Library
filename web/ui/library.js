@@ -40,6 +40,30 @@ export async function loadOverview() {
   }
 }
 
+/** Changes made outside the app: the core watches the library folder and reads
+ *  what changed; the page asks every few seconds whether it found anything, and
+ *  asks it to look itself when the window comes back to the front (network
+ *  shares don't always report changes) and every few minutes. */
+export function watchLibrary() {
+  let rev = null;
+  let looked = Date.now();
+  const seen = async (r) => {
+    const changed = rev !== null && r.rev !== rev;
+    rev = r.rev;
+    if (changed) await loadOverview();
+  };
+  const ask = (check) => {
+    if (!ui.get().library || ui.get().firstRun) return;
+    if (check) looked = Date.now();
+    api("library_changes", check ? { check: true } : {}).then(seen, () => {});
+  };
+  setInterval(() => { if (!document.hidden) ask(false); }, 4000);
+  setInterval(() => ask(true), 5 * 60 * 1000);
+  const back = () => { if (!document.hidden && Date.now() - looked > 30000) ask(true); };
+  window.addEventListener("focus", back);
+  document.addEventListener("visibilitychange", back);
+}
+
 /** Read every model folder again (`full`: ignore what's cached on this computer). */
 export async function rescan(full = true) {
   const done = addJob("Reading the library again");

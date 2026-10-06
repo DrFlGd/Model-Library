@@ -266,7 +266,7 @@ pub fn list(lib: &Library) -> Vec<Value> {
 /// What Home shows about a change.
 pub fn brief(j: &Value) -> Value {
     let moves = j["moves"].as_array().map_or(0, Vec::len);
-    json!({ "id": j["id"], "label": j["label"], "created": j["created"], "state": j["state"], "direction": j["direction"], "models": moves, "error": j["error"] })
+    json!({ "id": j["id"], "kind": j["kind"], "label": j["label"], "created": j["created"], "state": j["state"], "direction": j["direction"], "models": moves, "error": j["error"] })
 }
 
 /// Subcategory folders after a change: `target`'s are made, `other`'s that
@@ -345,13 +345,64 @@ fn place(lib: &Library, from: &str, to: &str, m: &Value, side: &str, p: &Progres
         .flatten()
         .map(|n| json!({ "name": n }))
         .collect();
-    let defaults = json!({ "name": m["name"], "authors": if authors.is_empty() { Value::Null } else { json!(authors) } });
+    let mut defaults = json!({ "name": m["name"], "authors": if authors.is_empty() { Value::Null } else { json!(authors) } });
+    if m["keep_id"] == true {
+        defaults["id"] = m["id"].clone(); // a copy set aside comes back as it was
+    }
     model::update(&dest, &json!({}), &defaults)?;
     model::set_place(
         &dest,
         m[format!("schema_{side}")].as_str(),
         &path_in(m, side),
     )?;
+    Ok(())
+}
+
+/// A finished change's categories: the schema saved (or removed) and its folders made.
+fn apply_schema(lib: &Library, j: &Value) -> Result<()> {
+    match &j["schema_after"] {
+        Value::Null => schema::remove(lib, j["schema"].as_str().unwrap_or(""))?,
+        v => schema::save(lib, v)?,
+    }
+    sync_folders(lib, &j["schema_after"], &j["schema_before"])?;
+    let (before, after) = (
+        j["schema_before"]["folder"].as_str(),
+        j["schema_after"]["folder"].as_str(),
+    );
+    if let Some(b) = before.filter(|b| Some(*b) != after) {
+        let _ = std::fs::remove_dir(lib.root().join(b)); // only if empty
+    }
+    if let Some(a) = after {
+        std::fs::create_dir_all(lib.root().join(a))?;
+    }
+    Ok(())
+}
+
+/// An undone change's categories: the schema as it was, and its folders.
+fn undo_schema(lib: &Library, j: &Value) -> Result<()> {
+    schema::save(lib, &j["schema_before"])?;
+    sync_folders(lib, &j["schema_before"], &j["schema_after"])?;
+    let (before, after) = (
+        j["schema_before"]["folder"].as_str(),
+        j["schema_after"]["folder"].as_str(),
+    );
+    if let Some(a) = after.filter(|a| Some(*a) != before) {
+        let _ = std::fs::remove_dir(lib.root().join(a));
+    }
+    if let Some(b) = before {
+        std::fs::create_dir_all(lib.root().join(b))?;
+    }
+    Ok(())
+}
+
+/// The set-aside copies were deleted: those changes can't be undone or finished.
+pub fn mark_emptied(lib: &Library) -> Result<()> {
+    for mut j in list(lib) {
+        if j["kind"] == "set-aside" && j["state"] != "undone" && j["state"] != "emptied" {
+            j["state"] = json!("emptied");
+            write(lib, &j)?;
+        }
+    }
     Ok(())
 }
 
@@ -366,6 +417,9 @@ pub fn apply(
     let mut j = read(lib, id)?;
     if j["state"] == "done" {
         bail!("That change is already done.");
+    }
+    if j["state"] == "emptied" {
+        bail!("Those copies were deleted already.");
     }
     j["state"] = json!("running");
     j["direction"] = json!("apply");
@@ -398,20 +452,9 @@ pub fn apply(
         }
     }
     if failed.is_empty() {
-        match &j["schema_after"] {
-            Value::Null => schema::remove(lib, j["schema"].as_str().unwrap_or(""))?,
-            v => schema::save(lib, v)?,
-        }
-        sync_folders(lib, &j["schema_after"], &j["schema_before"])?;
-        let (before, after) = (
-            j["schema_before"]["folder"].as_str(),
-            j["schema_after"]["folder"].as_str(),
-        );
-        if let Some(b) = before.filter(|b| Some(*b) != after) {
-            let _ = std::fs::remove_dir(lib.root().join(b)); // only if empty
-        }
-        if let Some(a) = after {
-            std::fs::create_dir_all(lib.root().join(a))?;
+        // setting copies aside moves folders only; categories stay as they are
+        if j["kind"] != "set-aside" {
+            apply_schema(lib, &j)?;
         }
         j["state"] = json!("done");
         j.as_object_mut().unwrap().shift_remove("error");
@@ -440,6 +483,9 @@ pub fn undo(
     let mut j = read(lib, id)?;
     if j["state"] == "undone" {
         bail!("That change was already undone.");
+    }
+    if j["state"] == "emptied" {
+        bail!("Those copies were deleted, so setting them aside can't be undone.");
     }
     if let Some(newer) = list(lib).into_iter().find(|x| x["state"] != "undone") {
         if newer["id"] != j["id"] {
@@ -485,17 +531,8 @@ pub fn undo(
         }
     }
     if failed.is_empty() {
-        schema::save(lib, &j["schema_before"])?;
-        sync_folders(lib, &j["schema_before"], &j["schema_after"])?;
-        let (before, after) = (
-            j["schema_before"]["folder"].as_str(),
-            j["schema_after"]["folder"].as_str(),
-        );
-        if let Some(a) = after.filter(|a| Some(*a) != before) {
-            let _ = std::fs::remove_dir(lib.root().join(a));
-        }
-        if let Some(b) = before {
-            std::fs::create_dir_all(lib.root().join(b))?;
+        if j["kind"] != "set-aside" {
+            undo_schema(lib, &j)?;
         }
         j["state"] = json!("undone");
         j.as_object_mut().unwrap().shift_remove("error");

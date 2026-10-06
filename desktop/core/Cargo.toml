@@ -17,6 +17,7 @@ base64 = "0.22"
 crc32fast = "1"
 flate2 = "1"
 hex = "0.4"
+notify = { version = "8", default-features = false }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }

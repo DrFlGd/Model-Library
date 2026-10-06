@@ -5,7 +5,7 @@ import { useStore } from "../lib/store.js";
 import { ui } from "./state.js";
 import { ctx, routeHash, schemaScope } from "./context.js";
 import { api, isDesktop, openLibrary, showLibraryFolder, rescan, followJob, loadOverview, toast, undoChange, finishChange } from "./library.js";
-import { sortFolder } from "./import.js";
+import { sortFolder } from "./sort.js";
 
 const TREE = `_library/                  the app's own files
 Unsorted/                  models with no category yet
@@ -32,7 +32,7 @@ async function makePreviews() {
   } catch (e) { toast(`Couldn't make previews: ${e.message || e}`, 6000); }
 }
 
-const STATES = { done: "", undone: "undone", running: "interrupted", undoing: "interrupted while undoing", stopped: "stopped partway" };
+const STATES = { done: "", undone: "undone", running: "interrupted", undoing: "interrupted while undoing", stopped: "stopped partway", emptied: "copies deleted" };
 
 /** Category changes recorded in the library: undo the newest; finish or put back an interrupted one. */
 function RecentChanges({ lib, rev }) {
@@ -67,8 +67,9 @@ const NEXT = [
   ["Phase 1", "Categories, model details and search"],
   ["Phase 2", "Importing models: files, folders and ZIPs, moved or copied into place, and moving models between categories"],
   ["Phase 3", "Viewing models: a 3D viewer, parts and variants, previews, pictures, readmes, PDFs and videos"],
-  ["Phase 4", "Editing categories: a tree of subcategories, renamed, merged and moved with folders to match, and undo", true],
-  ["Phase 5", "Large collections: adopting tidy folders in place, finding duplicates, noticing changes made outside the app"],
+  ["Phase 4", "Editing categories: a tree of subcategories, renamed, merged and moved with folders to match, and undo"],
+  ["Phase 5", "Large collections: sorting a whole folder tree as it is, finding duplicates, noticing changes made outside the app", true],
+  ["Phase 6", "Running on a server (Docker) with sign-in, to browse the library from another computer"],
 ];
 
 export function Home() {

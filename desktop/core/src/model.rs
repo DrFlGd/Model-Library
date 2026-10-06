@@ -174,7 +174,8 @@ pub fn path_of(side: &Value) -> Option<Vec<String>> {
 
 /// Write a model's details: `patch` holds details (null removes one) and maybe
 /// "fields" (the schema's own; null removes one). Creates the sidecar (with an id,
-/// `added`, and the given name/category) if the folder has none. Returns the sidecar.
+/// `added`, and the given name/category) if the folder has none; its id is
+/// `defaults.id` when given. Returns the sidecar.
 pub fn update(dir: &Path, patch: &Value, defaults: &Value) -> Result<Value> {
     if !dir.is_dir() {
         bail!("The model's folder {} is gone.", dir.display());
@@ -183,7 +184,10 @@ pub fn update(dir: &Path, patch: &Value, defaults: &Value) -> Result<Value> {
     let now = crate::library::now();
     if side.get("id").and_then(Value::as_str).is_none() {
         side["format"] = json!(FORMAT);
-        side["id"] = json!(new_id());
+        side["id"] = match defaults["id"].as_str() {
+            Some(id) if crate::library::valid_id(id).is_ok() => json!(id),
+            _ => json!(new_id()),
+        };
         side["added"] = json!(now);
         for (k, v) in defaults.as_object().into_iter().flatten() {
             if side.get(k).is_none() && !v.is_null() {

@@ -21,7 +21,7 @@ export function routeFromHash(hash) {
     return `browse:${rest[0] || "all"}`;
   }
   if (first === "model" && rest[0]) return `model:${decodeURIComponent(rest[0])}`;
-  return first === "settings" || first === "import" ? first : "home";
+  return ["settings", "import", "duplicates"].includes(first) ? first : "home";
 }
 
 /** A browse place for a schema and some of its category values. */

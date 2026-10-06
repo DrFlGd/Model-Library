@@ -51,6 +51,9 @@ export function Sidebar() {
           ${unfolded ? html`<${TreeRows} schema=${sc} nodes=${sc.tree} values=${[]} depth=${1} current=${s.route} open=${s.open} />` : null}`;
       })}</ul>` : html`<p class="muted nav-note">None yet.</p>`}
       ${s.library && !s.library.read_only ? html`<button type="button" class="ghost nav-add" id="new-schema" onClick=${() => ui.set({ dialog: { type: "new-schema" }, navOpen: false })}>${Icon.plus(14)} New category…</button>` : null}
-      <ul class="nav-list nav-foot"><${NavLink} route="settings" label="Settings" icon="cog" current=${s.route} /></ul>
+      <ul class="nav-list nav-foot">
+        <${NavLink} route="duplicates" label="Duplicates" icon="stack" current=${s.route} />
+        <${NavLink} route="settings" label="Settings" icon="cog" current=${s.route} />
+      </ul>
     </nav>`;
 }

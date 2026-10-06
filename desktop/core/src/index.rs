@@ -122,6 +122,10 @@ fn read_model(lib: &Library, dir: &Path, schema: Option<&Schema>, cats: &[String
         }
     }
     let dir_mtime = mtime(dir);
+    // model.json records where the model was put; a folder moved by hand differs
+    let moved = side["id"].is_string()
+        && (side["schema"].as_str() != schema.map(|s| s.id.as_str())
+            || (schema.is_some() && model::path_of(&side).as_deref() != Some(cats)));
     let v = json!({
         "id": id,
         "rel": rel,
@@ -138,6 +142,7 @@ fn read_model(lib: &Library, dir: &Path, schema: Option<&Schema>, cats: &[String
         "fields": side["fields"].as_object().cloned().unwrap_or_default(),
         "added": side["added"].as_str().map(String::from).unwrap_or_else(|| crate::library::iso_from_unix((dir_mtime / 1000) as i64)),
         "sidecar": side.get("id").is_some(),
+        "moved": moved,
         "files": summary,
     });
     let mut words: Vec<String> = vec![];
