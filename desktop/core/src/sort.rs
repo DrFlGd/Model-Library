@@ -1450,7 +1450,7 @@ mod tests {
         se.split(&ctx, &bits).unwrap();
         // group loose files and a left one into one model, named after their folder
         let (a, b) = (by_name(&se, "a").id.clone(), by_name(&se, "b").id.clone());
-        let png = s(&src.join("Bits/c.png"));
+        let png = s(&src.join("Bits").join("c.png")); // as the walk writes it, on Windows too
         let g = se
             .group(
                 &ctx,
