@@ -28,6 +28,15 @@ function Title({ scope, overview }) {
     i === crumbs.length - 1 ? label : html`<a href=${routeHash(`browse:${schemaScope(id, path)}`)}>${label}</a>`}`)}</h1>`;
 }
 
+/** Changing the category shown: edit it (its own page), or rename or move a value. */
+function PlaceTools({ scope, readOnly }) {
+  if (readOnly || !scope.startsWith("schema:")) return null;
+  const [id, ...values] = scope.slice(7).split("/").map(decodeURIComponent);
+  return values.length
+    ? html`<button type="button" class="ghost" id="rename-node" title="Rename, merge or move this category, with its folders" onClick=${() => ui.set({ dialog: { type: "rename-node", schemaId: id, path: values } })}>${Icon.edit(14)} Rename or move…</button>`
+    : html`<button type="button" class="ghost" id="edit-schema" title="Edit this category: its levels, folders and fields" onClick=${() => ui.set({ dialog: { type: "edit-schema", schemaId: id } })}>${Icon.edit(14)} Edit category…</button>`;
+}
+
 /** A model's cover picture, or an icon for the kind of files it has. */
 export function Cover({ model, cls = "" }) {
   const [failed, setFailed] = useState(false);
@@ -85,6 +94,7 @@ function Picked({ models }) {
     <h2 class="insp-title">${models.length} models picked</h2>
     <p class="insp-sub">Ctrl or Cmd click adds or removes one; Shift click picks a run.</p>
     <div class="insp-actions">
+      <button type="button" class="ghost" id="edit-picked" disabled=${readOnly || !models.length} onClick=${() => ui.set({ dialog: { type: "edit-picked", models } })}>${Icon.edit(15)} Edit details…</button>
       <button type="button" class="ghost" id="move-picked" disabled=${readOnly || !models.length} onClick=${() => ui.set({ dialog: { type: "move-models", models } })}>${Icon.move(15)} Move to category…</button>
       <button type="button" class="ghost" onClick=${() => ui.set({ picked: [] })}>Clear</button>
     </div>
@@ -126,7 +136,8 @@ export function Browser() {
     <div class="browse-main">
       <div class="browse-head">
         <div class="browse-title"><${Title} scope=${scope} overview=${s.overview} />
-          <span class="browse-count" id="browse-count" data-q=${result ? result.q : null}>${result ? `${result.total} ${result.total === 1 ? "model" : "models"}` : ""}</span></div>
+          <span class="browse-count" id="browse-count" data-q=${result ? result.q : null}>${result ? `${result.total} ${result.total === 1 ? "model" : "models"}` : ""}</span>
+          <${PlaceTools} scope=${scope} readOnly=${!!s.library?.read_only} /></div>
         <label class="search small browse-search"><span class="visually-hidden">Search this place</span>
           <input id="search" type="search" value=${text} placeholder="Search names, authors, tags… or author:jo tag:presupported" autocomplete="off" spellcheck="false"
             onInput=${(e) => setText(e.target.value)} /></label>

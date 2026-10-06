@@ -20,8 +20,8 @@ The code started as a trimmed copy of [Claude Grid Workshop](https://github.com/
 
 | Path | What |
 | --- | --- |
-| `web/` | The front end (no build step). `app.js`: start-up and routing. `web/ui/`: Preact + htm islands (`shell.js` mounts them; `sidebar.js` with the schema trees, `home.js` with the first-start screen, `browser.js` for the model grid/list and search, `details.js` for the selected model, `dialogs.js` for New category, Edit details and Move, `import.js` for the Import page, `modelpage.js` for a model's own page (viewer, part tree, variants, pictures, documents, videos), `category.js` for the category picker, `settings.js`, `chrome.js` for the top bar and status bar, `library.js` for library and model actions, `state.js` for shared state and preferences). `viewer.js`: the three.js viewer (three.js in `web/vendor/three/`, loaded only on a model's page). `platform.js` / `platform-desktop.js`: the seam between the page and the backend (desktop now, a server later). |
-| `desktop/core/` | Rust, no GUI: `api.rs` (the app's command table, `App::call`), `library.rs` (the library folder: `_library/library.json`, format number, read-only for newer formats), `schema.rs` (schema files, folder-name templates), `model.rs` (a model folder: its files, kinds, cover, `model.json`), `index.rs` (finding models, the in-memory index and its cache on this computer, search), `import.rs` (proposing models from folders, destinations, moving or copying with SHA-256 checks, moving between categories), `mesh.rs` (reading STL, OBJ and 3MF into triangles; binary STL for the viewer), `archive.rs` (listing and reading ZIP entries), `thumb.rs` (choosing a model's main 3D file and drawing its preview, a small software renderer, PNG out), `docs.rs` (readmes as safe HTML), `config.rs` (what stays on this computer). `src/bin/modlib-cli.rs`: `library-info`, `library-scan`, `make-test-library` and `serve` (the backend over HTTP, for tests now and the Docker build later). |
+| `web/` | The front end (no build step). `app.js`: start-up and routing. `web/ui/`: Preact + htm islands (`shell.js` mounts them; `sidebar.js` with the schema trees, `home.js` with the first-start screen, `browser.js` for the model grid/list and search, `details.js` for the selected model, `dialogs.js` for New category, Edit details and Move, `import.js` for the Import page, `categories.js` for renaming, merging and editing categories and editing several models, `modelpage.js` for a model's own page (viewer, part tree, variants, pictures, documents, videos), `category.js` for the category picker, `settings.js`, `chrome.js` for the top bar and status bar, `library.js` for library and model actions, `state.js` for shared state and preferences). `viewer.js`: the three.js viewer (three.js in `web/vendor/three/`, loaded only on a model's page). `platform.js` / `platform-desktop.js`: the seam between the page and the backend (desktop now, a server later). |
+| `desktop/core/` | Rust, no GUI: `api.rs` (the app's command table, `App::call`), `library.rs` (the library folder: `_library/library.json`, format number, read-only for newer formats), `schema.rs` (schema files, folder-name templates), `model.rs` (a model folder: its files, kinds, cover, `model.json`), `index.rs` (finding models, the in-memory index and its cache on this computer, search), `import.rs` (proposing models from folders, destinations, moving or copying with SHA-256 checks, moving between categories), `mesh.rs` (reading STL, OBJ and 3MF into triangles; binary STL for the viewer), `archive.rs` (listing and reading ZIP entries), `thumb.rs` (choosing a model's main 3D file and drawing its preview, a small software renderer, PNG out), `docs.rs` (readmes as safe HTML), `relayout.rs` (category changes that move folders: plan, journal in `_library/journal/`, apply, undo), `config.rs` (what stays on this computer). `src/bin/modlib-cli.rs`: `library-info`, `library-scan`, `make-test-library` and `serve` (the backend over HTTP, for tests now and the Docker build later). |
 | `desktop/src-tauri/` | The Tauri app: a thin layer over `api.rs`, plus dialogs, the file manager and the `library://` protocol. Version in `tauri.conf.json`. |
 | `tools/` | `build_desktop.py` (web/ to `build/desktop/ui`, fonts), `set_version.py`, `vendor_preact.py`. |
 | `tests/` | `desktop_page.py` (acceptance test: the page + the real backend through `modlib-cli serve` and `tauri_shim.js`, in Chromium), `desktop_ui.py` (WebDriver on the built app). |
@@ -47,7 +47,7 @@ The sandbox has a network allowlist and is reset between sessions.
 
 ### Known limitations now
 
-- ZIPs are read in place (listed, and their 3D files and pictures shown) but never unpacked; 7z and RAR are kept as archives and not opened. Schemas can be made but not changed (Phase 4).
+- ZIPs are read in place (listed, and their 3D files and pictures shown) but never unpacked; 7z and RAR are kept as archives and not opened. Only the newest category change can be undone; a model folder can't be renamed from the app except through a category's model-folder template.
 - The duplicate check compares file counts and sizes only; no hashing of the library yet (Phase 5's duplicate report).
 - The index lives in memory and is cached per computer (`<data dir>/index/<library id>.json`); 10,000 models take about 1 s to read the first time and under a second after.
 - Previews are drawn by the core's own renderer (`thumb.rs`, flat shaded, no textures or colours from 3MF). Models whose 3D file can't be read get no preview and are tried again by every *Make previews*. G-code and other slicer files aren't shown in 3D.
@@ -58,15 +58,24 @@ The sandbox has a network allowlist and is reset between sessions.
 
 ### Next (roadmap)
 
-Phase 4 in `docs/PLAN.md`: editing categories, with folders moved to match. The owner wants to test Phase 3 in depth before Phase 4 starts.
+Phase 5 in `docs/PLAN.md`: large collections (adopting tidy folders in place, a duplicate report, noticing changes made outside the app). The owner is testing Phases 3 and 4 on a real folder of files first.
 
 ---
 
 ## Unreleased
 
-- **Variant folder names are set in Settings** (owner's request), kept in the library (`library.json` `variant_folders`). The defaults add Sized, Split, FDM and Resin to Presupported, Supported, Unsupported and No supports. A folder is a variant when its name is one of them or holds one as whole words ("Resin 32mm").
+Phase 4 (0.4): editing categories (design in docs/PLAN.md, "Phase 4 design"; notes in "Phase 4 notes").
 
-Phase 3 (0.3): viewing models (design in docs/PLAN.md, "Phase 3 design"; notes in "Phase 3 notes").
+- **Rename or move…** on a category's page (Warhammer 40k › Tyranid): rename it, merge it into one that's already there by giving that name, or move it under another value. A preview shows every folder that moves, and any that would clash and get a number.
+- **Edit category…** on a category's own page: its name, top folder, levels (rename a label, add one with a value for the models already there, remove or reorder), the model folder name (optionally renaming existing folders to match) and its fields. **Delete this category…** moves its models to Unsorted.
+- Every change that moves folders is written to a journal in `_library/journal/` first. **Recent changes** on Home lists them; the newest can be **undone** (folders, model.json categories and the category file all go back). A change that stopped partway can be finished or put back from Home.
+- **Edit details…** for several picked models: add or remove tags, and set authors, licence or the category's fields for all of them.
+
+## 0.3.0 and 0.3.1 (2026-10-06)
+
+- 0.3.1: **Variant folder names are set in Settings** (owner's request), kept in the library (`library.json` `variant_folders`). The defaults add Sized, Split, FDM and Resin to Presupported, Supported, Unsupported and No supports. A folder is a variant when its name is one of them or holds one as whole words ("Resin 32mm").
+
+0.3.0, Phase 3 (0.3): viewing models (design in docs/PLAN.md, "Phase 3 design"; notes in "Phase 3 notes").
 
 - **A model's own page**: double-click a model, press Enter, or use **Open** in its details. A large 3D view (STL, OBJ, 3MF; turn, zoom, pan; 3/4, top and front views; edges; size in mm and triangle count), with tabs for its **Pictures**, **Documents** and **Videos**.
 - **Parts as a tree**: the model's files keep their folders (Helmet, Arms…); click a part to show it. Folders named Presupported, Supported, Unsupported and the like are **variants**: a switch shows one variant's parts (supported first) or all.

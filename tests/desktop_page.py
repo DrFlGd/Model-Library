@@ -19,6 +19,9 @@ Phase 3: a preview drawn on import, variant folder names set in Settings, a mode
 tree and a Presupported/Unsupported switch, a ZIP's entries shown from inside
 it, a readme rendered safely, pictures and "Use as cover", ranged reads of
 library files (video seeking), and Make previews from Home.
+Phase 4: renaming a faction with a preview, undoing it from Home, merging two
+factions, editing a category (a level's label; a new top folder), and editing
+several models' details at once.
 Phase 1: making a schema, hand-made model folders listed under their categories,
 search with typed filters, a model's details and files, editing details into
 model.json, starring, and 10,000 generated models read and searched in time.
@@ -439,6 +442,79 @@ async def phase3(pg):
     await pg.screenshot(path=str(out / "14-previews.png"))
 
 
+async def phase4(pg):
+    t = library / "Wargames/Warhammer 40k"
+    before = sorted(x.name for x in (t / "Tyranid").iterdir())
+    # 25. renaming a faction moves its folders (with a preview first)
+    await pg.goto(B + "#/browse/schema/wargames/Warhammer%2040k/Tyranid")
+    await pg.click("#rename-node")
+    await pg.fill("#rename-faction", "Tyranids")
+    await pg.wait_for_selector("#change-preview[data-moving]")
+    preview = await pg.inner_text("#change-preview")
+    await pg.screenshot(path=str(out / "15-rename.png"))
+    await pg.click("#rename-dialog button[type=submit]")
+    await pg.wait_for_selector("#rename-dialog", state="detached", timeout=60000)
+    await pg.wait_for_function("() => location.hash.includes('Tyranids')")
+    n = await count(pg)
+    after = sorted(x.name for x in (t / "Tyranids").iterdir()) if (t / "Tyranids").is_dir() else []
+    side = json.loads((t / "Tyranids/Hive Guard (Jo Smith)/model.json").read_text())
+    check("renaming a faction moves its folders, after a preview", after == before and not (t / "Tyranid").exists() and side["category"]["faction"] == "Tyranids"
+          and f"{len(before)} model folders move" in preview and n == f"{len(before)} models", (preview, before, after, n))
+
+    # 26. undo from Home
+    await pg.goto(B + "#/")
+    await pg.wait_for_selector("#undo-change")
+    await pg.screenshot(path=str(out / "16-recent-changes.png"))
+    await pg.click("#undo-change")
+    await pg.wait_for_function("() => /Undone/.test(document.querySelector('.toast')?.textContent || '')", timeout=60000)
+    side = json.loads((t / "Tyranid/Hive Guard (Jo Smith)/model.json").read_text())
+    check("the rename is undone from Home", sorted(x.name for x in (t / "Tyranid").iterdir()) == before and not (t / "Tyranids").exists()
+          and side["category"]["faction"] == "Tyranid", side.get("category"))
+
+    # 27. merging: Necrons into Tyranid
+    nec = sorted(x.name for x in (t / "Necrons").iterdir())
+    await pg.goto(B + "#/browse/schema/wargames/Warhammer%2040k/Necrons")
+    await pg.click("#rename-node")
+    await pg.fill("#rename-faction", "Tyranid")
+    await pg.wait_for_selector("#rename-merge")
+    await pg.wait_for_selector("#change-preview[data-moving]")
+    await pg.click("#rename-dialog button[type=submit]")
+    await pg.wait_for_selector("#rename-dialog", state="detached", timeout=60000)
+    merged = sorted(x.name for x in (t / "Tyranid").iterdir())
+    check("a faction renamed to one that exists merges into it", merged == sorted(before + nec) and not (t / "Necrons").exists(), merged)
+
+    # 28. editing the category: a level renamed (nothing moves), then a new top folder (everything moves)
+    await pg.goto(B + "#/browse/schema/wargames")
+    await pg.click("#edit-schema")
+    await pg.fill(".es-level >> nth=1", "Army")
+    await pg.wait_for_selector("#change-preview[data-moving='0']")
+    await pg.click("#edit-schema-dialog button[type=submit]")
+    await pg.wait_for_selector("#edit-schema-dialog", state="detached", timeout=60000)
+    sch = json.loads((library / "_library/schemas/wargames.json").read_text())
+    relabelled = [l["label"] for l in sch["levels"]] == ["Game", "Army"] and t.is_dir()
+    await pg.click("#edit-schema")
+    await pg.fill("#es-folder", "Tabletop")
+    await pg.wait_for_function("() => +document.querySelector('#change-preview')?.dataset.moving > 0")
+    await pg.screenshot(path=str(out / "17-edit-category.png"))
+    await pg.click("#edit-schema-dialog button[type=submit]")
+    await pg.wait_for_selector("#edit-schema-dialog", state="detached", timeout=60000)
+    moved = (library / "Tabletop/Warhammer 40k/Tyranid/Hive Guard (Jo Smith)/guard.stl").is_file() and not (library / "Wargames").exists()
+    check("editing a category relabels a level, and a new top folder moves its models", relabelled and moved, (sch["levels"], moved))
+
+    # 29. several models' details at once
+    await pg.goto(B + "#/browse/schema/wargames")
+    await pg.wait_for_selector(".card:has(.card-name:text-is('Gargoyle'))")
+    await pg.click(".card:has(.card-name:text-is('Gargoyle'))")
+    await pg.click(".card:has(.card-name:text-is('dragon'))", modifiers=["Control"])
+    await pg.click("#edit-picked")
+    await pg.fill("#bulk-tags-add", "painted, display")
+    await pg.fill("#bulk-license", "CC-BY")
+    await pg.click("#bulk-dialog button[type=submit]")
+    await pg.wait_for_selector("#bulk-dialog", state="detached")
+    tags = [json.loads((library / f"Tabletop/Warhammer 40k/Tyranid/{m}/model.json").read_text()) for m in ("Gargoyle", "dragon")]
+    check("several models' details are edited at once", all(x.get("tags") == ["painted", "display"] and x.get("license") == "CC-BY" for x in tags), tags)
+
+
 def big_library():
     """10,000 generated models: read, read again from the cache, searched."""
     big = home / "Big"
@@ -488,6 +564,7 @@ async def main():
             await phase1(pg)
             await phase2(pg)
             await phase3(pg)
+            await phase4(pg)
 
             # 3. renaming the library
             await pg.click('.sidebar a[href="#/settings"]')

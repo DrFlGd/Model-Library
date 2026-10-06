@@ -10,7 +10,7 @@ The design and the phased plan are in [docs/PLAN.md](docs/PLAN.md). Built on the
 
 ## Status
 
-**Phase 3:** viewing models. Each model has its own page: a 3D view of its STL, OBJ and 3MF files (even inside ZIPs), its parts as a tree with a Presupported/Unsupported switch, previews drawn for every card, and its pictures, readmes, PDFs and videos. Before that: importing and sorting into categories (Phase 2), browsing, search and details (Phase 1). Editing categories comes in Phase 4.
+**Phase 4:** editing categories. Rename, merge or move a category, or change its levels and folders, and the model folders on disk move to match, with a preview first and undo afterwards. Edit several models' details at once. Before that: viewing models with a 3D viewer, parts and variants (Phase 3), importing and sorting (Phase 2), browsing and search (Phase 1). Large collections come in Phase 5.
 
 Installers are on the [releases page](https://github.com/DrFlGd/Model-Library/releases) once CI publishes one (Windows: the `-setup.exe`, unsigned, so SmartScreen asks once; Linux: the `.deb` or `.AppImage`).
 

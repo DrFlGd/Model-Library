@@ -263,6 +263,154 @@ pub fn create(lib: &Library, spec: &Value) -> Result<Schema> {
     Ok(Schema::from_value(&v).unwrap())
 }
 
+/// Where a level of an edited schema takes its values from: an old level (by
+/// index), or a value given for every model already there (a new level).
+#[derive(Clone, Debug, PartialEq)]
+pub enum LevelFrom {
+    Old(usize),
+    New(String),
+}
+
+/// The schema file after an edit from the form (name, folder, levels
+/// [{key?, label, value?}], model_folder, fields [{key?, label, type, choices}]),
+/// and where each new level's values come from. Keys of kept levels and fields
+/// stay, so model.json values stay attached.
+pub fn edited(lib: &Library, old: &Schema, spec: &Value) -> Result<(Value, Vec<LevelFrom>)> {
+    let name = spec["name"]
+        .as_str()
+        .unwrap_or(&old.name)
+        .trim()
+        .to_string();
+    if name.is_empty() {
+        bail!("A category needs a name.");
+    }
+    let folder = clean_folder_name(
+        spec["folder"]
+            .as_str()
+            .filter(|f| !f.trim().is_empty())
+            .unwrap_or(&old.folder),
+        60,
+    );
+    if folder.starts_with('_') || folder.eq_ignore_ascii_case("Unsorted") {
+        bail!("The folder {folder} is kept for the app; choose another.");
+    }
+    if list(lib)
+        .iter()
+        .any(|s| s.id != old.id && s.folder.eq_ignore_ascii_case(&folder))
+    {
+        bail!("Another category already uses the folder {folder}.");
+    }
+    let mut levels: Vec<Value> = vec![];
+    let mut from = vec![];
+    for l in spec["levels"].as_array().into_iter().flatten() {
+        let label = l["label"].as_str().unwrap_or("").trim().to_string();
+        if label.is_empty() {
+            continue;
+        }
+        let kept = l["key"]
+            .as_str()
+            .and_then(|k| old.levels.iter().position(|(ok, _)| ok == k));
+        let key = match kept {
+            Some(i) if !levels.iter().any(|x| x["key"] == json!(old.levels[i].0)) => {
+                from.push(LevelFrom::Old(i));
+                old.levels[i].0.clone()
+            }
+            _ => {
+                let value = l["value"].as_str().unwrap_or("").trim().to_string();
+                if value.is_empty() {
+                    bail!("Give the new level {label} a value for the models already there.");
+                }
+                from.push(LevelFrom::New(value));
+                unique_key(
+                    &slug(&label).replace('-', "_"),
+                    levels
+                        .iter()
+                        .map(|l| l["key"].as_str().unwrap_or(""))
+                        .chain(old.levels.iter().map(|(k, _)| k.as_str())),
+                )
+            }
+        };
+        levels.push(json!({ "key": key, "label": label }));
+    }
+    let old_fields = old.fields();
+    let mut fields: Vec<Value> = vec![];
+    for f in spec["fields"].as_array().into_iter().flatten() {
+        let label = f["label"].as_str().unwrap_or("").trim().to_string();
+        if label.is_empty() {
+            continue;
+        }
+        let ty = f["type"]
+            .as_str()
+            .filter(|t| FIELD_TYPES.contains(t))
+            .unwrap_or("text");
+        let key = match f["key"].as_str().filter(|k| {
+            old_fields.iter().any(|o| o["key"] == json!(k))
+                && !fields.iter().any(|x| x["key"] == json!(k))
+        }) {
+            Some(k) => k.to_string(),
+            None => unique_key(
+                &slug(&label).replace('-', "_"),
+                fields
+                    .iter()
+                    .map(|f| f["key"].as_str().unwrap_or(""))
+                    .chain(old_fields.iter().filter_map(|f| f["key"].as_str())),
+            ),
+        };
+        let mut field = json!({ "key": key, "label": label, "type": ty });
+        if ty == "choice" {
+            field["choices"] = json!(choices(&f["choices"]));
+        }
+        fields.push(field);
+    }
+    let template = spec["model_folder"]
+        .as_str()
+        .map(str::trim)
+        .filter(|t| t.contains("{name}"))
+        .unwrap_or(&old.model_folder);
+    let mut v = old.to_json();
+    v["name"] = json!(name);
+    v["folder"] = json!(folder);
+    v["levels"] = json!(levels);
+    v["model_folder"] = json!(template);
+    v["fields"] = json!(fields);
+    v["updated"] = json!(crate::library::now());
+    Ok((v, from))
+}
+
+fn choices(v: &Value) -> Vec<String> {
+    match v {
+        Value::Array(a) => a
+            .iter()
+            .filter_map(|c| c.as_str())
+            .map(|c| c.trim().to_string())
+            .filter(|c| !c.is_empty())
+            .collect(),
+        Value::String(s) => s
+            .split(',')
+            .map(|c| c.trim().to_string())
+            .filter(|c| !c.is_empty())
+            .collect(),
+        _ => vec![],
+    }
+}
+
+/// Write a schema file as it is (a re-layout's before or after).
+pub fn save(lib: &Library, v: &Value) -> Result<()> {
+    let id = v["id"].as_str().unwrap_or("");
+    crate::library::valid_id(id)?;
+    write_json(&schemas_dir(lib).join(format!("{id}.json")), v)
+}
+
+/// Remove a schema file (its folders are left to the caller).
+pub fn remove(lib: &Library, id: &str) -> Result<()> {
+    crate::library::valid_id(id)?;
+    let p = schemas_dir(lib).join(format!("{id}.json"));
+    if p.exists() {
+        std::fs::remove_file(p)?;
+    }
+    Ok(())
+}
+
 fn unique_key<'a>(base: &str, taken: impl Iterator<Item = &'a str> + Clone) -> String {
     let base = if base.is_empty() { "level" } else { base };
     let mut key = base.to_string();

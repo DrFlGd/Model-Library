@@ -320,7 +320,7 @@ pub fn slug(s: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     pub fn temp_dir(name: &str) -> PathBuf {

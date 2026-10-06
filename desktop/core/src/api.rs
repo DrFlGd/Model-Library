@@ -5,7 +5,7 @@
 use crate::config::{AppConfig, Prefs};
 use crate::index::Index;
 use crate::library::{self, Library};
-use crate::{archive, import, mesh, model, schema, thumb};
+use crate::{archive, import, mesh, model, relayout, schema, thumb};
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -704,6 +704,123 @@ impl App {
                 lib.set_favourites(&json!(favs)).map_err(e2s)?;
                 j(json!({ "id": id, "favourites": favs }))
             }
+            "relayout_plan" => {
+                let change = args["change"].clone();
+                let plan = self
+                    .with_index(None, |ix, lib| relayout::plan(lib, ix, &change))
+                    .await?
+                    .map_err(e2s)?;
+                j(relayout::summary(&plan))
+            }
+            "relayout_apply" => {
+                let change = args["change"].clone();
+                let lib = self.library()?;
+                lib.writable().map_err(e2s)?;
+                let plan = self
+                    .with_index(None, |ix, lib| relayout::plan(lib, ix, &change))
+                    .await?
+                    .map_err(e2s)?;
+                let id = relayout::start(&lib, &plan).map_err(e2s)?;
+                j(self.spawn_job(
+                    plan["label"].as_str().unwrap_or("Moving folders"),
+                    move |app, jid, cancel| {
+                        relayout::apply(&lib, &id, &cancel, &|i, n, name| {
+                            app.job_progress(&jid, json!({ "item": i, "items": n, "name": name }))
+                        })
+                    },
+                ))
+            }
+            "journals" => {
+                let lib = self.library()?;
+                j(json!(relayout::list(&lib)
+                    .iter()
+                    .map(relayout::brief)
+                    .collect::<Vec<_>>()))
+            }
+            "journal_undo" | "journal_finish" => {
+                let lib = self.library()?;
+                lib.writable().map_err(e2s)?;
+                let id = arg(&args, "id").map_err(e2s)?.to_string();
+                let undo = cmd == "journal_undo";
+                let label = relayout::read(&lib, &id).map_err(e2s)?["label"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
+                j(self.spawn_job(
+                    &format!("{}: {label}", if undo { "Undoing" } else { "Finishing" }),
+                    move |app, jid, cancel| {
+                        let report = |i: usize, n: usize, name: &str| {
+                            app.job_progress(&jid, json!({ "item": i, "items": n, "name": name }))
+                        };
+                        if undo {
+                            relayout::undo(&lib, &id, &cancel, &report)
+                        } else {
+                            relayout::apply(&lib, &id, &cancel, &report)
+                        }
+                    },
+                ))
+            }
+            "models_update" => {
+                // several models at once: tags added or removed, authors, licence, fields
+                let ids: Vec<String> = args["ids"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect();
+                let edit = args["patch"].clone();
+                let r = self
+                    .with_index(None, |ix, lib| -> Result<Value> {
+                        lib.writable()?;
+                        let list = |k: &str| -> Vec<String> {
+                            match &edit[k] {
+                                Value::String(s) => s.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect(),
+                                Value::Array(a) => a.iter().filter_map(Value::as_str).map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect(),
+                                _ => vec![],
+                            }
+                        };
+                        let (add, remove) = (list("tags_add"), list("tags_remove"));
+                        let (mut saved, mut errors) = (0, vec![]);
+                        for id in &ids {
+                            let Some(m) = ix.get(id) else {
+                                errors.push(json!({ "id": id, "error": "That model isn't in the library any more." }));
+                                continue;
+                            };
+                            let dir = lib.resolve(m.rel())?;
+                            let mut patch = json!({});
+                            if !add.is_empty() || !remove.is_empty() {
+                                let mut tags: Vec<String> = m.v["tags"].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect();
+                                tags.retain(|t| !remove.iter().any(|r| r.eq_ignore_ascii_case(t)));
+                                for a in &add {
+                                    if !tags.iter().any(|t| t.eq_ignore_ascii_case(a)) {
+                                        tags.push(a.clone());
+                                    }
+                                }
+                                patch["tags"] = json!(tags);
+                            }
+                            for k in ["authors", "license"] {
+                                if edit[k].as_str().is_some_and(|v| !v.trim().is_empty()) {
+                                    patch[k] = edit[k].clone();
+                                }
+                            }
+                            if let Some(f) = edit["fields"].as_object().filter(|f| !f.is_empty()) {
+                                patch["fields"] = Value::Object(f.clone());
+                            }
+                            let defaults = json!({ "name": m.v["name"], "schema": m.v["schema"], "category": m.v["category"],
+                                "authors": m.v["authors"].as_array().filter(|a| !a.is_empty()).map(|a| a.iter().map(|n| json!({ "name": n })).collect::<Vec<_>>()) });
+                            match model::update(&dir, &patch, &defaults) {
+                                Ok(_) => saved += 1,
+                                Err(e) => errors.push(json!({ "id": id, "error": e2s(e) })),
+                            }
+                        }
+                        Ok(json!({ "saved": saved, "errors": errors }))
+                    })
+                    .await?
+                    .map_err(e2s)?;
+                self.with_index(Some(false), |_, _| ()).await?;
+                j(r)
+            }
             "schema_create" => {
                 let lib = self.library()?;
                 let s = schema::create(&lib, &args["schema"]).map_err(e2s)?;
@@ -1140,6 +1257,97 @@ mod tests {
         assert_eq!((code, part.as_slice()), (206, &all.1[2..8]));
         assert_eq!(cr.unwrap(), format!("bytes 2-7/{}", all.1.len()));
         assert_eq!(app.library_range(rel, Some("bytes=99999-")).unwrap().0, 416);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[tokio::test]
+    async fn renames_a_category_undoes_it_and_edits_several_models() {
+        let (app, home) = app("relayout");
+        let lib = home.join("Lib");
+        call(
+            &app,
+            "library_open",
+            json!({ "path": lib.display().to_string() }),
+        )
+        .await;
+        call(&app, "schema_create", json!({ "schema": { "name": "Wargames", "levels": [{ "label": "Game" }, { "label": "Faction" }] } })).await;
+        for m in ["Tyrant", "Lictor"] {
+            std::fs::create_dir_all(lib.join(format!("Wargames/40k/Tyranid/{m}"))).unwrap();
+            std::fs::write(lib.join(format!("Wargames/40k/Tyranid/{m}/x.stl")), "solid").unwrap();
+        }
+        call(&app, "library_scan", json!({ "full": true })).await;
+        let change = json!({ "kind": "category", "schema": "wargames", "from": ["40k", "Tyranid"], "to": ["40k", "Tyranids"] });
+        let s = call(&app, "relayout_plan", json!({ "change": change })).await;
+        assert_eq!(
+            (s["moving"].clone(), s["label"].clone()),
+            (json!(2), json!("Renamed Tyranid to Tyranids"))
+        );
+        let done = wait(
+            &app,
+            &call(&app, "relayout_apply", json!({ "change": change })).await,
+        )
+        .await;
+        assert_eq!(done["result"]["state"], "done", "{done}");
+        let q = call(
+            &app,
+            "models_query",
+            json!({ "scope": "schema:wargames/40k/Tyranids" }),
+        )
+        .await;
+        assert_eq!(q["total"], 2);
+        let js = call(&app, "journals", json!({})).await;
+        assert_eq!(js[0]["state"], "done");
+        let done = wait(
+            &app,
+            &call(&app, "journal_undo", json!({ "id": js[0]["id"] })).await,
+        )
+        .await;
+        assert_eq!(done["result"]["state"], "undone", "{done}");
+        assert!(
+            lib.join("Wargames/40k/Tyranid/Tyrant/x.stl").is_file()
+                && !lib.join("Wargames/40k/Tyranids").exists()
+        );
+        // several models at once
+        let q = call(&app, "models_query", json!({ "scope": "all" })).await;
+        let ids: Vec<Value> = q["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["id"].clone())
+            .collect();
+        let r = call(
+            &app,
+            "models_update",
+            json!({ "ids": ids, "patch": { "tags_add": "big, monster", "authors": "Jo Smith" } }),
+        )
+        .await;
+        assert_eq!(r["saved"], 2, "{r}");
+        let q = call(
+            &app,
+            "models_query",
+            json!({ "scope": "all", "q": "tag:monster author:jo" }),
+        )
+        .await;
+        assert_eq!(q["total"], 2);
+        let ids: Vec<Value> = q["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["id"].clone())
+            .collect();
+        call(
+            &app,
+            "models_update",
+            json!({ "ids": ids, "patch": { "tags_remove": ["big"] } }),
+        )
+        .await;
+        let q = call(
+            &app,
+            "models_query",
+            json!({ "scope": "all", "q": "tag:big" }),
+        )
+        .await;
+        assert_eq!(q["total"], 0);
         let _ = std::fs::remove_dir_all(&home);
     }
 }

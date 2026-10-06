@@ -7,11 +7,12 @@ import { routeHash, schemaScope } from "./context.js";
 import { Icon } from "./icons.js";
 import { api, loadOverview, saveDetails, moveModels, toast } from "./library.js";
 import { CategoryPicker } from "./category.js";
+import { RenameNode, EditSchema, DeleteSchema, EditPicked } from "./categories.js";
 
-const FIELD_TYPES = [["text", "Text"], ["number", "Number"], ["choice", "Choice"], ["yes-no", "Yes or no"], ["date", "Date"]];
-const close = () => ui.set({ dialog: null });
+export const FIELD_TYPES = [["text", "Text"], ["number", "Number"], ["choice", "Choice"], ["yes-no", "Yes or no"], ["date", "Date"]];
+export const close = () => ui.set({ dialog: null });
 
-function Dialog({ title, id, onSubmit, busy, error, submitLabel, children }) {
+export function Dialog({ title, id, onSubmit, busy, error, submitLabel, children }) {
   useEffect(() => {
     const key = (e) => { if (e.key === "Escape") close(); };
     addEventListener("keydown", key);
@@ -98,7 +99,7 @@ function NewSchema() {
 }
 
 /** An input for one of the schema's fields, by its type. */
-function FieldInput({ field, value, onChange }) {
+export function FieldInput({ field, value, onChange }) {
   const id = `field-${field.key}`;
   if (field.type === "choice") {
     const choices = field.choices || [];
@@ -207,6 +208,10 @@ export function Dialogs() {
   if (!dialog) return null;
   if (dialog.type === "new-schema") return html`<${NewSchema} />`;
   if (dialog.type === "move-models") return html`<${MoveModels} models=${dialog.models} />`;
+  if (dialog.type === "rename-node") return html`<${RenameNode} schemaId=${dialog.schemaId} path=${dialog.path} />`;
+  if (dialog.type === "edit-schema") return html`<${EditSchema} schemaId=${dialog.schemaId} />`;
+  if (dialog.type === "delete-schema") return html`<${DeleteSchema} schemaId=${dialog.schemaId} />`;
+  if (dialog.type === "edit-picked") return html`<${EditPicked} models=${dialog.models} />`;
   if (dialog.type === "edit-model") return html`<${EditModel} model=${dialog.model} schema=${dialog.schema} key=${dialog.model.id} />`;
   return null;
 }

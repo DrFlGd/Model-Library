@@ -318,3 +318,37 @@ Built 2026-10-06, as designed above, with these details:
 - **Range requests:** `App::library_range` serves both the Tauri protocol and `serve`; an open-ended range returns at most 8 MB, which is what video elements ask for.
 - **Tests:** `api.rs` checks meshes, ZIP entries, readmes, previews and ranges; `desktop_page.py` checks 19–24 (preview on import, the model page with variants, a ZIP's part, covers and a readme, ranges, Make previews). Headless Chromium needs `--enable-unsafe-swiftshader` for WebGL.
 - Not done: textures and 3MF colours in the viewer and previews; slicer files (G-code) in 3D; nested archives; 7z and RAR.
+
+## Phase 4 design
+
+Written before the code (2026-10-06). Goal: change categories after the fact, with the folders on disk following, safely. Done when renaming a faction moves its folders and can be undone.
+
+**One engine: re-layout.** Every change that moves model folders is planned the same way: work out, for each model affected, its new category values and its new folder; show a preview; then run it as a job. The kinds of change:
+
+- **Rename, merge or move a category value.** From a category's page (the browse header), **Rename or move…** edits the values down to it (Warhammer 40k › Tyranid). Renaming Tyranid to Tyranids renames it; renaming it to a value that's already there (Tyranids) merges the two; changing a value higher up moves it (Tyranid under another game). Every model below it gets the new values.
+- **Edit a category** (the schema itself): its name, top folder, levels (rename a label, add a level with a value for the models already there, remove a level, reorder), the model-folder template (with an option to rename existing model folders to match) and its fields. Renaming a level's label or editing fields moves nothing; changing the top folder, levels or (with the option) the template re-lays out its models.
+- **Delete a category**: its models go to Unsorted (their folders keep their names), then its schema file is removed.
+
+**Preview.** Before anything moves, the dialog shows how many models move, a sample of from → to paths, and any name clashes (a model folder that would land on an existing one gets " (2)", as in importing).
+
+**Safety: a journal.** A re-layout writes its plan to `_library/journal/<id>.json` before the first move: every model's old and new folder, schema and category values, and the schema file before and after. Each move is a rename on the same drive (a checked copy otherwise, as in importing); each moved model's `model.json` gets its new category, and a model without one gets one, so its id (and its star) survives the move. Progress is read back from the disk (a move is done when its new folder exists and its old one doesn't), so the journal isn't rewritten for every model. Category folders left empty are removed.
+
+- **Undo**: **Recent changes** on Home lists the last changes; the newest can be undone, which moves every folder back, restores the category values in `model.json` and the schema file as it was.
+- **Interrupted** (the app closed or a move failed partway): Home says so, with **Finish it** and **Put things back**.
+
+**Several models' details at once.** With several models picked (Ctrl or Shift click), **Edit details…** adds or removes tags, and sets authors, licence or a category field, for all of them.
+
+Not in this phase: editing a single model's folder name from the app, merging two schemas, undo for anything older than the newest change.
+
+## Phase 4 notes
+
+Built 2026-10-06, as designed above, with these details:
+
+- **Core:** `relayout.rs` (`plan`, `summary`, `start`, `apply`, `undo`, `list`); `schema::edited` turns the edit form into the new schema file and says where each new level's values come from (an old level, or one value for every model); `schema::save` and `schema::remove`. Commands: `relayout_plan {change}` (the preview), `relayout_apply {change}` (a job), `journals`, `journal_undo {id}`, `journal_finish {id}`, `models_update {ids, patch}`.
+- **The journal** holds the whole plan (each model's id, old and new folder, schema and category values, and the schema file before and after) plus `state` (running, done, stopped, undoing, undone) and `direction`. Journal ids are model-style time-ordered ids, so the newest sorts first; the 20 newest are kept.
+- **Which models are in a change:** a model whose folder and category don't change (a level's label or a field edited) is left out, so editing labels or fields writes only the schema file.
+- **Moves** use import's `destination` (clean folder names, " (2)" on a clash) and `transfer` (a rename, or a checked copy across drives). Every moved model gets a `model.json` if it had none, so its id and star survive; `model::set_place` records its new category. Emptied category folders are removed; an old top folder goes when it's empty.
+- **Undo** is only for the newest change that isn't undone. "Finish it" after an interruption runs the same plan again, skipping models already in place; for an interrupted undo, Home offers to finish undoing or make the change again.
+- **Bulk details** (`models_update`): tags added and removed case-insensitively; authors and licence replace; the category's fields are offered only when every picked model is in the same category.
+- **Tests:** `relayout.rs` (merge with a clash, undo, schema edit with a new top level and renamed folders, only-newest undo, delete), `api.rs` (rename, undo and bulk edit through the commands), and page checks 25–29.
+- Not done: undo of older changes, merging two categories (schemas) into one, renaming one model's folder by itself.

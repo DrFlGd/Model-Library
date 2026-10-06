@@ -162,3 +162,22 @@ export function valuesAt(schema, values, level) {
   }
   return nodes.map((x) => x.value);
 }
+
+/** What a category change would move: { label, models, moving, clashes, sample }. */
+export const planChange = (change) => api("relayout_plan", { change });
+
+async function changeJob(start, label) {
+  const { job } = await start;
+  const done = await followJob(job, label);
+  await loadOverview();
+  if (done.error) throw new Error(done.error);
+  const r = done.result || {};
+  if (r.failed?.length) throw new Error(`${r.failed.length} ${r.failed.length === 1 ? "model" : "models"} couldn't be moved (${r.failed[0].name}: ${r.failed[0].error}). Home has the change: finish it or put things back.`);
+  return r;
+}
+
+/** Make a category change (rename, merge, edit, delete), moving folders to match. */
+export const runChange = (change, label = "Moving folders") => changeJob(api("relayout_apply", { change }), label);
+/** Undo a recorded change, or finish one that was interrupted. */
+export const undoChange = (id) => changeJob(api("journal_undo", { id }), "Undoing");
+export const finishChange = (id) => changeJob(api("journal_finish", { id }), "Finishing");

@@ -1,10 +1,10 @@
 // Home: the open library, how its folders are laid out, and what's coming.
 // Also the first-start screen, which asks where the library should go.
-import { html } from "../lib/html.js";
+import { html, useState, useEffect } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui } from "./state.js";
 import { ctx, routeHash, schemaScope } from "./context.js";
-import { api, isDesktop, openLibrary, showLibraryFolder, rescan, followJob, loadOverview, toast } from "./library.js";
+import { api, isDesktop, openLibrary, showLibraryFolder, rescan, followJob, loadOverview, toast, undoChange, finishChange } from "./library.js";
 import { sortFolder } from "./import.js";
 
 const TREE = `_library/                  the app's own files
@@ -32,16 +32,47 @@ async function makePreviews() {
   } catch (e) { toast(`Couldn't make previews: ${e.message || e}`, 6000); }
 }
 
+const STATES = { done: "", undone: "undone", running: "interrupted", undoing: "interrupted while undoing", stopped: "stopped partway" };
+
+/** Category changes recorded in the library: undo the newest; finish or put back an interrupted one. */
+function RecentChanges({ lib, rev }) {
+  const [list, setList] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api("journals").then(setList, () => setList([])); }, [lib.path, rev]);
+  if (!list?.length) return null;
+  const act = async (fn, id, what) => {
+    setBusy(true);
+    try { await fn(id); toast(what); } catch (e) { toast(e.message || String(e), 8000); } finally { setBusy(false); }
+  };
+  const live = list.filter((j) => j.state !== "undone");
+  const newest = live[0];
+  const broken = list.find((j) => ["running", "undoing", "stopped"].includes(j.state));
+  const when = (t) => (t || "").replace("T", " ").slice(0, 16);
+  return html`<div class="home-card home-counts" id="recent-changes">
+    <h2>Recent changes</h2>
+    ${broken && !lib.read_only ? html`<div class="warn-note" role="alert" id="change-broken">
+      <p>${broken.label} didn't finish${broken.error ? `: ${broken.error}` : "."} Some folders may have moved and others not.</p>
+      ${broken.direction === "undo"
+        ? html`<div class="home-actions"><button type="button" class="primary" id="finish-change" disabled=${busy} onClick=${() => act(undoChange, broken.id, "Undone: the folders are back where they were.")}>Finish undoing it</button>
+          <button type="button" class="ghost" id="putback-change" disabled=${busy} onClick=${() => act(finishChange, broken.id, "The change is made again.")}>Make the change again</button></div>`
+        : html`<div class="home-actions"><button type="button" class="primary" id="finish-change" disabled=${busy} onClick=${() => act(finishChange, broken.id, "Finished.")}>Finish it</button>
+          <button type="button" class="ghost" id="putback-change" disabled=${busy} onClick=${() => act(undoChange, broken.id, "Put things back as they were.")}>Put things back</button></div>`}</div>` : null}
+    <ul class="ls-list">${list.slice(0, 6).map((j) => html`<li key=${j.id} class=${j.state === "undone" ? "muted" : ""}><span>${j.label} <span class="muted">· ${when(j.created)} · ${j.models} ${j.models === 1 ? "model" : "models"}${STATES[j.state] ? ` · ${STATES[j.state]}` : ""}</span></span>
+      ${j === newest && j.state === "done" && !lib.read_only ? html`<button type="button" class="ghost" id="undo-change" disabled=${busy} onClick=${() => act(undoChange, j.id, "Undone: the folders are back where they were.")}>Undo</button>` : null}</li>`)}</ul>
+  </div>`;
+}
+
 const NEXT = [
   ["Phase 0", "The app, its library folder and settings"],
   ["Phase 1", "Categories, model details and search"],
   ["Phase 2", "Importing models: files, folders and ZIPs, moved or copied into place, and moving models between categories"],
-  ["Phase 3", "Viewing models: a 3D viewer, parts and variants, previews, pictures, readmes, PDFs and videos", true],
-  ["Phase 4", "Editing categories, with folders moved to match"],
+  ["Phase 3", "Viewing models: a 3D viewer, parts and variants, previews, pictures, readmes, PDFs and videos"],
+  ["Phase 4", "Editing categories: rename, merge and move them, change their levels, with folders moved to match and undo", true],
+  ["Phase 5", "Large collections: adopting tidy folders in place, finding duplicates, noticing changes made outside the app"],
 ];
 
 export function Home() {
-  const s = useStore(ui, (st) => ({ library: st.library, error: st.libraryError, firstRun: st.firstRun, overview: st.overview }));
+  const s = useStore(ui, (st) => ({ library: st.library, error: st.libraryError, firstRun: st.firstRun, overview: st.overview, rev: st.catalogRev }));
   const lib = s.library;
   if (s.firstRun && !lib) return html`<${FirstRun} />`;
   const ov = s.overview;
@@ -65,6 +96,7 @@ export function Home() {
         ${ov.schemas.length ? html` Categories: ${ov.schemas.map((sc, i) => html`${i ? ", " : ""}<a href=${routeHash(`browse:${schemaScope(sc.id)}`)} key=${sc.id}>${sc.name} (${sc.count})</a>`)}.`
           : html` No categories yet: make one with <b>New category…</b> in the menu, then put model folders under its folder.`}</p>
     </div>` : null}
+    ${lib ? html`<${RecentChanges} lib=${lib} rev=${s.rev} />` : null}
     ${ov?.loose?.length ? html`<div class="home-card home-counts" id="home-loose">
       <h2>Folders not sorted yet</h2>
       <p>These folders are in the library but not in a category or Unsorted, so their models aren't listed. Sort them to give each model a place.</p>
