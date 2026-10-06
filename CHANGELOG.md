@@ -72,6 +72,7 @@ Phase 5: large collections (design in docs/PLAN.md, "Phase 5 design"; notes in "
 - **Duplicates** (new page in the menu): *Look for duplicates* compares files of the same size by a quick fingerprint, then SHA-256, and lists models whose 3D, slicer and archive files are all the same as another's, and files in more than one model. Hashes are kept in each model's `model.json` (`hashes`), so the next look only reads what changed. *Set aside* moves extra copies to `_library/set-aside/` (journalled: undo on the page or on Home); *Delete set-aside copies…* deletes them after asking. Import's duplicate warning now compares fingerprints too, not just sizes.
 - **Changes made outside the app show up by themselves**: the library folder is watched, and checked again when the window comes back to the front and every 5 minutes. A model folder moved by hand keeps its id, star and details, and its `model.json` is told its new place.
 - Tests: the workspace test built a path with a forward slash, so it failed on Windows (the app itself takes paths from the folder walk, which uses the system's separator).
+- Tests: the page test now waits for a grouped model's details before renaming it (it raced on a slow runner).
 
 ## 0.4.2 (2026-10-06)
 

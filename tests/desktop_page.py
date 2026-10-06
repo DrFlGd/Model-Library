@@ -666,6 +666,8 @@ async def phase5(pg):
     await pick_rows(pg, "hinge", "latch")
     await pg.click("#sort-group")
     await pg.wait_for_function("() => /^Grouped/.test(document.querySelector('.toast')?.textContent || '')")
+    # the new model's details (named after its folder) before renaming it
+    await pg.wait_for_function("() => document.querySelector('#details-name')?.value === 'NAS share'")
     await pg.fill("#details-name", "Hinge and latch")
     await pg.press("#details-name", "Tab")
     await pg.wait_for_selector('#sort-list tr[data-name="Hinge and latch"]')
