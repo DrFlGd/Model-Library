@@ -18,17 +18,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 const DEFAULT_TEMPLATE: &str = "{name} ({author})";
 
 /// Kinds that make a file a model on its own when it's loose in a folder.
-fn is_main(name: &str) -> bool {
+pub(crate) fn is_main(name: &str) -> bool {
     matches!(file_kind(name), "model" | "slicer" | "archive")
 }
 
-fn file_name(p: &Path) -> String {
+pub(crate) fn file_name(p: &Path) -> String {
     p.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default()
 }
 
-fn stem(name: &str) -> String {
+pub(crate) fn stem(name: &str) -> String {
     name.rsplit_once('.')
         .map(|(s, _)| s)
         .unwrap_or(name)
@@ -36,7 +36,7 @@ fn stem(name: &str) -> String {
 }
 
 /// "hive_tyrant_v2" -> "hive tyrant v2" (only when the name has no spaces).
-fn tidy(name: &str) -> String {
+pub(crate) fn tidy(name: &str) -> String {
     let n = if name.contains(' ') {
         name.to_string()
     } else {
@@ -46,17 +46,104 @@ fn tidy(name: &str) -> String {
 }
 
 /// Name and author from a folder or file name.
-fn guess_name(raw: &str) -> (String, Option<String>) {
+pub(crate) fn guess_name(raw: &str) -> (String, Option<String>) {
     let (n, a) = parse_folder_name(DEFAULT_TEMPLATE, raw.trim());
     (tidy(&n), a)
 }
 
 /// A proposed model: a folder, or loose files that belong together.
 #[derive(Debug, Clone)]
-struct Found {
-    path: PathBuf,
-    /// Loose files (empty for a folder).
-    files: Vec<PathBuf>,
+pub(crate) struct Found {
+    pub path: PathBuf,
+    /// Loose files, and folders taken as parts (empty for a folder).
+    pub files: Vec<PathBuf>,
+}
+
+/// A candidate's files as they'd be in its model folder: (path in it, size, where
+/// it is now). A folder's files; else each of `files` by its name, a folder's
+/// files under its name.
+pub(crate) fn listing(f: &Found) -> Vec<(String, u64, PathBuf)> {
+    if f.files.is_empty() {
+        return model::list_files(&f.path)
+            .into_iter()
+            .map(|(r, s)| {
+                let p = f.path.join(&r);
+                (r, s, p)
+            })
+            .collect();
+    }
+    let mut out = vec![];
+    for p in &f.files {
+        let name = file_name(p);
+        if p.is_dir() {
+            for (r, s) in model::list_files(p) {
+                let at = p.join(&r);
+                out.push((format!("{name}/{r}"), s, at));
+            }
+        } else {
+            out.push((
+                name,
+                std::fs::metadata(p).map(|m| m.len()).unwrap_or(0),
+                p.clone(),
+            ));
+        }
+    }
+    out.sort();
+    out
+}
+
+/// Models with a given (file count, bytes): (folder, id, name).
+type BySize = HashMap<(u64, u64), Vec<(String, String, Value)>>;
+
+/// What proposing and describing candidates needs from the index, gathered once
+/// (so a job can use it without holding the index, and thousands of candidates
+/// don't each go through every model).
+pub struct Ctx {
+    pub lib: Library,
+    schemas: Vec<Schema>,
+    /// every path each schema has (its tree and its models'), by schema id
+    known: HashMap<String, Vec<Vec<String>>>,
+    /// models by (file count, bytes): (rel, id, name)
+    by_size: BySize,
+    /// model ids by folder
+    rels: HashMap<String, String>,
+}
+
+impl Ctx {
+    pub fn new(lib: &Library, ix: &Index) -> Ctx {
+        let mut by_size: BySize = HashMap::new();
+        for m in &ix.models {
+            if let (Some(c), Some(b)) = (
+                m.v["files"]["count"].as_u64(),
+                m.v["files"]["bytes"].as_u64(),
+            ) {
+                by_size.entry((c, b)).or_default().push((
+                    m.rel().to_string(),
+                    m.id().to_string(),
+                    m.v["name"].clone(),
+                ));
+            }
+        }
+        Ctx {
+            lib: lib.clone(),
+            schemas: ix.schemas.clone(),
+            known: ix
+                .schemas
+                .iter()
+                .map(|s| (s.id.clone(), known_paths(ix, &s.id)))
+                .collect(),
+            by_size,
+            rels: ix
+                .models
+                .iter()
+                .map(|m| (m.rel().to_string(), m.id().to_string()))
+                .collect(),
+        }
+    }
+
+    pub fn schema(&self, id: &str) -> Option<&Schema> {
+        self.schemas.iter().find(|s| s.id == id)
+    }
 }
 
 /// What a folder's contents propose: its sub-folders, and its loose files grouped
@@ -130,7 +217,7 @@ fn known_paths(ix: &Index, schema: &str) -> Vec<Vec<String>> {
 }
 
 /// The schema and category values the folder names on `path` suggest.
-fn guess_category(ix: &Index, path: &Path, name: &str) -> Value {
+fn guess_category(ctx: &Ctx, path: &Path, name: &str) -> Value {
     let mut segs: HashSet<String> = path
         .components()
         .rev()
@@ -139,11 +226,11 @@ fn guess_category(ix: &Index, path: &Path, name: &str) -> Value {
         .collect();
     segs.insert(fold(name));
     let mut best: Option<(usize, &Schema, Vec<String>)> = None;
-    for s in &ix.schemas {
+    for s in &ctx.schemas {
         if (segs.contains(&fold(&s.folder)) || segs.contains(&fold(&s.name))) && best.is_none() {
             best = Some((1, s, vec![]));
         }
-        for p in known_paths(ix, &s.id) {
+        for p in ctx.known.get(&s.id).into_iter().flatten() {
             for d in (0..p.len()).rev() {
                 if segs.contains(&fold(&p[d])) {
                     if best.as_ref().is_none_or(|b| b.0 < d + 2) {
@@ -167,21 +254,10 @@ fn sizes_of(files: &[(String, u64)]) -> Vec<u64> {
 }
 
 /// One candidate as the page shows it.
-fn describe(lib: &Library, ix: &Index, f: &Found) -> Value {
+pub(crate) fn describe(ctx: &Ctx, f: &Found) -> Value {
+    let lib = &ctx.lib;
     let is_dir = f.files.is_empty();
-    let files: Vec<(String, u64)> = if is_dir {
-        model::list_files(&f.path)
-    } else {
-        f.files
-            .iter()
-            .map(|p| {
-                (
-                    file_name(p),
-                    std::fs::metadata(p).map(|m| m.len()).unwrap_or(0),
-                )
-            })
-            .collect()
-    };
+    let files: Vec<(String, u64)> = listing(f).into_iter().map(|(r, s, _)| (r, s)).collect();
     let side = if is_dir {
         model::read_sidecar(&f.path)
     } else {
@@ -209,59 +285,51 @@ fn describe(lib: &Library, ix: &Index, f: &Found) -> Value {
         warnings.push(json!({ "kind": "empty" }));
     }
     if is_dir && !files.iter().any(|(r, _)| !r.contains('/') && is_main(r)) {
-        let parts: Vec<String> = std::fs::read_dir(&f.path)
-            .map(|rd| {
-                rd.flatten()
-                    .filter(|e| e.path().is_dir())
-                    .map(|e| e.file_name().to_string_lossy().into_owned())
-                    .collect()
-            })
-            .unwrap_or_default();
-        let with_models: Vec<String> = parts
+        let mut with_models: Vec<String> = files
+            .iter()
+            .filter(|(r, _)| is_main(r))
+            .filter_map(|(r, _)| r.split_once('/').map(|(p, _)| p.to_string()))
+            .filter(|p| !p.starts_with(['_', '.']))
+            .collect::<HashSet<_>>()
             .into_iter()
-            .filter(|p| {
-                !p.starts_with(['_', '.'])
-                    && files
-                        .iter()
-                        .any(|(r, _)| r.starts_with(&format!("{p}/")) && is_main(r))
-            })
             .collect();
         if with_models.len() >= 2 {
-            let mut with_models = with_models;
             with_models.sort();
             warnings.push(json!({ "kind": "several", "parts": with_models }));
         }
     }
     let rel = lib.relative(&f.path);
-    if let Some(m) = rel
+    if let Some((r, id)) = rel
         .as_ref()
-        .and_then(|r| ix.models.iter().find(|m| m.rel() == r))
+        .and_then(|r| ctx.rels.get_key_value(r.as_str()))
     {
-        warnings.push(json!({ "kind": "in-library", "id": m.id(), "rel": m.rel() }));
+        warnings.push(json!({ "kind": "in-library", "id": id, "rel": r }));
     }
     let count = files.len() as u64;
     let bytes: u64 = files.iter().map(|f| f.1).sum();
     if count > 0 {
         let mine = sizes_of(&files);
-        for m in ix.models.iter().filter(|m| {
-            m.v["files"]["count"] == json!(count)
-                && m.v["files"]["bytes"] == json!(bytes)
-                && Some(m.rel()) != rel.as_deref()
-        }) {
-            if let Ok(dir) = lib.resolve(m.rel()) {
+        for (r, id, name) in ctx
+            .by_size
+            .get(&(count, bytes))
+            .into_iter()
+            .flatten()
+            .filter(|(r, _, _)| Some(r) != rel.as_ref())
+        {
+            if let Ok(dir) = lib.resolve(r) {
                 if sizes_of(&model::list_files(&dir)) == mine {
-                    warnings.push(json!({ "kind": "duplicate", "id": m.id(), "name": m.v["name"], "rel": m.rel() }));
+                    warnings.push(json!({ "kind": "duplicate", "id": id, "name": name, "rel": r }));
                     break;
                 }
             }
         }
     }
     let guess = match (
-        side["schema"].as_str().and_then(|s| ix.schema(s)),
+        side["schema"].as_str().and_then(|s| ctx.schema(s)),
         model::path_of(&side),
     ) {
-        (Some(s), Some(path)) => json!({ "schema": s.id, "values": path }),
-        _ => guess_category(ix, &f.path, &name),
+        (Some(s), Some(path)) => json!({ "schema": s.id, "values": path, "sure": true }),
+        _ => guess_category(ctx, &f.path, &name),
     };
     json!({
         "source": f.path.display().to_string(),
@@ -278,7 +346,7 @@ fn describe(lib: &Library, ix: &Index, f: &Found) -> Value {
 }
 
 /// Refuse the library itself, a folder holding it, and the app's own folders.
-fn check_source(lib: &Library, p: &Path) -> Result<()> {
+pub(crate) fn check_source(lib: &Library, p: &Path) -> Result<()> {
     let p = p
         .canonicalize()
         .with_context(|| format!("{} isn't there", p.display()))?;
@@ -323,7 +391,8 @@ pub fn scan(lib: &Library, ix: &Index, paths: &[PathBuf], contents: bool) -> Res
             bail!("{} isn't there.", p.display());
         }
     }
-    let items: Vec<Value> = found.iter().map(|f| describe(lib, ix, f)).collect();
+    let ctx = Ctx::new(lib, ix);
+    let items: Vec<Value> = found.iter().map(|f| describe(&ctx, f)).collect();
     Ok(json!({ "items": items, "left_behind": left }))
 }
 

@@ -5,7 +5,7 @@ import { useStore } from "../lib/store.js";
 import { ui } from "./state.js";
 import { ctx, routeHash, schemaScope } from "./context.js";
 import { api, isDesktop, openLibrary, showLibraryFolder, rescan, followJob, loadOverview, toast, undoChange, finishChange } from "./library.js";
-import { sortFolder } from "./import.js";
+import { sortFolder } from "./sort.js";
 
 const TREE = `_library/                  the app's own files
 Unsorted/                  models with no category yet

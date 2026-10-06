@@ -9,6 +9,7 @@
 //! - [`index`]: every model in the library, searched in memory, cached on this computer
 //! - [`archive`], [`mesh`], [`thumb`]: inside ZIPs, 3D files as triangles, thumbnails
 //! - [`import`]: proposing models from folders, moving or copying them in, and between categories
+//! - [`sort`]: the sorting workspace: a folder tree read as it is, sorted into the library over several sittings
 //! - [`relayout`]: renaming, merging and editing categories, with folders moved to match (journalled, undoable)
 //! - [`api`]: the commands the page calls
 
@@ -23,6 +24,7 @@ pub mod mesh;
 pub mod model;
 pub mod relayout;
 pub mod schema;
+pub mod sort;
 pub mod thumb;
 
 pub use library::Library;

@@ -10,7 +10,7 @@ import { Home } from "./home.js";
 import { Browser } from "./browser.js";
 import { Dialogs } from "./dialogs.js";
 import { Settings } from "./settings.js";
-import { ImportPage, onDropped } from "./import.js";
+import { ImportPage, onDropped } from "./sort.js";
 import { ModelPage } from "./modelpage.js";
 import { loadOverview } from "./library.js";
 

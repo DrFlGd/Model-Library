@@ -33,21 +33,32 @@ pub fn variant_of(segment: &str) -> Option<&'static str> {
 /// if it's a ZIP). The largest 3D file at the shallowest depth, avoiding
 /// "unsupported" folders when there's another choice.
 pub fn pick_main(dir: &Path) -> Option<(String, Option<String>)> {
-    let files = model::list_files(dir);
+    let files: Vec<(String, u64, PathBuf)> = model::list_files(dir)
+        .into_iter()
+        .map(|(r, s)| {
+            let p = dir.join(&r);
+            (r, s, p)
+        })
+        .collect();
+    pick_main_in(&files)
+}
+
+/// As [`pick_main`], from a list of (path in the model, size, where it is).
+pub fn pick_main_in(files: &[(String, u64, PathBuf)]) -> Option<(String, Option<String>)> {
     let score = |rel: &str, size: u64| {
         let depth = rel.matches('/').count();
         let unsup = rel.split('/').any(|s| variant_of(s) == Some("unsupported"));
         (unsup, depth, std::cmp::Reverse(size))
     };
-    if let Some((rel, _)) = files
+    if let Some((rel, _, _)) = files
         .iter()
-        .filter(|(r, s)| mesh::readable(r) && *s <= MAX_BYTES && !r.starts_with("_thumbs/"))
-        .min_by_key(|(r, s)| score(r, *s))
+        .filter(|(r, s, _)| mesh::readable(r) && *s <= MAX_BYTES && !r.starts_with("_thumbs/"))
+        .min_by_key(|(r, s, _)| score(r, *s))
     {
         return Some((rel.clone(), None));
     }
-    for (rel, _) in files.iter().filter(|(r, _)| archive::is_zip(r)) {
-        let Ok(entries) = archive::list(&dir.join(rel)) else {
+    for (rel, _, at) in files.iter().filter(|(r, _, _)| archive::is_zip(r)) {
+        let Ok(entries) = archive::list(at) else {
             continue;
         };
         let best = entries
@@ -64,15 +75,84 @@ pub fn pick_main(dir: &Path) -> Option<(String, Option<String>)> {
 
 /// A file's bytes, or an entry's inside a ZIP.
 pub fn file_bytes(dir: &Path, rel: &str, entry: Option<&str>) -> Result<Vec<u8>> {
-    let path = dir.join(crate::library::rel_inside(rel)?);
+    bytes_at(&dir.join(crate::library::rel_inside(rel)?), entry)
+}
+
+/// The bytes of the file at `path`, or of an entry inside it (a ZIP).
+pub fn bytes_at(path: &Path, entry: Option<&str>) -> Result<Vec<u8>> {
     match entry {
-        Some(e) => archive::read(&path, e, MAX_BYTES),
+        Some(e) => archive::read(path, e, MAX_BYTES),
         None => {
-            let len = std::fs::metadata(&path)?.len();
+            let len = std::fs::metadata(path)?.len();
             if len > MAX_BYTES {
-                bail!("{rel} is too big to show ({} MB)", len >> 20);
+                bail!(
+                    "{} is too big to show ({} MB)",
+                    path.file_name().unwrap_or_default().to_string_lossy(),
+                    len >> 20
+                );
             }
-            Ok(std::fs::read(&path)?)
+            Ok(std::fs::read(path)?)
+        }
+    }
+}
+
+/// A preview of one 3D file (or an entry in a ZIP), drawn once and kept in
+/// `cache` (the app's data folder, not the library) under a name made from the
+/// file's path, size and time. Returns that name.
+pub fn file_preview(cache: &Path, path: &Path, entry: Option<&str>) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    let meta = std::fs::metadata(path)?;
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut h = Sha256::new();
+    h.update(path.to_string_lossy().as_bytes());
+    h.update([0]);
+    h.update(entry.unwrap_or("").as_bytes());
+    h.update(format!("\0{}\0{modified}", meta.len()).as_bytes());
+    let name = format!("{}.png", &hex::encode(h.finalize())[..32]);
+    let out = cache.join(&name);
+    if out.is_file() {
+        return Ok(name);
+    }
+    let name_in = entry.map(String::from).unwrap_or_else(|| {
+        path.file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned()
+    });
+    if !mesh::readable(&name_in) {
+        bail!("{name_in} can't be drawn");
+    }
+    let bytes = bytes_at(path, entry)?;
+    let png = render(&mesh::read(&name_in, &bytes)?)?;
+    crate::config::write_atomic(&out, &png)?;
+    prune_cache(cache);
+    Ok(name)
+}
+
+/// Keep the preview cache to its newest few thousand pictures.
+fn prune_cache(cache: &Path) {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static WRITES: AtomicU32 = AtomicU32::new(0);
+    if WRITES.fetch_add(1, Ordering::Relaxed) % 200 != 199 {
+        return;
+    }
+    let Ok(rd) = std::fs::read_dir(cache) else {
+        return;
+    };
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = rd
+        .flatten()
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect();
+    const KEEP: usize = 5000;
+    if files.len() > KEEP {
+        files.sort();
+        for (_, p) in &files[..files.len() - KEEP] {
+            let _ = std::fs::remove_file(p);
         }
     }
 }
