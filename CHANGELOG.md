@@ -70,6 +70,7 @@ Phase 1 (0.1): schemas, model details and search (design in docs/PLAN.md, "Phase
 - **Browsing**: each schema's categories are a tree in the menu with counts; All models, Unsorted and Favourites list theirs; a grid or a list, sorted by name, newest or size, with author and tag chips to narrow down.
 - **Search** in each place: words match the start of names, authors, tags, categories and fields, accents ignored; `author:`, `tag:`, `schema:`, a level (`faction:tyranid`) or a field (`scale:32mm`) filter, with quotes for spaces.
 - **Model details** beside the list: cover, authors, category, source, the schema's fields, tags, notes, and the files (parts keep their sub-folders) by kind. **Edit details…** writes `model.json` (keeping keys it doesn't know); a model's first edit or star gives it an id. **Star** keeps favourites in the library.
+- The search test waits for the results of its own search (CI was slower than the debounce).
 - `modlib-cli library-scan` and `make-test-library` time a generated 10,000-model library; the acceptance test checks it opens in seconds and searches in under 100 ms.
 
 ## 0.0.0 (2026-10-06)

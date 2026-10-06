@@ -70,8 +70,9 @@ export function Browser() {
   useEffect(() => {
     if (!s.library) return;
     const n = ++seq.current;
-    api("models_query", { scope, q: s.q, sort: s.sort, limit }).then((r) => { if (n === seq.current) setResult(r); },
-      (e) => { if (n === seq.current) { setResult({ total: 0, items: [], facets: {}, error: e.message || String(e) }); } });
+    const q = s.q;
+    api("models_query", { scope, q, sort: s.sort, limit }).then((r) => { if (n === seq.current) setResult({ ...r, q }); },
+      (e) => { if (n === seq.current) { setResult({ total: 0, items: [], facets: {}, q, error: e.message || String(e) }); } });
   }, [scope, s.q, s.sort, limit, s.rev, s.favs.length, s.library?.path]);
   // typing searches after a short pause
   useEffect(() => {
@@ -91,7 +92,7 @@ export function Browser() {
     <div class="browse-main">
       <div class="browse-head">
         <div class="browse-title"><${Title} scope=${scope} overview=${s.overview} />
-          <span class="browse-count" id="browse-count">${result ? `${result.total} ${result.total === 1 ? "model" : "models"}` : ""}</span></div>
+          <span class="browse-count" id="browse-count" data-q=${result ? result.q : null}>${result ? `${result.total} ${result.total === 1 ? "model" : "models"}` : ""}</span></div>
         <label class="search small browse-search"><span class="visually-hidden">Search this place</span>
           <input id="search" type="search" value=${text} placeholder="Search names, authors, tags… or author:jo tag:presupported" autocomplete="off" spellcheck="false"
             onInput=${(e) => setText(e.target.value)} /></label>

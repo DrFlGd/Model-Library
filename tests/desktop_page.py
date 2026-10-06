@@ -96,9 +96,10 @@ async def count(pg):
 
 
 async def search(pg, q):
+    """Search this place; the count once the results for `q` are shown."""
     await pg.fill("#search", q)
-    await pg.wait_for_timeout(400)
-    return await count(pg)
+    await pg.wait_for_function("q => document.querySelector('#browse-count')?.dataset.q === q", arg=q)
+    return await pg.inner_text("#browse-count")
 
 
 async def phase1(pg):
