@@ -79,6 +79,12 @@ export async function renameLibrary(name) {
   await refreshLibrary();
 }
 
+/** Set the folder names that mark variants (null: back to the defaults). */
+export async function setVariantFolders(names) {
+  await api("library_variants", { names });
+  await refreshLibrary();
+}
+
 export function showLibraryFolder() {
   const path = ui.get().library?.path;
   if (path) ctx.platform.library.openPath(path);

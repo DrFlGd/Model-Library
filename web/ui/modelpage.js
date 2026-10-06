@@ -1,7 +1,7 @@
 // A model's own page (docs/PLAN.md, "Phase 3 design"): a large viewer for its 3D
 // files, pictures, documents and videos, and its files as a part tree, with a
-// switch between variant folders (Presupported, Unsupported…). ZIPs unfold into
-// their entries, which open straight from the archive.
+// switch between variant folders (Presupported, Unsupported, Resin… as named in
+// Settings). ZIPs unfold into their entries, which open straight from the archive.
 import { html, useState, useEffect, useRef } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui, resolvedTheme } from "./state.js";
@@ -14,24 +14,35 @@ const MESH = /\.(stl|obj|3mf)$/i;
 const MD = /\.(md|markdown|txt)$/i;
 const VIDEO_OK = /\.(mp4|webm|m4v|mov)$/i;
 
-/** Which variant a folder name is (as the core's thumb::variant_of). */
-export function variantOf(segment) {
-  const s = segment.toLowerCase().replace(/[^a-z0-9]/g, "");
-  if (["presupported", "supported", "withsupports", "supports"].includes(s)) return "supported";
-  if (["unsupported", "nosupports", "nosupport", "withoutsupports"].includes(s)) return "unsupported";
-  return null;
+const words = (s) => s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+
+/** Whether a folder name is a variant: it is one of the library's variant
+ *  names (Settings), or holds one as whole words ("Resin 32mm" holds "Resin"),
+ *  with case, spaces and dashes ignored ("Pre-supported" is "Presupported"). */
+export function isVariant(segment, names) {
+  const fw = words(segment);
+  return names.some((n) => {
+    const tw = words(n);
+    if (!tw.length) return false;
+    if (fw.join("") === tw.join("")) return true;
+    for (let i = 0; i + tw.length <= fw.length; i++) if (tw.every((w, k) => fw[i + k] === w)) return true;
+    return false;
+  });
 }
+
+/** Folders with supports come first (as the core's thumb::variant_of picks previews). */
+const supported = (seg) => ["presupported", "supported", "withsupports", "supports"].includes(seg.toLowerCase().replace(/[^a-z0-9]/g, ""));
 
 /** The variant folder names in a model (e.g. ["Presupported", "Unsupported"]). */
-function variantsIn(files) {
-  const names = new Map();
-  for (const f of files) for (const seg of f.rel.split("/").slice(0, -1)) if (variantOf(seg)) names.set(seg.toLowerCase(), seg);
-  return [...names.values()].sort();
+function variantsIn(files, names) {
+  const found = new Map();
+  for (const f of files) for (const seg of f.rel.split("/").slice(0, -1)) if (isVariant(seg, names)) found.set(seg.toLowerCase(), seg);
+  return [...found.values()].sort((a, b) => supported(b) - supported(a) || a.localeCompare(b));
 }
 
-const inVariant = (rel, variant) => {
+const inVariant = (rel, variant, names) => {
   if (!variant) return true;
-  const segs = rel.split("/").slice(0, -1).filter((s) => variantOf(s));
+  const segs = rel.split("/").slice(0, -1).filter((s) => isVariant(s, names));
   return !segs.length || segs.some((s) => s.toLowerCase() === variant.toLowerCase());
 };
 
@@ -79,7 +90,7 @@ function ZipEntries({ model, f, open, current }) {
   });
 }
 
-function TreeNode({ node, model, open, current, depth }) {
+function TreeNode({ node, model, open, current, depth, names }) {
   // Folders start open two levels down (a variant folder, then its parts).
   const [toggled, setToggled] = useState({});
   const [zipOpen, setZipOpen] = useState({});
@@ -89,8 +100,8 @@ function TreeNode({ node, model, open, current, depth }) {
       <button type="button" class="tree-btn" aria-expanded=${isOpen(d.path) ? "true" : "false"} data-dir=${d.path}
         onClick=${() => setToggled({ ...toggled, [d.path]: !isOpen(d.path) })}>
         <span class="tree-icon">${Icon.folder(13)}</span><span class="tree-name">${d.name}</span>
-        ${variantOf(d.name) ? html`<span class="badge">${variantOf(d.name) === "supported" ? "supports" : "no supports"}</span>` : null}</button>
-      ${isOpen(d.path) ? html`<ul class="tree"><${TreeNode} node=${d} model=${model} open=${open} current=${current} depth=${depth + 1} /></ul>` : null}
+        ${isVariant(d.name, names) ? html`<span class="badge">variant</span>` : null}</button>
+      ${isOpen(d.path) ? html`<ul class="tree"><${TreeNode} node=${d} model=${model} open=${open} current=${current} depth=${depth + 1} names=${names} /></ul>` : null}
     </li>`)}
     ${node.files.map((f) => {
       const t = target(f);
@@ -242,7 +253,7 @@ function Videos({ model, videos, current, setCurrent }) {
 }
 
 export function ModelPage({ id }) {
-  const s = useStore(ui, (st) => ({ rev: st.catalogRev, favs: st.favs, overview: st.overview, readOnly: !!st.library?.read_only }));
+  const s = useStore(ui, (st) => ({ rev: st.catalogRev, favs: st.favs, overview: st.overview, readOnly: !!st.library?.read_only, names: st.library?.variant_folders || [] }));
   const [m, setM] = useState(null);
   const [error, setError] = useState("");
   const [tab, setTab] = useState(null);
@@ -261,13 +272,14 @@ export function ModelPage({ id }) {
   }, [id, s.rev]);
   if (error) return html`<div class="pages"><p class="warn-note" role="alert">${error}</p></div>`;
   if (!m) return html`<div class="pages"></div>`;
-  const variants = variantsIn(m.files_list);
-  const chosen = variant === undefined ? variants.find((v) => variantOf(v) === "supported") || variants[0] || null : variant;
-  const files = m.files_list.filter((f) => inVariant(f.rel, chosen));
+  const names = s.names;
+  const variants = variantsIn(m.files_list, names);
+  const chosen = variant === undefined || (variant && !variants.includes(variant)) ? variants[0] || null : variant;
+  const files = m.files_list.filter((f) => inVariant(f.rel, chosen, names));
   const pictures = files.filter((f) => f.kind === "image").map((f) => ({ file: f.rel }));
   const docs = files.filter((f) => f.kind === "doc").map((f) => ({ file: f.rel }));
   const videos = files.filter((f) => f.kind === "video").map((f) => ({ file: f.rel }));
-  const mainOk = m.main && inVariant(m.main.entry ? m.main.file : m.main.file, chosen);
+  const mainOk = m.main && inVariant(m.main.file, chosen, names);
   const first3d = mainOk ? m.main : (() => { const f = files.find((x) => MESH.test(x.rel)); return f ? { file: f.rel } : null; })();
   const tabs = [["3d", "3D", true], ["pictures", `Pictures (${pictures.length})`, pictures.length], ["docs", `Documents (${docs.length})`, docs.length], ["videos", `Videos (${videos.length})`, videos.length]].filter((t) => t[2]);
   const shown = tab || (first3d ? "3d" : tabs.find((t) => t[0] !== "3d")?.[0] || "3d");
@@ -290,7 +302,7 @@ export function ModelPage({ id }) {
     <div class="mp-body">
       <section class="mp-stage">
         <div class="seg mp-tabs" role="tablist">${tabs.map(([k, label]) => html`<button type="button" role="tab" key=${k} data-tab=${k} aria-pressed=${shown === k ? "true" : "false"} onClick=${() => setTab(k)}>${label}</button>`)}</div>
-        ${shown === "3d" ? html`<${Stage3D} model=${m} current=${cur["3d"] && inVariant(cur["3d"].file, chosen) ? cur["3d"] : first3d} />` : null}
+        ${shown === "3d" ? html`<${Stage3D} model=${m} current=${cur["3d"] && inVariant(cur["3d"].file, chosen, names) ? cur["3d"] : first3d} />` : null}
         ${shown === "pictures" ? html`<${Pictures} model=${m} pictures=${pictures} current=${cur.pictures} setCurrent=${(p) => setCur({ ...cur, pictures: p })} />` : null}
         ${shown === "docs" ? html`<${Documents} model=${m} docs=${docs} current=${cur.docs} setCurrent=${(d) => setCur({ ...cur, docs: d })} />` : null}
         ${shown === "videos" ? html`<${Videos} model=${m} videos=${videos} current=${cur.videos} setCurrent=${(v) => setCur({ ...cur, videos: v })} />` : null}
@@ -302,7 +314,7 @@ export function ModelPage({ id }) {
             <button type="button" aria-pressed=${chosen === null ? "true" : "false"} onClick=${() => setVariant(null)}>All</button>
           </div></div>` : null}
         <div class="field-block"><span class="field-label">Files <span class="muted">${files.length} · ${size(files.reduce((a, f) => a + f.size, 0))}</span></span>
-          <ul class="tree" id="part-tree"><${TreeNode} node=${tree(files)} model=${m} open=${open} current=${cur[shown]} depth=${0} key=${chosen || "all"} /></ul></div>
+          <ul class="tree" id="part-tree"><${TreeNode} node=${tree(files)} model=${m} open=${open} current=${cur[shown]} depth=${0} names=${names} key=${chosen || "all"} /></ul></div>
         ${m.details?.notes ? html`<div class="insp-section"><h3>Notes</h3><p class="insp-note">${m.details.notes}</p></div>` : null}
       </aside>
     </div>

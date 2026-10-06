@@ -349,6 +349,17 @@ impl App {
                 lib.update_meta(json!({ "name": name })).map_err(e2s)?;
                 j(lib.info())
             }
+            "library_variants" => {
+                let lib = self.library()?;
+                let names: Option<Vec<String>> = args["names"].as_array().map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(String::from)
+                        .collect()
+                });
+                lib.set_variant_folders(names.as_deref()).map_err(e2s)?;
+                j(lib.info())
+            }
             "library_scan" => {
                 let full = args["full"].as_bool() == Some(true);
                 j(self.with_index(Some(full), |ix, _| json!({ "models": ix.models.len(), "read": ix.read, "ms": ix.ms as u64 })).await?)
@@ -796,6 +807,16 @@ mod tests {
         assert_eq!(info["name"], "Models A");
         let info = call(&app, "library_rename", json!({ "name": "  Minis " })).await;
         assert_eq!(info["name"], "Minis");
+        assert_eq!(info["variant_folders"][4], "Sized");
+        let info = call(
+            &app,
+            "library_variants",
+            json!({ "names": ["Resin", " FDM ", "resin", ""] }),
+        )
+        .await;
+        assert_eq!(info["variant_folders"], json!(["Resin", "FDM"]));
+        let info = call(&app, "library_variants", json!({ "names": null })).await;
+        assert_eq!(info["variant_folders"].as_array().unwrap().len(), 8);
         assert!(app
             .call("library_rename", json!({ "name": " " }))
             .await

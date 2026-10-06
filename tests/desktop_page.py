@@ -15,7 +15,7 @@ Phase 2: sorting a messy folder through the Import page (proposals, warnings,
 setting categories for several rows, move with a checked copy), adding a model
 folder by copy, Move to category for one and several models, and sorting a loose
 folder found inside the library.
-Phase 3: a preview drawn on import, a model's page with its 3D view, parts as a
+Phase 3: a preview drawn on import, variant folder names set in Settings, a model's page with its 3D view, parts as a
 tree and a Presupported/Unsupported switch, a ZIP's entries shown from inside
 it, a readme rendered safely, pictures and "Use as cover", ranged reads of
 library files (video seeking), and Make previews from Home.
@@ -369,6 +369,26 @@ async def phase3(pg):
     await pg.wait_for_function("() => document.querySelector('#viewer-file')?.textContent === 'Unsupported/Helmet/helmet.stl'")
     dirs = await pg.eval_on_selector_all("#part-tree [data-dir]", "els => els.map(e => e.dataset.dir)")
     check("the variant switch shows that variant's parts", dirs == ["Unsupported", "Unsupported/Helmet"], dirs)
+
+    # 20b. variant names are set in Settings: Resin and FDM folders become a switch
+    put(dest / "FDM/fdm.stl", cube(6))
+    put(dest / "Resin 32mm/resin.stl", cube(7))
+    await pg.goto(B + "#/settings")
+    await pg.wait_for_selector("#variant-names li")
+    defaults = await pg.eval_on_selector_all("#variant-names li span", "els => els.map(e => e.textContent)")
+    await pg.click("#variant-names li:has(span:text-is('FDM')) .chip-x")
+    await pg.wait_for_function("() => ![...document.querySelectorAll('#variant-names li span')].some(e => e.textContent === 'FDM')")
+    await pg.fill("#variant-add", "fdm")
+    await pg.click("#variant-add-btn")
+    await pg.wait_for_function("() => [...document.querySelectorAll('#variant-names li span')].some(e => e.textContent === 'fdm')")
+    stored = json.loads((library / "_library/library.json").read_text()).get("variant_folders")
+    await pg.go_back()
+    await pg.wait_for_selector("#variants")
+    await pg.wait_for_function("() => document.querySelectorAll('#variants button').length === 5")
+    variants = await pg.eval_on_selector_all("#variants button", "els => els.map(e => e.textContent)")
+    check("variant folder names are set in Settings and kept in the library", defaults == ["Presupported", "Supported", "Unsupported", "No supports", "Sized", "Split", "FDM", "Resin"]
+          and stored and stored[-1] == "fdm" and "FDM" not in stored and variants == ["Presupported", "FDM", "Resin 32mm", "Unsupported", "All"], (defaults, stored, variants))
+    await pg.click("#variants button:text-is('Unsupported')")
 
     # 21. a ZIP's entries open from inside it
     await pg.click("#part-tree [data-file='extras.zip']")

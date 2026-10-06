@@ -43,6 +43,18 @@ or synced, and opened again by any version of the app.\n\
 \n\
 The app's search index and caches are kept on each computer, not here.\n";
 
+/// Variant folder names a library starts with (Settings changes them).
+pub const DEFAULT_VARIANTS: &[&str] = &[
+    "Presupported",
+    "Supported",
+    "Unsupported",
+    "No supports",
+    "Sized",
+    "Split",
+    "FDM",
+    "Resin",
+];
+
 #[derive(Clone, Debug)]
 pub struct Library {
     root: PathBuf,
@@ -213,7 +225,42 @@ impl Library {
             "path": self.root.display().to_string(),
             "id": meta["id"], "name": meta["name"], "format": meta["format"], "created": meta["created"],
             "read_only": self.read_only,
+            "variant_folders": self.variant_folders(),
         })
+    }
+
+    /// Folder names that mark a model's variants rather than its parts
+    /// (library.json `variant_folders`, else [`DEFAULT_VARIANTS`]).
+    pub fn variant_folders(&self) -> Vec<String> {
+        match self.meta().get("variant_folders").and_then(Value::as_array) {
+            Some(a) => a
+                .iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect(),
+            None => DEFAULT_VARIANTS.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    /// Set the variant folder names (trimmed, blanks and repeats dropped); None
+    /// goes back to the defaults.
+    pub fn set_variant_folders(&self, names: Option<&[String]>) -> Result<Vec<String>> {
+        let Some(names) = names else {
+            self.update_meta(json!({ "variant_folders": null }))?;
+            return Ok(self.variant_folders());
+        };
+        let mut out: Vec<String> = vec![];
+        for n in names {
+            let n = n.trim();
+            if n.chars().count() > 60 {
+                bail!("A variant folder name can be at most 60 characters.");
+            }
+            if !n.is_empty() && !out.iter().any(|o| o.eq_ignore_ascii_case(n)) {
+                out.push(n.to_string());
+            }
+        }
+        self.update_meta(json!({ "variant_folders": out }))?;
+        Ok(out)
     }
 
     // ------------------------------------------------------------ favourites

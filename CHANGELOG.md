@@ -64,6 +64,8 @@ Phase 4 in `docs/PLAN.md`: editing categories, with folders moved to match. The 
 
 ## Unreleased
 
+- **Variant folder names are set in Settings** (owner's request), kept in the library (`library.json` `variant_folders`). The defaults add Sized, Split, FDM and Resin to Presupported, Supported, Unsupported and No supports. A folder is a variant when its name is one of them or holds one as whole words ("Resin 32mm").
+
 Phase 3 (0.3): viewing models (design in docs/PLAN.md, "Phase 3 design"; notes in "Phase 3 notes").
 
 - **A model's own page**: double-click a model, press Enter, or use **Open** in its details. A large 3D view (STL, OBJ, 3MF; turn, zoom, pan; 3/4, top and front views; edges; size in mm and triangle count), with tabs for its **Pictures**, **Documents** and **Videos**.
