@@ -20,10 +20,10 @@ Wargames/
 
 const NEXT = [
   ["Phase 0", "The app, its library folder and settings"],
-  ["Phase 1", "Schemas, model details and search", true],
+  ["Phase 1", "Categories, model details and search", true],
   ["Phase 2", "Importing models: files, folders and ZIPs, moved or copied into place"],
   ["Phase 3", "Viewing models, their parts, pictures, PDFs and videos"],
-  ["Phase 4", "Editing schemas and categories, with folders moved to match"],
+  ["Phase 4", "Editing categories, with folders moved to match"],
 ];
 
 export function Home() {
@@ -34,8 +34,8 @@ export function Home() {
   return html`<div class="home">
     <div class="home-head">
       <h1>${lib ? lib.name : "Model Library"}</h1>
-      <p>${lib ? html`Your library is in <b>${lib.path}</b>. Models go into folders laid out by your schemas, so the library makes sense in any file manager, with or without this app.`
-        : "Organise your 3D models into folders laid out by your own schemas."}</p>
+      <p>${lib ? html`Your library is in <b>${lib.path}</b>. Models go into folders laid out by your categories, so the library makes sense in any file manager, with or without this app.`
+        : "Organise your 3D models into folders laid out by your own categories."}</p>
     </div>
     ${s.error ? html`<p class="warn-note" role="alert">${s.error}</p>` : null}
     ${lib?.read_only ? html`<p class="warn-note" role="alert">${lib.read_only}</p>` : null}
@@ -47,8 +47,8 @@ export function Home() {
     ${ov ? html`<div class="home-card home-counts" id="home-counts">
       <h2>In this library</h2>
       <p><a href=${routeHash("browse:all")}><b>${ov.all}</b> ${ov.all === 1 ? "model" : "models"}</a>${ov.unsorted ? html`, <a href=${routeHash("browse:unsorted")}>${ov.unsorted} unsorted</a>` : null}.
-        ${ov.schemas.length ? html` Schemas: ${ov.schemas.map((sc, i) => html`${i ? ", " : ""}<a href=${routeHash(`browse:${schemaScope(sc.id)}`)} key=${sc.id}>${sc.name} (${sc.count})</a>`)}.`
-          : html` No schemas yet: make one with <b>New schema…</b> in the menu, then put model folders under its folder.`}</p>
+        ${ov.schemas.length ? html` Categories: ${ov.schemas.map((sc, i) => html`${i ? ", " : ""}<a href=${routeHash(`browse:${schemaScope(sc.id)}`)} key=${sc.id}>${sc.name} (${sc.count})</a>`)}.`
+          : html` No categories yet: make one with <b>New category…</b> in the menu, then put model folders under its folder.`}</p>
     </div>` : null}
     <div class="home-pair">
       <section class="home-card">
@@ -68,7 +68,7 @@ function FirstRun() {
   const def = ctx.platform?.info?.default_library || "";
   return html`<div class="first-run" id="first-run">
     <h1>Where should your library go?</h1>
-    <p>The library is an ordinary folder. Models are sorted into folders inside it by your schemas, with their details saved next to them, so you can move it to another drive or computer and open it again later.</p>
+    <p>The library is an ordinary folder. Models are sorted into folders inside it by your categories, with their details saved next to them, so you can move it to another drive or computer and open it again later.</p>
     <p>Choose an empty folder for a new library, or a folder that already is one.</p>
     <div class="home-actions">
       ${def ? html`<button type="button" class="primary" id="use-default" onClick=${() => openLibrary(def)}>Use ${def}</button>` : null}

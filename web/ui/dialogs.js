@@ -53,15 +53,15 @@ function NewSchema() {
       await loadOverview();
       close();
       location.hash = routeHash(`browse:${schemaScope(s.id)}`);
-      toast(`Made the schema ${s.name}, in the folder ${s.folder}.`);
+      toast(`Made the category ${s.name}, in the folder ${s.folder}.`);
     } catch (e) {
       setError(e.message || String(e));
     } finally {
       setBusy(false);
     }
   };
-  return html`<${Dialog} title="New schema" id="schema-dialog" onSubmit=${submit} busy=${busy} error=${error} submitLabel="Make schema">
-    <p class="muted">A schema is a kind of model with its own top folder. Its levels are the folders below that, and every model gets a folder at the bottom.</p>
+  return html`<${Dialog} title="New category" id="schema-dialog" onSubmit=${submit} busy=${busy} error=${error} submitLabel="Make category">
+    <p class="muted">A category is a kind of model with its own top folder, such as Wargames. Its levels are the folders below that (Game, Faction), and every model gets a folder at the bottom.</p>
     <div class="form-two">
       <label class="field-block"><span>Name</span>
         <input id="schema-name" type="text" required maxlength="60" placeholder="Wargames" value=${name} onInput=${(e) => setName(e.target.value)} /></label>

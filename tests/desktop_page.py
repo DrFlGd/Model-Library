@@ -114,13 +114,16 @@ async def phase1(pg):
     await pg.locator(".schema-field-type").nth(0).select_option("choice")
     await pg.locator(".schema-field-choices").nth(0).fill("28mm, 32mm")
     preview = await pg.inner_text("#schema-preview")
+    head = await pg.inner_text(".sidebar .nav-head")
+    dtitle = await pg.inner_text("#schema-dialog h2")
     await pg.screenshot(path=str(out / "05-new-schema.png"))
     await pg.click("#schema-dialog button[type=submit]")
     await pg.wait_for_selector("#schema-dialog", state="detached")
     await pg.wait_for_function("() => location.hash === '#/browse/schema/wargames'")
     schema = json.loads((library / "_library/schemas/wargames.json").read_text())
-    check("a schema is made from the menu", (library / "Wargames").is_dir() and [l["label"] for l in schema["levels"]] == ["Game", "Faction"]
-          and schema["fields"][0]["choices"] == ["28mm", "32mm"] and preview == "Wargames / <Game> / <Faction> / Hive Tyrant (Jo Smith)", (preview, schema))
+    check("a category (schema) is made from the menu", (library / "Wargames").is_dir() and [l["label"] for l in schema["levels"]] == ["Game", "Faction"]
+          and schema["fields"][0]["choices"] == ["28mm", "32mm"] and preview == "Wargames / <Game> / <Faction> / Hive Tyrant (Jo Smith)"
+          and head.lower() == "categories" and dtitle == "New category", (preview, head, dtitle, schema))
 
     # 10. model folders made by hand are found under their categories
     model_folder("Wargames/Warhammer 40k/Tyranid/Hive Tyrant (Jo Smith)", {"body.stl": "solid x", "Arms/left.stl": "solid x", "Arms/right.stl": "solid x", "_media/cover.png": PNG, "readme.pdf": "%PDF"})

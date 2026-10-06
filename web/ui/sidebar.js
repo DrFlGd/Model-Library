@@ -40,7 +40,7 @@ export function Sidebar() {
         <${NavLink} route="browse:unsorted" label="Unsorted" icon="box" count=${ov?.unsorted} current=${s.route} />
         <${NavLink} route="browse:favs" label="Favourites" icon="star" current=${s.route} />
       </ul>
-      <p class="nav-head">Schemas</p>
+      <p class="nav-head">Categories</p>
       ${ov?.schemas?.length ? html`<ul class="nav-list" id="schema-tree">${ov.schemas.map((sc) => {
         const key = sc.id;
         const unfolded = s.open[key] !== false; // schemas start unfolded
@@ -49,7 +49,7 @@ export function Sidebar() {
         return html`<${NavLink} key=${key} route=${`browse:${schemaScope(sc.id)}`} label=${sc.name} icon="layers" count=${sc.count} current=${s.route} toggle=${toggle} />
           ${unfolded ? html`<${TreeRows} schema=${sc} nodes=${sc.tree} values=${[]} depth=${1} current=${s.route} open=${s.open} />` : null}`;
       })}</ul>` : html`<p class="muted nav-note">None yet.</p>`}
-      ${s.library && !s.library.read_only ? html`<button type="button" class="ghost nav-add" id="new-schema" onClick=${() => ui.set({ dialog: { type: "new-schema" }, navOpen: false })}>${Icon.plus(14)} New schema…</button>` : null}
+      ${s.library && !s.library.read_only ? html`<button type="button" class="ghost nav-add" id="new-schema" onClick=${() => ui.set({ dialog: { type: "new-schema" }, navOpen: false })}>${Icon.plus(14)} New category…</button>` : null}
       <ul class="nav-list nav-foot"><${NavLink} route="settings" label="Settings" icon="cog" current=${s.route} /></ul>
     </nav>`;
 }
