@@ -1,0 +1,20 @@
+[package]
+name = "modlib-core"
+description = "Library folder, metadata and commands for the Model Library desktop app"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "modlib_core"
+
+[[bin]]
+name = "modlib-cli"
+path = "src/bin/modlib-cli.rs"
+
+[dependencies]
+anyhow = "1"
+hex = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "time"] }

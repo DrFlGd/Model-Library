@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Model Library</title>
+  <meta name="description" content="Organise large collections of 3D model files into a folder library laid out by your own schemas.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,400..800&display=swap">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/">
+      <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8.5l9-4.5 9 4.5-9 4.5z"/><path d="M3 12.5l9 4.5 9-4.5"/><path d="M3 16.5l9 4.5 9-4.5" class="accent"/></svg>
+      <span>Model Library</span>
+    </a>
+    <span class="topbar-spacer"></span>
+    <div id="topbuttons" class="topbuttons"></div>
+  </header>
+
+  <div class="app">
+    <div id="sidebar-root" class="sidebar-root"></div>
+    <div id="main-root" class="app-main"></div>
+  </div>
+  <footer id="statusbar" class="statusbar"></footer>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <noscript><p>Model Library needs JavaScript.</p></noscript>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
