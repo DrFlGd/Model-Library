@@ -106,3 +106,46 @@ export async function saveDetails(model, patch) {
   await loadOverview();
   return v;
 }
+
+/** Wait for a background job (importing), showing it in the status bar.
+ *  `onProgress(job)` sees each poll. Resolves with the finished job. */
+export async function followJob(id, label, onProgress) {
+  const done = addJob(label, () => api("job_cancel", { id }));
+  try {
+    for (;;) {
+      const job = await api("job", { id });
+      onProgress?.(job);
+      const p = job.progress || {};
+      if (p.items) done.update(`${label}: ${Math.min(p.item + 1, p.items)} of ${p.items}`);
+      if (job.done) return job;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  } finally {
+    done();
+  }
+}
+
+/** Move models into a category (schema id and level values), or to Unsorted (schema null). */
+export async function moveModels(ids, schema, values) {
+  const r = await api("models_move", { ids, schema, values });
+  const remap = Object.fromEntries(r.moved.map((m) => [m.id, m.new_id]));
+  ui.set((s) => ({ favs: r.favourites, picked: [], selection: remap[s.selection] || s.selection }));
+  await loadOverview();
+  return r;
+}
+
+/** The values a schema already has at `level`, below the chosen values above it. */
+export function valuesAt(schema, values, level) {
+  let nodes = schema?.tree || [];
+  for (let i = 0; i < level; i++) {
+    const n = nodes.find((x) => x.value.toLowerCase() === (values[i] || "").trim().toLowerCase());
+    if (!n) {
+      // an unknown value above: offer every value at this depth
+      let all = schema?.tree || [];
+      for (let j = 0; j < level; j++) all = all.flatMap((x) => x.children);
+      return [...new Set(all.map((x) => x.value))].sort();
+    }
+    nodes = n.children;
+  }
+  return nodes.map((x) => x.value);
+}

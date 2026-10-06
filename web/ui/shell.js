@@ -10,12 +10,14 @@ import { Home } from "./home.js";
 import { Browser } from "./browser.js";
 import { Dialogs } from "./dialogs.js";
 import { Settings } from "./settings.js";
+import { ImportPage, onDropped } from "./import.js";
 import { loadOverview } from "./library.js";
 
 function Main() {
   const route = useStore(ui, (s) => s.route);
   const blocked = useStore(ui, (s) => s.firstRun && !s.library);
   if (route === "settings" && !blocked) return html`<${Settings} />`;
+  if (route === "import" && !blocked) return html`<${ImportPage} />`;
   if (route.startsWith("browse:") && !blocked) return html`<${Browser} key=${route} />`;
   return html`<${Home} />`;
 }
@@ -33,6 +35,7 @@ export function mountShell(context) {
   mount("statusbar", StatusBar);
   mount("dialog-root", Dialogs);
   loadOverview();
+  context.platform.onDrop?.(onDropped);
 }
 
 export { ui };

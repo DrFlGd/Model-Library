@@ -37,9 +37,26 @@ export function Cover({ model, cls = "" }) {
   return html`<span class=${`thumb thumb-none ${cls}`}>${Icon[KIND_ICON[kind]](40)}</span>`;
 }
 
-function Card({ m, selected, fav }) {
+/** Click: select one. Ctrl or Cmd click: add or remove it. Shift click: the run from the selected one. */
+function choose(e, m, items) {
+  const s = ui.get();
+  if (e.ctrlKey || e.metaKey) {
+    const picked = s.picked.length ? s.picked : s.selection ? [s.selection] : [];
+    const next = picked.includes(m.id) ? picked.filter((id) => id !== m.id) : [...picked, m.id];
+    ui.set({ picked: next, selection: next.length === 1 ? next[0] : next.includes(s.selection) ? s.selection : next[next.length - 1] || null });
+  } else if (e.shiftKey && s.selection) {
+    const ids = items.map((x) => x.id);
+    const [a, b] = [ids.indexOf(s.selection), ids.indexOf(m.id)].sort((x, y) => x - y);
+    if (a < 0) ui.set({ selection: m.id, picked: [] });
+    else ui.set({ picked: ids.slice(a, b + 1) });
+  } else {
+    ui.set({ selection: m.id, picked: [] });
+  }
+}
+
+function Card({ m, selected, fav, items }) {
   return html`<div class="card" role="option" tabindex="0" data-model=${m.id} aria-selected=${selected ? "true" : "false"}
-    onClick=${() => ui.set({ selection: m.id })} onKeyDown=${(e) => { if (e.key === "Enter") ui.set({ selection: m.id }); }}>
+    onClick=${(e) => choose(e, m, items)} onKeyDown=${(e) => { if (e.key === "Enter") ui.set({ selection: m.id, picked: [] }); }}>
     <${Cover} model=${m} />
     ${fav ? html`<span class="card-fav" title="Favourite">${Icon.star(14, true)}</span>` : null}
     <span class="card-name">${m.name}</span>
@@ -48,9 +65,9 @@ function Card({ m, selected, fav }) {
   </div>`;
 }
 
-function Row({ m, selected, fav }) {
+function Row({ m, selected, fav, items }) {
   return html`<div class="row" role="option" tabindex="0" data-model=${m.id} aria-selected=${selected ? "true" : "false"}
-    onClick=${() => ui.set({ selection: m.id })} onKeyDown=${(e) => { if (e.key === "Enter") ui.set({ selection: m.id }); }}>
+    onClick=${(e) => choose(e, m, items)} onKeyDown=${(e) => { if (e.key === "Enter") ui.set({ selection: m.id, picked: [] }); }}>
     <${Cover} model=${m} cls="thumb-sm" />
     <span class="row-name">${m.name}${fav ? html` <span class="badge-star">${Icon.star(12, true)}</span>` : null}</span>
     <span class="row-author">${m.authors.join(", ")}</span>
@@ -58,8 +75,22 @@ function Row({ m, selected, fav }) {
   </div>`;
 }
 
+/** Several models picked: what can be done to all of them. */
+function Picked({ models }) {
+  const readOnly = useStore(ui, (st) => !!st.library?.read_only);
+  return html`<aside class="inspector" aria-label="Picked models" id="picked-panel">
+    <h2 class="insp-title">${models.length} models picked</h2>
+    <p class="insp-sub">Ctrl or Cmd click adds or removes one; Shift click picks a run.</p>
+    <div class="insp-actions">
+      <button type="button" class="ghost" id="move-picked" disabled=${readOnly || !models.length} onClick=${() => ui.set({ dialog: { type: "move-models", models } })}>${Icon.move(15)} Move to category…</button>
+      <button type="button" class="ghost" onClick=${() => ui.set({ picked: [] })}>Clear</button>
+    </div>
+    <ul class="insp-files">${models.map((m) => html`<li key=${m.id}><span>${m.name}</span><span class="muted">${m.path.join(" › ") || "Unsorted"}</span></li>`)}</ul>
+  </aside>`;
+}
+
 export function Browser() {
-  const s = useStore(ui, (st) => ({ route: st.route, q: st.q, sort: st.sort, layout: st.layout, selection: st.selection, rev: st.catalogRev, favs: st.favs, overview: st.overview, library: st.library }));
+  const s = useStore(ui, (st) => ({ route: st.route, q: st.q, sort: st.sort, layout: st.layout, selection: st.selection, picked: st.picked, rev: st.catalogRev, favs: st.favs, overview: st.overview, library: st.library }));
   const scope = s.route.slice(7);
   const [text, setText] = useState(s.q);
   const [result, setResult] = useState(null);
@@ -111,12 +142,12 @@ export function Browser() {
         ${result?.error ? html`<p class="warn-note" role="alert">${result.error}</p>` : null}
         ${result && !items.length && !result.error ? html`<div class="empty" id="no-results">${s.q ? "Nothing matches that search here." : scope === "favs" ? "No favourites yet: star a model to keep it here." : "No models here yet."}</div>` : null}
         <div class=${`results ${s.layout === "list" ? "list-view" : "grid-view"}`} role="listbox" aria-label="Models">
-          ${items.map((m) => html`<${View} key=${m.id} m=${m} selected=${s.selection === m.id} fav=${s.favs.includes(m.id)} />`)}
+          ${items.map((m) => html`<${View} key=${m.id} m=${m} items=${items} selected=${s.picked.length > 1 ? s.picked.includes(m.id) : s.selection === m.id} fav=${s.favs.includes(m.id)} />`)}
         </div>
         ${result && result.total > items.length ? html`<button type="button" class="ghost more-btn" onClick=${() => setLimit(limit + PAGE)}>Show more (${result.total - items.length} left)</button>` : null}
       </div>
     </div>
-    <${ModelDetails} id=${s.selection} />
+    ${s.picked.length > 1 ? html`<${Picked} models=${items.filter((m) => s.picked.includes(m.id))} />` : html`<${ModelDetails} id=${s.selection} />`}
   </div>`;
 }
 

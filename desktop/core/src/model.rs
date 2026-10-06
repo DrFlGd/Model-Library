@@ -213,6 +213,26 @@ pub fn update(dir: &Path, patch: &Value, defaults: &Value) -> Result<Value> {
     Ok(side)
 }
 
+/// Record where a model now lives: its schema (None: Unsorted) and category values.
+/// The folder path stays the truth; this keeps model.json in step with it, so a
+/// library re-imported elsewhere knows each model's place.
+pub fn set_place(dir: &Path, schema: Option<&str>, category: &Map<String, Value>) -> Result<Value> {
+    let mut side = read_sidecar(dir);
+    let obj = side.as_object_mut().unwrap();
+    match schema {
+        Some(s) => {
+            obj.insert("schema".into(), json!(s));
+            obj.insert("category".into(), Value::Object(category.clone()));
+        }
+        None => {
+            obj.shift_remove("schema");
+            obj.shift_remove("category");
+        }
+    }
+    write_json(&dir.join(SIDECAR), &side)?;
+    Ok(side)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

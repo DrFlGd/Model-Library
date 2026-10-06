@@ -20,8 +20,8 @@ The code started as a trimmed copy of [Claude Grid Workshop](https://github.com/
 
 | Path | What |
 | --- | --- |
-| `web/` | The front end (no build step). `app.js`: start-up and routing. `web/ui/`: Preact + htm islands (`shell.js` mounts them; `sidebar.js` with the schema trees, `home.js` with the first-start screen, `browser.js` for the model grid/list and search, `details.js` for the selected model, `dialogs.js` for New schema and Edit details, `settings.js`, `chrome.js` for the top bar and status bar, `library.js` for library and model actions, `state.js` for shared state and preferences). `platform.js` / `platform-desktop.js`: the seam between the page and the backend (desktop now, a server later). |
-| `desktop/core/` | Rust, no GUI: `api.rs` (the app's command table, `App::call`), `library.rs` (the library folder: `_library/library.json`, format number, read-only for newer formats), `schema.rs` (schema files, folder-name templates), `model.rs` (a model folder: its files, kinds, cover, `model.json`), `index.rs` (finding models, the in-memory index and its cache on this computer, search), `config.rs` (what stays on this computer). `src/bin/modlib-cli.rs`: `library-info`, `library-scan`, `make-test-library` and `serve` (the backend over HTTP, for tests now and the Docker build later). |
+| `web/` | The front end (no build step). `app.js`: start-up and routing. `web/ui/`: Preact + htm islands (`shell.js` mounts them; `sidebar.js` with the schema trees, `home.js` with the first-start screen, `browser.js` for the model grid/list and search, `details.js` for the selected model, `dialogs.js` for New category, Edit details and Move, `import.js` for the Import page, `category.js` for the category picker, `settings.js`, `chrome.js` for the top bar and status bar, `library.js` for library and model actions, `state.js` for shared state and preferences). `platform.js` / `platform-desktop.js`: the seam between the page and the backend (desktop now, a server later). |
+| `desktop/core/` | Rust, no GUI: `api.rs` (the app's command table, `App::call`), `library.rs` (the library folder: `_library/library.json`, format number, read-only for newer formats), `schema.rs` (schema files, folder-name templates), `model.rs` (a model folder: its files, kinds, cover, `model.json`), `index.rs` (finding models, the in-memory index and its cache on this computer, search), `import.rs` (proposing models from folders, destinations, moving or copying with SHA-256 checks, moving between categories), `config.rs` (what stays on this computer). `src/bin/modlib-cli.rs`: `library-info`, `library-scan`, `make-test-library` and `serve` (the backend over HTTP, for tests now and the Docker build later). |
 | `desktop/src-tauri/` | The Tauri app: a thin layer over `api.rs`, plus dialogs, the file manager and the `library://` protocol. Version in `tauri.conf.json`. |
 | `tools/` | `build_desktop.py` (web/ to `build/desktop/ui`, fonts), `set_version.py`, `vendor_preact.py`. |
 | `tests/` | `desktop_page.py` (acceptance test: the page + the real backend through `modlib-cli serve` and `tauri_shim.js`, in Chromium), `desktop_ui.py` (WebDriver on the built app). |
@@ -47,7 +47,8 @@ The sandbox has a network allowlist and is reset between sessions.
 
 ### Known limitations now
 
-- No importing yet (Phase 2): models are folders put into the library by hand, then *Read the folders again* on Home. Schemas can be made but not changed (Phase 4).
+- Importing reads ZIPs as files: they aren't opened or unpacked (Phase 3 lists what's inside). 7z and RAR are kept as archives too. Schemas can be made but not changed (Phase 4).
+- The duplicate check compares file counts and sizes only; no hashing of the library yet (Phase 5's duplicate report).
 - The index lives in memory and is cached per computer (`<data dir>/index/<library id>.json`); 10,000 models take about 1 s to read the first time and under a second after. Thumbnails aren't generated yet: covers are pictures already in the folder.
 - `Cargo.lock` isn't committed yet: the first CI run makes it (the Tauri crates can't be resolved in a cloud session). Commit `ci-out/Cargo.lock` from the `desktop-ci-linux` branch once it exists.
 - The `library://` protocol reads whole files into memory and has no range requests; videos and large STLs need that (Phase 3).
@@ -56,11 +57,25 @@ The sandbox has a network allowlist and is reset between sessions.
 
 ### Next (roadmap)
 
-Phase 2 in `docs/PLAN.md`: the import wizard (files, folders and ZIPs; moved by default, or copied), placing models by schema, and thumbnails.
+Phase 3 in `docs/PLAN.md`: viewing models (part tree, variants, files inside ZIPs, a 3D viewer, thumbnails, pictures, PDFs and videos).
 
 ---
 
 ## Unreleased
+
+Phase 2 (0.2): importing, and moving models between categories (design in docs/PLAN.md, "Phase 2 design"; notes in "Phase 2 notes").
+
+- **Import** in the menu: *Sort a folder…* proposes a model for each sub-folder and each loose model file or archive (pictures and documents named like it go with it); *Add a model folder…*, *Add a file…*, or dropping folders and files on the window adds each as one model.
+- Each proposal shows its files and warnings (*maybe several models*, with **Split**; *looks like a model already in the library*; *already in the library*), with its name and author read from the folder name or its own `model.json`, and a category guessed from folder names the library already uses.
+- Give each a category and its levels (values already in the library are suggested), author and tags; tick several and use **Set for picked**. The destination folder is shown as you type.
+- **Move** (default) or **Copy**. Moves on the same drive are renames; otherwise every file is copied, checked by SHA-256, and only then is the original deleted. Each imported model gets a `model.json` (keeping the one it brought). Progress shows with a Stop button; a stopped or failed model stays where it was.
+- **Move to category…** on a model (the folder button in its details), or on several picked with Ctrl or Shift click. Folders keep their names; emptied category folders are removed; stars follow.
+- **Home** lists folders in the library that aren't sorted yet, each with **Sort…**.
+- The menu says **Categories** and **New category…** (owner's request); code and files keep "schema".
+
+## 0.1.0 and 0.1.1 (2026-10-06)
+
+0.1.1 renamed schemas to **categories** in the interface (owner's request).
 
 Phase 1 (0.1): schemas, model details and search (design in docs/PLAN.md, "Phase 1 design"; notes in "Phase 1 notes").
 
@@ -70,8 +85,6 @@ Phase 1 (0.1): schemas, model details and search (design in docs/PLAN.md, "Phase
 - **Browsing**: each schema's categories are a tree in the menu with counts; All models, Unsorted and Favourites list theirs; a grid or a list, sorted by name, newest or size, with author and tag chips to narrow down.
 - **Search** in each place: words match the start of names, authors, tags, categories and fields, accents ignored; `author:`, `tag:`, `schema:`, a level (`faction:tyranid`) or a field (`scale:32mm`) filter, with quotes for spaces.
 - **Model details** beside the list: cover, authors, category, source, the schema's fields, tags, notes, and the files (parts keep their sub-folders) by kind. **Edit details…** writes `model.json` (keeping keys it doesn't know); a model's first edit or star gives it an id. **Star** keeps favourites in the library.
-- The search test waits for the results of its own search (CI was slower than the debounce).
-- The interface calls schemas **categories** (owner's request, 2026-10-06): the menu heading is *Categories* and the button *New category…*. Code, files and the `schema:` search filter keep the word schema.
 - `modlib-cli library-scan` and `make-test-library` time a generated 10,000-model library; the acceptance test checks it opens in seconds and searches in under 100 ms.
 
 ## 0.0.0 (2026-10-06)

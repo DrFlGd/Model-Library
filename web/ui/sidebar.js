@@ -36,6 +36,7 @@ export function Sidebar() {
     <nav class=${`sidebar${s.navOpen ? " open" : ""}`} aria-label="Library">
       <ul class="nav-list">
         <${NavLink} route="home" label="Home" icon="home" current=${s.route} />
+        <${NavLink} route="import" label="Import" icon="inbox" current=${s.route} />
         <${NavLink} route="browse:all" label="All models" icon="grid" count=${ov?.all} current=${s.route} />
         <${NavLink} route="browse:unsorted" label="Unsorted" icon="box" count=${ov?.unsorted} current=${s.route} />
         <${NavLink} route="browse:favs" label="Favourites" icon="star" current=${s.route} />

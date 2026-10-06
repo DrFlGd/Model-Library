@@ -241,3 +241,50 @@ Built 2026-10-06, as designed above, with these differences and details:
 - **Search** also matches file names and a schema's field keys (`scale:32mm`); level filters match the start of a value (`faction:space`). Field values that aren't text (numbers, yes or no) are filterable but not searched as words.
 - **Timings** (cloud sandbox, release build, 10,000 generated models): first read about 1 s, reopen from the cache under 1 s, a search with a filter about 5–7 ms; the cache is about 6 MB. CI checks the same with `make-test-library` and `library-scan` in `desktop_page.py` (`--big`).
 - Not done here, as planned: thumbnails (Phase 2), viewing files and parts (Phase 3), changing schemas and `_category.json` inheritance (Phase 4).
+
+## Phase 2 design
+
+Written before the code (2026-10-06). Goal: get models into the library and into their categories. Point the app at a messy folder (on the NAS, a local drive, or one already sitting inside the library), review what it proposes, pick categories, and the files are moved (or copied) into the right folders with a `model.json`. Jerred also asked for **Move to category…** on models already in the library (for example, ones in Unsorted).
+
+Changes from section 7, by decision: ZIPs stay zipped (2026-10-06), so there is no unpacking or staging step; an archive becomes a model folder holding the archive. Thumbnails stay in Phase 3 with the viewer that renders them.
+
+**Sources.** Two ways in, both on the Import page:
+- *Sort a folder…*: the folder's contents are the candidates. Each sub-folder is one model; each loose model file or archive is one model; loose pictures and documents whose name starts the same as a loose model go with it, and other loose files are listed as left behind.
+- *Add a model folder…* / *Add a file…*, or dropping folders and files on the window: each dropped item is one model.
+Folders that are the library itself, or hold it, are refused; folders inside the library are allowed (that's how a messy folder already in the library gets sorted).
+
+**Candidates** show: name and author (from a `model.json` if the folder has one, as when re-importing from another library; else read from the folder or file name by the `{name} ({author})` pattern), a summary of the files by kind and size, and warnings:
+- *Maybe several models*: no model files at its top but two or more sub-folders with model files. It may be one model with parts (an armour set) or a collection; **Split** replaces it with its sub-folders.
+- *Already in the library*: same number of files and the same file sizes as a model already there (cheap: no hashing of the library).
+- *Nothing to import*: no files.
+
+**Category guesses.** If a folder name on the candidate's path (or its own name) equals a known category value, that schema and those levels are suggested (for example `Downloads/Tyranid/Carnifex` suggests Wargames > ? > Tyranid only if Tyranid is already a Faction). A `model.json` with a schema and category wins. Anything unguessed goes to Unsorted unless set.
+
+**The review table.** One row per candidate: include it or not, name, author, category (a schema, or Unsorted) with a box per level (suggesting values already in the library), tags, and the destination folder, worked out by the core as you type (`import_plan`). Tick rows and use **Set for selected** to give many the same category, author or tags. **Move** (default) or **Copy** for the whole import.
+
+**Committing** runs as a background job with progress and a Stop button:
+1. Destination: `<schema folder>/<level values…>/<model folder name>` (`{name} ({author})`, or just the name with no author), each part cleaned for Windows; Unsorted models go in `Unsorted/<name (author)>`. An existing folder gets ` (2)`, ` (3)`…
+2. Move: a rename when on the same drive. Otherwise (and for Copy) every file is copied, each copy checked against the original by SHA-256, and only for a move are the originals deleted once the whole model is copied and checked. A failure leaves the original in place and reports it.
+3. A loose file (or archive) gets a new folder of its own.
+4. `model.json` is written: the details from the table and the folder's own `model.json` if it had one (keys kept), with `added` and the import source recorded (`imported_from`).
+5. The index rereads the library when the job ends.
+
+**Move to category…** on one or several selected models (Ctrl or Shift click picks several) opens the same category picker. The model's folder is renamed into place (same drive), its `model.json` gets the new schema and category (and an id, if it had none; favourites follow), and category folders left empty are removed. The folder keeps its name.
+
+**Unsorted folders on Home.** Folders at the top of the library that aren't a category's folder, `Unsorted` or the app's are listed on Home as *not sorted yet*, each with **Sort…** that opens the Import page on it.
+
+**Done when:** a folder of Printables/MMF-style downloads (folders, loose STLs, ZIPs, an armour set with part folders, a model from another library with its `model.json`, and a duplicate) imports into the right category folders with `model.json`s, by move and by copy, with the copy checked; and models in Unsorted can be moved into categories.
+
+## Phase 2 notes
+
+Built 2026-10-06, as designed above, with these details:
+
+- **Core:** `import.rs` (`scan`, `plan`, `transfer`, `commit_one`, `move_model`, `loose_folders`). Commands: `import_scan {paths, contents}`, `import_plan {items}`, `import_commit {items, mode, force_copy}` (a job), `job {id}`, `jobs`, `job_cancel {id}`, `models_move {ids, schema, values}`; `library_overview` gains `loose`. Jobs follow Grid Workshop's pattern: one import at a time, the page polls `job` every 300 ms, and the index rereads the library when a job ends.
+- **Checked copies:** each file is hashed (SHA-256) while it's copied, the copy is hashed again, and the original of a move is deleted only after the whole model is copied and checked. `force_copy` (tests only) takes that path even on one drive. A stop or failure removes the half-made copy and leaves the original. Loose files are gathered in a hidden `.importing-…` folder next to the destination and renamed into place, so a half-import never shows as a model.
+- **model.json on import:** the details from the table, `imported_from` (the source path), and `schema` and `category` (also written by Move to category, through `model::set_place`). A `model.json` brought from another library keeps its keys; its id is replaced only if this library already uses it.
+- **Move and Copy** is chosen per import, and goes back to Move after each one.
+- **Folder names** keep `{name} ({author})` from the schema; a name already taken gets ` (2)`. Level values and names are cleaned for Windows (`clean_folder_name`), and can't start with `_`.
+- **Guesses:** a category is suggested when a folder name on the source path (or the model's name) equals a value the library already has (its whole path above comes from that model), or names a category's folder. A `model.json` with a schema and category wins.
+- **Drag and drop** uses Tauri's `tauri://drag-drop` event (paths of the dropped items); it can't be exercised by the page test, which uses the Add buttons.
+- **Loose folders** on Home are non-empty top-level folders that aren't a category's, `Unsorted` or the app's; sorting one moves its contents out and leaves the empty folder (no longer listed).
+- Not done: a regroup by dragging rows (Split covers the common case of a collection folder), unpacking archives (decision: ZIPs stay zipped), checking for duplicates by content hash (Phase 5).

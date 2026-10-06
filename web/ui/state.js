@@ -5,7 +5,7 @@ import { createStore } from "../lib/store.js";
 
 export const ui = createStore({
   ready: false,
-  route: "home",           // home | browse:<all|unsorted|favs|schema:<id>/<value>…> | settings
+  route: "home",           // home | browse:<all|unsorted|favs|schema:<id>/<value>…> | settings | import
   library: null,           // the open library's info (path, name, format, read_only)
   libraryError: null,
   recent: [],              // libraries opened before (paths), newest first
@@ -15,8 +15,9 @@ export const ui = createStore({
   sort: "name",            // name | added | size
   layout: "grid",          // grid | list
   selection: null,         // the selected model's id
+  picked: [],              // several models picked with Ctrl or Shift (ids)
   catalogRev: 0,           // bumps when models change (the browse view asks again)
-  dialog: null,            // { type: "new-schema" | "edit-model", ... }
+  dialog: null,            // { type: "new-schema" | "edit-model" | "move-models", ... }
   open: {},                // sidebar tree rows unfolded: { "<schema>/<value>…": true }
   favs: [],
   jobs: [],                // [{ id, label, started, cancel }]

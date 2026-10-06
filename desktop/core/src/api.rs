@@ -5,11 +5,12 @@
 use crate::config::{AppConfig, Prefs};
 use crate::index::Index;
 use crate::library::{self, Library};
-use crate::{model, schema};
+use crate::{import, model, schema};
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 
 /// Where the app keeps things on this computer.
 #[derive(Clone, Debug)]
@@ -27,11 +28,34 @@ pub enum Reply {
     Bytes(Vec<u8>),
 }
 
+/// Long work (importing) runs in the background; the page polls `job`.
+#[derive(Clone, Default)]
+struct Job {
+    id: String,
+    label: String,
+    done: bool,
+    error: Option<String>,
+    result: Value,
+    progress: Value,
+    started: String,
+    cancel: Arc<AtomicBool>,
+}
+
+impl Job {
+    fn to_json(&self) -> Value {
+        json!({ "id": self.id, "label": self.label, "done": self.done, "error": self.error, "result": self.result, "progress": self.progress, "started": self.started })
+    }
+}
+
 pub struct App {
     pub paths: AppPaths,
     library: RwLock<Option<Library>>,
     /// the open library's index, built on first use (one build at a time)
     index: tokio::sync::Mutex<Option<Index>>,
+    jobs: Mutex<Vec<Job>>,
+    job_seq: Mutex<u64>,
+    /// one import at a time
+    busy: tokio::sync::Mutex<()>,
 }
 
 /// What `library()` says before any library was ever opened (the page then asks where).
@@ -54,6 +78,9 @@ impl App {
             paths,
             library: RwLock::new(None),
             index: tokio::sync::Mutex::new(None),
+            jobs: Mutex::new(vec![]),
+            job_seq: Mutex::new(0),
+            busy: tokio::sync::Mutex::new(()),
         }))
     }
 
@@ -123,6 +150,129 @@ impl App {
         Ok(f(g.as_mut().unwrap(), &lib))
     }
 
+    // ------------------------------------------------------------ jobs
+
+    fn start_job(&self, label: &str) -> Job {
+        let mut seq = self.job_seq.lock().unwrap();
+        *seq += 1;
+        let job = Job {
+            id: format!("job{}", *seq),
+            label: label.into(),
+            started: library::now(),
+            ..Default::default()
+        };
+        let mut jobs = self.jobs.lock().unwrap();
+        // keep running jobs and the last few finished ones
+        let finished = jobs.iter().filter(|j| j.done).count();
+        let mut drop_n = finished.saturating_sub(20);
+        jobs.retain(|j| {
+            let gone = j.done && drop_n > 0;
+            if gone {
+                drop_n -= 1;
+            }
+            !gone
+        });
+        jobs.push(job.clone());
+        job
+    }
+
+    fn job_progress(&self, id: &str, progress: Value) {
+        if let Some(j) = self.jobs.lock().unwrap().iter_mut().find(|j| j.id == id) {
+            j.progress = progress;
+        }
+    }
+
+    fn job_done(&self, id: &str, r: Result<Value, String>) {
+        if let Some(j) = self.jobs.lock().unwrap().iter_mut().find(|j| j.id == id) {
+            j.done = true;
+            match r {
+                Ok(v) => j.result = v,
+                Err(e) => j.error = Some(e),
+            }
+        }
+    }
+
+    /// Run `work` on a blocking thread as a job, then read the library again.
+    fn spawn_job<F>(self: &Arc<Self>, label: &str, work: F) -> Value
+    where
+        F: FnOnce(Arc<Self>, String, Arc<AtomicBool>) -> Result<Value> + Send + 'static,
+    {
+        let job = self.start_job(label);
+        let (app, id, cancel) = (self.clone(), job.id.clone(), job.cancel.clone());
+        tokio::spawn(async move {
+            let _g = app.busy.lock().await;
+            let (a, jid) = (app.clone(), id.clone());
+            let r = tokio::task::spawn_blocking(move || work(a, jid, cancel)).await;
+            let r = match r {
+                Ok(r) => r.map_err(e2s),
+                Err(e) => Err(e.to_string()),
+            };
+            let _ = app.with_index(Some(false), |_, _| ()).await;
+            app.job_done(&id, r);
+        });
+        json!({ "job": job.id })
+    }
+
+    /// Import planned items one by one (a failed one doesn't stop the rest).
+    #[allow(clippy::too_many_arguments)]
+    fn run_import(
+        &self,
+        jid: &str,
+        cancel: &AtomicBool,
+        lib: &Library,
+        items: &[Value],
+        dests: &[PathBuf],
+        schemas: &std::collections::HashMap<String, schema::Schema>,
+        ids: &std::collections::HashSet<String>,
+        mv: bool,
+        force_copy: bool,
+    ) -> Vec<Value> {
+        let total_bytes: u64 = items
+            .iter()
+            .map(
+                |it| match it["files"].as_array().filter(|f| !f.is_empty()) {
+                    Some(fs) => fs
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(|f| import::tree_bytes(Path::new(f)))
+                        .sum(),
+                    None => import::tree_bytes(Path::new(it["source"].as_str().unwrap_or(""))),
+                },
+            )
+            .sum();
+        let done_bytes = std::sync::atomic::AtomicU64::new(0);
+        let mut results = vec![];
+        for (i, (it, dest)) in items.iter().zip(dests).enumerate() {
+            let name = it["name"].as_str().unwrap_or("").to_string();
+            let report = |bytes: u64| {
+                self.job_progress(jid, json!({ "item": i, "items": items.len(), "name": name, "bytes": bytes, "total_bytes": total_bytes }));
+            };
+            report(done_bytes.load(Ordering::Relaxed));
+            if cancel.load(Ordering::Relaxed) {
+                results.push(json!({ "source": it["source"], "name": name, "error": "Stopped before this one." }));
+                continue;
+            }
+            let on_bytes = |n: u64| report(done_bytes.fetch_add(n, Ordering::Relaxed) + n);
+            let p = import::Progress {
+                cancel,
+                on_bytes: &on_bytes,
+            };
+            let schema = it["schema"].as_str().and_then(|s| schemas.get(s));
+            match import::commit_one(lib, it, dest, schema, mv, force_copy, ids, &p) {
+                Ok(mut v) => {
+                    v["source"] = it["source"].clone();
+                    v["name"] = json!(name);
+                    results.push(v);
+                }
+                Err(e) => {
+                    results.push(json!({ "source": it["source"], "name": name, "error": e2s(e) }))
+                }
+            }
+        }
+        self.job_progress(jid, json!({ "item": items.len(), "items": items.len(), "bytes": total_bytes, "total_bytes": total_bytes }));
+        results
+    }
+
     pub async fn call(self: &Arc<Self>, cmd: &str, args: Value) -> Result<Reply, String> {
         let j = |v: Value| Ok(Reply::Json(v));
         match cmd {
@@ -177,7 +327,151 @@ impl App {
                 let full = args["full"].as_bool() == Some(true);
                 j(self.with_index(Some(full), |ix, _| json!({ "models": ix.models.len(), "read": ix.read, "ms": ix.ms as u64 })).await?)
             }
-            "library_overview" => j(self.with_index(None, |ix, _| ix.overview()).await?),
+            "library_overview" => j(self
+                .with_index(None, |ix, lib| {
+                    let mut v = ix.overview();
+                    v["loose"] = json!(import::loose_folders(lib, ix));
+                    v
+                })
+                .await?),
+            "import_scan" => {
+                let paths: Vec<PathBuf> = args["paths"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(PathBuf::from)
+                    .collect();
+                if paths.is_empty() {
+                    return Err("Nothing to import.".into());
+                }
+                let contents = args["contents"].as_bool() == Some(true);
+                let r = self
+                    .with_index(None, |ix, lib| import::scan(lib, ix, &paths, contents))
+                    .await?;
+                j(r.map_err(e2s)?)
+            }
+            "import_plan" => {
+                let items = args["items"].as_array().cloned().unwrap_or_default();
+                j(json!(
+                    self.with_index(None, |ix, lib| import::plan(lib, ix, &items))
+                        .await?
+                ))
+            }
+            "import_commit" => {
+                let items: Vec<Value> = args["items"].as_array().cloned().unwrap_or_default();
+                if items.is_empty() {
+                    return Err("Nothing to import.".into());
+                }
+                let mv = args["mode"].as_str() != Some("copy");
+                let force_copy = args["force_copy"].as_bool() == Some(true);
+                self.library()?.writable().map_err(e2s)?;
+                let (plans, schemas, ids) = self
+                    .with_index(None, |ix, lib| {
+                        (
+                            import::plan(lib, ix, &items),
+                            import::schemas_by_id(ix),
+                            import::ids_in_use(ix),
+                        )
+                    })
+                    .await?;
+                if let Some((it, e)) = items
+                    .iter()
+                    .zip(&plans)
+                    .find_map(|(it, p)| p["error"].as_str().map(|e| (it, e)))
+                {
+                    return Err(format!("{}: {e}", it["name"].as_str().unwrap_or("?")));
+                }
+                let dests: Vec<PathBuf> = plans
+                    .iter()
+                    .map(|p| PathBuf::from(p["dest"].as_str().unwrap_or("")))
+                    .collect();
+                let n = items.len();
+                let label = format!(
+                    "{} {n} {}",
+                    if mv { "Moving" } else { "Copying" },
+                    if n == 1 { "model" } else { "models" }
+                );
+                j(self.spawn_job(&label, move |app, jid, cancel| {
+                    let lib = app.library().map_err(|e| anyhow!(e))?;
+                    let results = app.run_import(
+                        &jid, &cancel, &lib, &items, &dests, &schemas, &ids, mv, force_copy,
+                    );
+                    Ok(json!({ "results": results, "mode": if mv { "move" } else { "copy" } }))
+                }))
+            }
+            "job" => {
+                let id = arg(&args, "id").map_err(e2s)?;
+                let jobs = self.jobs.lock().unwrap();
+                j(jobs
+                    .iter()
+                    .find(|x| x.id == id)
+                    .map(Job::to_json)
+                    .ok_or("No such job.")?)
+            }
+            "jobs" => j(json!(self
+                .jobs
+                .lock()
+                .unwrap()
+                .iter()
+                .map(Job::to_json)
+                .collect::<Vec<_>>())),
+            "job_cancel" => {
+                let id = arg(&args, "id").map_err(e2s)?;
+                if let Some(x) = self.jobs.lock().unwrap().iter().find(|x| x.id == id) {
+                    x.cancel.store(true, Ordering::Relaxed);
+                }
+                j(Value::Null)
+            }
+            "models_move" => {
+                let ids: Vec<String> = args["ids"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect();
+                let schema_id = args["schema"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .map(String::from);
+                let values: Vec<String> = args["values"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|v| v.as_str().unwrap_or("").to_string())
+                    .collect();
+                let lib = self.library()?;
+                lib.writable().map_err(e2s)?;
+                let r = self
+                    .with_index(None, |ix, lib| -> Result<Value> {
+                        let schema = match &schema_id {
+                            Some(id) => Some(ix.schema(id).cloned().ok_or_else(|| anyhow!("There's no category {id} any more."))?),
+                            None => None,
+                        };
+                        let mut favs: Vec<Value> = lib.favourites().as_array().cloned().unwrap_or_default();
+                        let mut moved = vec![];
+                        let mut errors = vec![];
+                        for id in &ids {
+                            match import::move_model(lib, ix, id, schema.as_ref(), &values) {
+                                Ok(dest) => {
+                                    let new_id = model::read_sidecar(&dest)["id"].clone();
+                                    for f in favs.iter_mut().filter(|f| f.as_str() == Some(id)) {
+                                        *f = new_id.clone();
+                                    }
+                                    moved.push(json!({ "id": id, "new_id": new_id, "rel": lib.relative(&dest) }));
+                                }
+                                Err(e) => errors.push(json!({ "id": id, "error": e2s(e) })),
+                            }
+                        }
+                        lib.set_favourites(&json!(favs))?;
+                        Ok(json!({ "moved": moved, "errors": errors, "favourites": favs }))
+                    })
+                    .await?
+                    .map_err(e2s)?;
+                self.with_index(Some(false), |_, _| ()).await?;
+                j(r)
+            }
             "models_query" => {
                 let favs: Vec<String> =
                     serde_json::from_value(self.library()?.favourites()).unwrap_or_default();
@@ -466,6 +760,83 @@ mod tests {
         std::fs::write(lib.join("Unsorted/A b/x.txt"), "hi").unwrap();
         assert_eq!(app.library_file("/Unsorted/A%20b/x.txt").unwrap(), b"hi");
         assert!(app.library_file("../config/config.json").is_err());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[tokio::test]
+    async fn imports_as_a_job_and_moves_between_categories() {
+        let (app, home) = app("import");
+        let lib = home.join("Lib");
+        call(
+            &app,
+            "library_open",
+            json!({ "path": lib.display().to_string() }),
+        )
+        .await;
+        call(&app, "schema_create", json!({ "schema": { "name": "Wargames", "levels": [{ "label": "Game" }, { "label": "Faction" }] } })).await;
+        let src = home.join("Downloads");
+        std::fs::create_dir_all(src.join("Tyrant (Jo)")).unwrap();
+        std::fs::write(src.join("Tyrant (Jo)/t.stl"), "solid").unwrap();
+        std::fs::write(src.join("benchy.stl"), "b").unwrap();
+        let scan = call(
+            &app,
+            "import_scan",
+            json!({ "paths": [src.display().to_string()], "contents": true }),
+        )
+        .await;
+        let mut items: Vec<Value> = scan["items"].as_array().unwrap().clone();
+        assert_eq!(items.len(), 2);
+        items[0]["schema"] = json!("wargames");
+        items[0]["values"] = json!(["40k", "Tyranid"]);
+        let plan = call(&app, "import_plan", json!({ "items": items })).await;
+        assert_eq!(plan[0]["rel"], "Wargames/40k/Tyranid/Tyrant (Jo)");
+        assert_eq!(plan[1]["rel"], "Unsorted/benchy");
+        let job = call(
+            &app,
+            "import_commit",
+            json!({ "items": items, "mode": "move", "force_copy": true }),
+        )
+        .await;
+        let id = job["job"].as_str().unwrap().to_string();
+        let mut done = Value::Null;
+        for _ in 0..200 {
+            done = call(&app, "job", json!({ "id": id })).await;
+            if done["done"] == true {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(done["error"], Value::Null, "{done}");
+        assert_eq!(done["result"]["results"].as_array().unwrap().len(), 2);
+        assert!(
+            lib.join("Wargames/40k/Tyranid/Tyrant (Jo)/t.stl").is_file()
+                && !src.join("benchy.stl").exists()
+        );
+        let ov = call(&app, "library_overview", json!({})).await;
+        assert_eq!(
+            (ov["all"].clone(), ov["unsorted"].clone()),
+            (json!(2), json!(1))
+        );
+        // star the Unsorted one, then sort it into a category: the star follows
+        let q = call(&app, "models_query", json!({ "scope": "unsorted" })).await;
+        let bid = q["items"][0]["id"].as_str().unwrap().to_string();
+        let star = call(&app, "model_star", json!({ "id": bid, "on": true })).await;
+        let bid = star["id"].as_str().unwrap().to_string();
+        let r = call(
+            &app,
+            "models_move",
+            json!({ "ids": [bid], "schema": "wargames", "values": ["40k", "Tyranid"] }),
+        )
+        .await;
+        assert_eq!(r["moved"][0]["rel"], "Wargames/40k/Tyranid/benchy");
+        assert_eq!(r["favourites"], json!([bid]));
+        let q = call(
+            &app,
+            "models_query",
+            json!({ "scope": "schema:wargames/40k/Tyranid" }),
+        )
+        .await;
+        assert_eq!(q["total"], 2);
         let _ = std::fs::remove_dir_all(&home);
     }
 }

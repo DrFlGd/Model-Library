@@ -5,7 +5,8 @@ import { useStore } from "../lib/store.js";
 import { ui } from "./state.js";
 import { routeHash, schemaScope } from "./context.js";
 import { Icon } from "./icons.js";
-import { api, loadOverview, saveDetails, toast } from "./library.js";
+import { api, loadOverview, saveDetails, moveModels, toast } from "./library.js";
+import { CategoryPicker } from "./category.js";
 
 const FIELD_TYPES = [["text", "Text"], ["number", "Number"], ["choice", "Choice"], ["yes-no", "Yes or no"], ["date", "Date"]];
 const close = () => ui.set({ dialog: null });
@@ -165,10 +166,47 @@ function EditModel({ model, schema }) {
   <//>`;
 }
 
+/** Move one or several models to a category (or Unsorted). Their folders keep their names. */
+function MoveModels({ models }) {
+  const overview = useStore(ui, (s) => s.overview);
+  const first = models[0];
+  const same = models.every((m) => m.schema === first.schema);
+  const [schema, setSchema] = useState(same ? first.schema : null);
+  const [values, setValues] = useState(same ? [...(first.path || [])] : []);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const sc = overview?.schemas?.find((s) => s.id === schema);
+  const where = sc ? [sc.folder, ...sc.levels.map((l, i) => values[i]?.trim() || `<${l.label}>`)].join(" / ") : "Unsorted";
+  const submit = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const r = await moveModels(models.map((m) => m.id), schema, values);
+      if (r.errors.length) {
+        setError(r.errors.map((e) => e.error).join(" "));
+      } else {
+        close();
+        toast(`Moved ${r.moved.length === 1 ? models[0].name : `${r.moved.length} models`} to ${sc ? [sc.name, ...values].join(" › ") : "Unsorted"}.`);
+      }
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return html`<${Dialog} title=${models.length === 1 ? `Move ${first.name}` : `Move ${models.length} models`} id="move-dialog" onSubmit=${submit} busy=${busy} error=${error} submitLabel="Move">
+    <p class="muted">${models.length === 1 ? "Its folder moves" : "Their folders move"} into the category's folder and ${models.length === 1 ? "keeps its" : "keep their"} name. Category folders left empty are removed.</p>
+    <div class="field-block"><span class="field-label">Category</span>
+      <${CategoryPicker} overview=${overview} schema=${schema} values=${values} idPrefix="move" onChange=${(s, v) => { setSchema(s); setValues(v); }} /></div>
+    <div class="field-block"><span class="field-label">Goes to</span><code class="preview-path" id="move-preview">${where} / …</code></div>
+  <//>`;
+}
+
 export function Dialogs() {
   const dialog = useStore(ui, (s) => s.dialog);
   if (!dialog) return null;
   if (dialog.type === "new-schema") return html`<${NewSchema} />`;
+  if (dialog.type === "move-models") return html`<${MoveModels} models=${dialog.models} />`;
   if (dialog.type === "edit-model") return html`<${EditModel} model=${dialog.model} schema=${dialog.schema} key=${dialog.model.id} />`;
   return null;
 }

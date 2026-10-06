@@ -7,10 +7,12 @@
 //! - [`schema`]: schemas, with their folder levels, model folder names and fields
 //! - [`model`]: one model folder and its model.json
 //! - [`index`]: every model in the library, searched in memory, cached on this computer
+//! - [`import`]: proposing models from folders, moving or copying them in, and between categories
 //! - [`api`]: the commands the page calls
 
 pub mod api;
 pub mod config;
+pub mod import;
 pub mod index;
 pub mod library;
 pub mod model;

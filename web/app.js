@@ -11,7 +11,7 @@ window.addEventListener("error", (e) => window.__errors.push(String(e.message)))
 window.addEventListener("unhandledrejection", (e) => window.__errors.push(String(e.reason?.message || e.reason)));
 
 function route() {
-  ui.set({ route: routeFromHash(location.hash), navOpen: false });
+  ui.set({ route: routeFromHash(location.hash), navOpen: false, picked: [] });
 }
 
 async function start() {

@@ -42,10 +42,15 @@ export async function createPlatform() {
     api,
     /** A web link in the default browser. */
     openUrl: (url) => invoke("open_url", { url }).catch((err) => console.warn("open_url", err)),
+    /** Folders and files dropped on the window (their paths). */
+    onDrop(cb) {
+      tauri.event?.listen?.("tauri://drag-drop", (e) => cb(e.payload?.paths || [])).catch?.(() => {});
+    },
     async refreshInfo() { Object.assign(info, await api("app_info")); return info; },
     library: {
       url: (rel) => libraryUrl + rel.split("/").map(encodeURIComponent).join("/"),
       pickFolder: (title) => invoke("pick_folder", { title }),
+      pickFile: (title, extensions) => invoke("pick_file", { title, extensions }),
       openPath: (path) => invoke("open_path", { path }),
     },
   };

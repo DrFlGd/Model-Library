@@ -19,7 +19,7 @@ export function routeFromHash(hash) {
     if (rest[0] === "schema" && rest[1]) return `browse:schema:${rest.slice(1).join("/")}`;
     return `browse:${rest[0] || "all"}`;
   }
-  return first === "settings" ? "settings" : "home";
+  return first === "settings" || first === "import" ? first : "home";
 }
 
 /** A browse place for a schema and some of its category values. */

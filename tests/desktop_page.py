@@ -11,6 +11,10 @@ library, opening a second library and switching back from the recent list, a
 folder that already holds models is left as it was, the theme follows the
 setting, a library from a newer app opens read-only, and the library opens the
 same after being moved (library-info).
+Phase 2: sorting a messy folder through the Import page (proposals, warnings,
+setting categories for several rows, move with a checked copy), adding a model
+folder by copy, Move to category for one and several models, and sorting a loose
+folder found inside the library.
 Phase 1: making a schema, hand-made model folders listed under their categories,
 search with typed filters, a model's details and files, editing details into
 model.json, starring, and 10,000 generated models read and searched in time.
@@ -190,6 +194,123 @@ async def phase1(pg):
     await pg.screenshot(path=str(out / "08-favourites.png"))
 
 
+def put(path, body="solid x"):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(body if isinstance(body, bytes) else body.encode())
+
+
+async def import_and_wait(pg):
+    await pg.wait_for_function("() => { const b = document.querySelector('#import-go'); return b && !b.disabled; }")
+    await pg.click("#import-go")
+    await pg.wait_for_selector("#import-results", timeout=60000)
+    return await pg.inner_text("#import-results h2")
+
+
+async def phase2(pg):
+    # 15. sorting a messy folder of downloads
+    dl = home / "Downloads"
+    put(dl / "Hive Guard (Jo Smith)/guard.stl")
+    put(dl / "Armour Set/Helmet/helmet.stl")
+    put(dl / "Armour Set/Arms/arm.stl")
+    put(dl / "dragon.zip", "PK dragon")
+    put(dl / "benchy.stl")
+    put(dl / "benchy.png", PNG)
+    put(dl / "Copy of Captain/captain.zip", "PK")
+    put(dl / "Other Library Model/prime.stl")
+    put(dl / "Other Library Model/model.json", json.dumps({"id": "mfromelsewhere", "name": "Tyrant Prime", "schema": "wargames", "category": {"game": "Warhammer 40k", "faction": "Tyranid"}, "kept": True}))
+    put(dl / "readme.txt", "hello")
+    await pg.click('.sidebar a[href="#/import"]')
+    pick(dl)
+    await pg.click("#import-sort")
+    await pg.wait_for_function("() => document.querySelectorAll('#import-list .imp-row').length === 6")
+    names = await pg.eval_on_selector_all("#import-list .imp-name", "els => els.map(e => e.value)")
+    row = lambda folder: pg.locator(f'#import-list .imp-row[data-source$="{folder}"]')
+    several = await row("Armour Set").locator("[data-warn=several]").count()
+    dup = await row("Copy of Captain").locator("[data-warn=duplicate]").count()
+    prime = await row("Other Library Model").locator(".cat-value").evaluate_all("els => els.map(e => e.value)")
+    left = await pg.inner_text(".imp-left summary")
+    check("a messy folder is proposed as models, with warnings and guesses", names == ["Armour Set", "Copy of Captain", "Hive Guard", "Tyrant Prime", "benchy", "dragon"]
+          and several == 1 and dup == 1 and prime == ["Warhammer 40k", "Tyranid"] and "1 loose file" in left, (names, several, dup, prime, left))
+    await row("Hive Guard (Jo Smith)").locator(".imp-pick").check()
+    await row("Armour Set").locator(".imp-pick").check()
+    await pg.select_option("#batch-schema", "wargames")
+    await pg.fill("#batch-game", "Warhammer 40k")
+    await pg.fill("#batch-faction", "Tyranid")
+    await pg.click("#batch-apply")
+    await row("Copy of Captain").locator(".imp-skip").click()
+    await pg.wait_for_function("() => [...document.querySelectorAll('#import-list .imp-row:not(.skipped)')].every(r => r.querySelector('.imp-dest code'))")
+    dests = await pg.eval_on_selector_all("#import-list .imp-row:not(.skipped) .imp-dest code", "els => els.map(e => e.textContent)")
+    await pg.screenshot(path=str(out / "09-import.png"), full_page=True)
+    await pg.evaluate("() => { window.__forceCopy = true; }")  # as across drives: copy, check, delete
+    title = await import_and_wait(pg)
+    t = "Wargames/Warhammer 40k/Tyranid"
+    on_disk = [(library / t / "Hive Guard (Jo Smith)/guard.stl").is_file(), (library / t / "Armour Set/Helmet/helmet.stl").is_file(),
+               (library / "Unsorted/benchy/benchy.png").is_file(), (library / "Unsorted/dragon/dragon.zip").is_file(), (library / t / "Tyrant Prime/prime.stl").is_file()]
+    side = json.loads((library / t / "Hive Guard (Jo Smith)/model.json").read_text())
+    prime_side = json.loads((library / t / "Tyrant Prime/model.json").read_text())
+    remaining = sorted(x.name for x in dl.iterdir())
+    check("importing moves models into their category folders", title.startswith("5 models moved") and all(on_disk) and side["schema"] == "wargames"
+          and side["category"] == {"game": "Warhammer 40k", "faction": "Tyranid"} and side["authors"] == [{"name": "Jo Smith"}] and prime_side.get("kept") is True
+          and remaining == ["Copy of Captain", "readme.txt"] and dests[0] == f"{t}/Armour Set", (title, on_disk, remaining, dests, side))
+    await pg.screenshot(path=str(out / "10-imported.png"), full_page=True)
+
+    # 16. adding one model folder by copy
+    await pg.click("#import-clear")
+    put(home / "Elsewhere/Gargoyle/gargoyle.stl")
+    pick(home / "Elsewhere/Gargoyle")
+    await pg.click("#import-add-folder")
+    await pg.wait_for_selector("#import-list .imp-row")
+    await pg.click("#mode-copy")
+    title = await import_and_wait(pg)
+    check("a model folder is copied in, the original kept", title.startswith("1 model copied") and (home / "Elsewhere/Gargoyle/gargoyle.stl").is_file()
+          and (library / "Unsorted/Gargoyle/gargoyle.stl").is_file(), title)
+
+    # 17. Move to category: one model, then several
+    await pg.goto(B + "#/browse/unsorted")
+    await pg.wait_for_selector(".card:has(.card-name:text-is('benchy'))")
+    await pg.click(".card:has(.card-name:text-is('benchy'))")
+    await pg.click("#details-move")
+    await pg.select_option("#move-schema", "wargames")
+    await pg.fill("#move-game", "Warhammer 40k")
+    await pg.fill("#move-faction", "Necrons")
+    await pg.click("#move-dialog button[type=submit]")
+    await pg.wait_for_selector("#move-dialog", state="detached")
+    one = (library / "Wargames/Warhammer 40k/Necrons/benchy/benchy.stl").is_file() and not (library / "Unsorted/benchy").exists()
+    await pg.goto(B + "#/browse/unsorted")
+    await pg.wait_for_selector(".card:has-text('Gargoyle')")
+    await pg.click(".card:has-text('dragon')")
+    await pg.click(".card:has-text('Gargoyle')", modifiers=["Control"])
+    await pg.wait_for_selector("#picked-panel")
+    await pg.click("#move-picked")
+    await pg.select_option("#move-schema", "wargames")
+    await pg.fill("#move-game", "Warhammer 40k")
+    await pg.fill("#move-faction", "Necrons")
+    await pg.click("#move-dialog button[type=submit]")
+    await pg.wait_for_selector("#move-dialog", state="detached")
+    nec = sorted(x.name for x in (library / "Wargames/Warhammer 40k/Necrons").iterdir())
+    n = await count(pg)
+    check("models move to a category, one or several at once", one and nec == ["Gargoyle", "benchy", "dragon"] and n == "1 model", (one, nec, n))
+
+    # 18. a loose folder inside the library is offered for sorting
+    put(library / "Old stuff/Lictor/lictor.stl")
+    await pg.goto(B + "#/")
+    await pg.click("#rescan")
+    await pg.wait_for_selector("#home-loose .sort-loose")
+    await pg.click("#home-loose .sort-loose")
+    await pg.wait_for_function("() => document.querySelectorAll('#import-list .imp-row').length === 1")
+    await pg.select_option("#imp-0-schema", "wargames")
+    await pg.fill("#imp-0-game", "Warhammer 40k")
+    await pg.fill("#imp-0-faction", "Tyranid")
+    title = await import_and_wait(pg)
+    await pg.goto(B + "#/")
+    await pg.wait_for_selector("#home-counts")
+    await pg.wait_for_timeout(300)
+    loose_gone = await pg.locator("#home-loose").count() == 0
+    counts = await pg.inner_text("#home-counts")
+    check("a loose folder in the library is sorted from Home", (library / t / "Lictor/lictor.stl").is_file() and loose_gone and "11 models" in counts, (title, loose_gone, counts))
+    await pg.screenshot(path=str(out / "11-home.png"))
+
+
 def big_library():
     """10,000 generated models: read, read again from the cache, searched."""
     big = home / "Big"
@@ -234,9 +355,10 @@ async def main():
             await pg.wait_for_selector("#no-results")
             unsorted = await pg.inner_text(".browse-title h1")
             active = await pg.inner_text(".sidebar .nav-link.active .nav-label")
-            check("the menu's places open", labels == ["Home", "All models", "Unsorted", "Favourites", "Settings"] and unsorted == "Unsorted" and active == "Unsorted", (labels, unsorted, active))
+            check("the menu's places open", labels == ["Home", "Import", "All models", "Unsorted", "Favourites", "Settings"] and unsorted == "Unsorted" and active == "Unsorted", (labels, unsorted, active))
 
             await phase1(pg)
+            await phase2(pg)
 
             # 3. renaming the library
             await pg.click('.sidebar a[href="#/settings"]')

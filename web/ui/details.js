@@ -59,6 +59,8 @@ export function ModelDetails({ id }) {
     <div class="insp-actions">
       <button type="button" class="ghost" id="details-star" aria-pressed=${fav ? "true" : "false"} onClick=${star} disabled=${s.readOnly}>${Icon.star(15, fav)} ${fav ? "Starred" : "Star"}</button>
       <button type="button" class="ghost" id="details-edit" onClick=${() => ui.set({ dialog: { type: "edit-model", model: m, schema } })} disabled=${s.readOnly}>${Icon.edit(15)} Edit details…</button>
+      <button type="button" class="ghost" id="details-move" title="Move to category" aria-label="Move to category" disabled=${s.readOnly}
+        onClick=${() => ui.set({ dialog: { type: "move-models", models: [m] } })}>${Icon.move(15)}</button>
       ${isDesktop() ? html`<button type="button" class="ghost" title="Show in folder" aria-label="Show in folder" onClick=${() => showModelFolder(m)}>${Icon.folder(15)}</button>` : null}
     </div>
     <dl class="insp-dl" id="details-list">

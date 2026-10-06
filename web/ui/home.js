@@ -5,9 +5,10 @@ import { useStore } from "../lib/store.js";
 import { ui } from "./state.js";
 import { ctx, routeHash, schemaScope } from "./context.js";
 import { isDesktop, openLibrary, showLibraryFolder, rescan } from "./library.js";
+import { sortFolder } from "./import.js";
 
 const TREE = `_library/                  the app's own files
-Unsorted/                  imports with no schema yet
+Unsorted/                  models with no category yet
 Wargames/
   Warhammer 40k/
     Tyranid/
@@ -20,8 +21,8 @@ Wargames/
 
 const NEXT = [
   ["Phase 0", "The app, its library folder and settings"],
-  ["Phase 1", "Categories, model details and search", true],
-  ["Phase 2", "Importing models: files, folders and ZIPs, moved or copied into place"],
+  ["Phase 1", "Categories, model details and search"],
+  ["Phase 2", "Importing models: files, folders and ZIPs, moved or copied into place, and moving models between categories", true],
   ["Phase 3", "Viewing models, their parts, pictures, PDFs and videos"],
   ["Phase 4", "Editing categories, with folders moved to match"],
 ];
@@ -49,6 +50,12 @@ export function Home() {
       <p><a href=${routeHash("browse:all")}><b>${ov.all}</b> ${ov.all === 1 ? "model" : "models"}</a>${ov.unsorted ? html`, <a href=${routeHash("browse:unsorted")}>${ov.unsorted} unsorted</a>` : null}.
         ${ov.schemas.length ? html` Categories: ${ov.schemas.map((sc, i) => html`${i ? ", " : ""}<a href=${routeHash(`browse:${schemaScope(sc.id)}`)} key=${sc.id}>${sc.name} (${sc.count})</a>`)}.`
           : html` No categories yet: make one with <b>New category…</b> in the menu, then put model folders under its folder.`}</p>
+    </div>` : null}
+    ${ov?.loose?.length ? html`<div class="home-card home-counts" id="home-loose">
+      <h2>Folders not sorted yet</h2>
+      <p>These folders are in the library but not in a category or Unsorted, so their models aren't listed. Sort them to give each model a place.</p>
+      <ul class="ls-list">${ov.loose.map((f) => html`<li key=${f}><span>${f}</span>
+        <button type="button" class="ghost sort-loose" data-folder=${f} onClick=${() => sortFolder(`${lib.path}/${f}`)}>Sort…</button></li>`)}</ul>
     </div>` : null}
     <div class="home-pair">
       <section class="home-card">
