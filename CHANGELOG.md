@@ -65,6 +65,8 @@ Phase 6 in `docs/PLAN.md`: the Docker build with sign-in. The owner is trying Ph
 
 ## Unreleased
 
+## 0.5.0 (2026-10-06)
+
 Phase 5: large collections (design in docs/PLAN.md, "Phase 5 design"; notes in "Phase 5 notes").
 
 - **The Import page is a sorting workspace** (owner's request): *Sort a folder…* reads a whole folder tree as it is on disk and proposes which folders and files are models, all the way down. Four views: *Folders* (the tree as on disk), *List* (sortable), *Grid* (a preview of each model) and *By category* (grouped by where each will go). Pick one or many (click, Ctrl, Shift, ticks; a picked folder takes everything in it) and *Send to* a category and subcategory, or Unsorted; for a folder, *Keep its folders as subcategories* brings a tidy tree in as it is. *Group into one model* makes picked models, folders and loose files one model; *Make one model* turns a folder read as several into one; *Split* and *Ungroup* undo that. *Import N sorted models* moves (or copies) what has a place; the rest waits. The workspace is kept on this computer, one per library, and comes back next time; *Read again* picks up changes and keeps what was decided.
