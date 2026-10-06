@@ -70,6 +70,7 @@ Phase 4 (0.4): editing categories (design in docs/PLAN.md, "Phase 4 design"; not
 - **Edit category…** on a category's own page: its name, top folder, levels (rename a label, add one with a value for the models already there, remove or reorder), the model folder name (optionally renaming existing folders to match) and its fields. **Delete this category…** moves its models to Unsorted.
 - Every change that moves folders is written to a journal in `_library/journal/` first. **Recent changes** on Home lists them; the newest can be **undone** (folders, model.json categories and the category file all go back). A change that stopped partway can be finished or put back from Home.
 - **Edit details…** for several picked models: add or remove tags, and set authors, licence or the category's fields for all of them.
+- Previews made by *Make previews* and details edited for several models are read back into the index straight away. Windows doesn't always change a folder's time when a file inside it changes, so the cache missed them (found by the Windows CI run).
 
 ## 0.3.0 and 0.3.1 (2026-10-06)
 

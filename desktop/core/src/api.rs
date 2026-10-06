@@ -208,9 +208,39 @@ impl App {
                 Err(e) => Err(e.to_string()),
             };
             let _ = app.with_index(Some(false), |_, _| ()).await;
+            // models a job changed inside their folders: read them again (a folder's
+            // time doesn't always change on Windows, so the cache can't tell)
+            if let Ok(v) = &r {
+                let ids: Vec<String> = v["refresh"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect();
+                if !ids.is_empty() {
+                    app.refresh_models(&ids).await;
+                }
+            }
             app.job_done(&id, r);
         });
         json!({ "job": job.id })
+    }
+
+    /// Read some models again from their folders, and save the cache.
+    async fn refresh_models(&self, ids: &[String]) {
+        let Ok(lib) = self.library() else { return };
+        let cache = self.index_cache(&lib);
+        let _ = self
+            .with_index(None, |ix, lib| {
+                for id in ids {
+                    ix.refresh(lib, id);
+                }
+                if let Some(c) = &cache {
+                    let _ = ix.save(c);
+                }
+            })
+            .await;
     }
 
     /// Import planned items one by one (a failed one doesn't stop the rest).
@@ -511,7 +541,7 @@ impl App {
                         .collect()
                 });
                 self.library()?.writable().map_err(e2s)?;
-                let dirs: Vec<(String, PathBuf)> = self
+                let dirs: Vec<(String, String, PathBuf)> = self
                     .with_index(None, |ix, lib| {
                         ix.models
                             .iter()
@@ -522,6 +552,7 @@ impl App {
                             .filter(|m| force || m.v["files"]["cover"].is_null())
                             .filter_map(|m| {
                                 Some((
+                                    m.id().to_string(),
                                     m.v["name"].as_str().unwrap_or("").to_string(),
                                     lib.resolve(m.rel()).ok()?,
                                 ))
@@ -531,19 +562,22 @@ impl App {
                     .await?;
                 let n = dirs.len();
                 j(self.spawn_job("Making previews", move |app, jid, cancel| {
-                    let (mut made, mut none, mut failed) = (0, 0, vec![]);
-                    for (i, (name, dir)) in dirs.iter().enumerate() {
+                    let (mut made, mut none, mut failed, mut ids) = (0, 0, vec![], vec![]);
+                    for (i, (id, name, dir)) in dirs.iter().enumerate() {
                         if cancel.load(Ordering::Relaxed) {
                             break;
                         }
                         app.job_progress(&jid, json!({ "item": i, "items": n, "name": name }));
                         match thumb::make(dir) {
-                            Ok(true) => made += 1,
+                            Ok(true) => {
+                                made += 1;
+                                ids.push(id.clone());
+                            }
                             Ok(false) => none += 1,
                             Err(e) => failed.push(json!({ "name": name, "error": e2s(e) })),
                         }
                     }
-                    Ok(json!({ "made": made, "no_3d": none, "failed": failed }))
+                    Ok(json!({ "made": made, "no_3d": none, "failed": failed, "refresh": ids }))
                 }))
             }
             "job" => {
@@ -770,6 +804,7 @@ impl App {
                     .map(String::from)
                     .collect();
                 let edit = args["patch"].clone();
+                let cache = self.index_cache(&self.library()?);
                 let r = self
                     .with_index(None, |ix, lib| -> Result<Value> {
                         lib.writable()?;
@@ -810,15 +845,20 @@ impl App {
                             let defaults = json!({ "name": m.v["name"], "schema": m.v["schema"], "category": m.v["category"],
                                 "authors": m.v["authors"].as_array().filter(|a| !a.is_empty()).map(|a| a.iter().map(|n| json!({ "name": n })).collect::<Vec<_>>()) });
                             match model::update(&dir, &patch, &defaults) {
-                                Ok(_) => saved += 1,
+                                Ok(_) => {
+                                    saved += 1;
+                                    ix.refresh(lib, id);
+                                }
                                 Err(e) => errors.push(json!({ "id": id, "error": e2s(e) })),
                             }
+                        }
+                        if let Some(c) = &cache {
+                            ix.save(c)?;
                         }
                         Ok(json!({ "saved": saved, "errors": errors }))
                     })
                     .await?
                     .map_err(e2s)?;
-                self.with_index(Some(false), |_, _| ()).await?;
                 j(r)
             }
             "schema_create" => {
