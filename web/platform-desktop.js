@@ -10,10 +10,13 @@ const api = (cmd, args = {}) => invoke("api", { cmd, args });
 export async function createPlatform() {
   const info = await api("app_info").catch((e) => ({ library_error: String(e), recent_libraries: [] }));
   let prefs = await api("prefs_get").catch(() => ({}));
+  // favourites live in the library and change through model_star, never through prefs_set
+  const favs = prefs["ml-favs"] || [];
+  delete prefs["ml-favs"];
   let timer = null;
   const store = {
     prefs: {
-      get(key, fallback = null) { return key in prefs ? prefs[key] : fallback; },
+      get(key, fallback = null) { return key === "ml-favs" ? favs : key in prefs ? prefs[key] : fallback; },
       set(key, value) {
         prefs = { ...prefs, [key]: value };
         clearTimeout(timer);

@@ -5,10 +5,19 @@ import { createStore } from "../lib/store.js";
 
 export const ui = createStore({
   ready: false,
-  route: "home",           // home | browse:<all|unsorted|favs> | settings
+  route: "home",           // home | browse:<all|unsorted|favs|schema:<id>/<value>…> | settings
   library: null,           // the open library's info (path, name, format, read_only)
   libraryError: null,
   recent: [],              // libraries opened before (paths), newest first
+  firstRun: false,         // no library was ever opened: ask where it goes
+  overview: null,          // library_overview: schemas (with category trees and counts), all, unsorted
+  q: "",                   // search text in the browse view (words and typed filters)
+  sort: "name",            // name | added | size
+  layout: "grid",          // grid | list
+  selection: null,         // the selected model's id
+  catalogRev: 0,           // bumps when models change (the browse view asks again)
+  dialog: null,            // { type: "new-schema" | "edit-model", ... }
+  open: {},                // sidebar tree rows unfolded: { "<schema>/<value>…": true }
   favs: [],
   jobs: [],                // [{ id, label, started, cancel }]
   theme: "system",
@@ -22,14 +31,14 @@ const LAYOUT_KEY = "ml-ui";
 export function initState(store) {
   prefs = store.prefs;
   const saved = prefs.get(LAYOUT_KEY, {}) || {};
-  ui.set({ favs: prefs.get("ml-favs", []) || [], theme: saved.theme || "system" });
+  ui.set({ favs: prefs.get("ml-favs", []) || [], theme: saved.theme || "system", sort: saved.sort || "name", layout: saved.layout || "grid", open: saved.open || {} });
   applyTheme();
   matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", applyTheme);
 }
 
 function savePrefs() {
   const s = ui.get();
-  prefs?.set(LAYOUT_KEY, { theme: s.theme });
+  prefs?.set(LAYOUT_KEY, { theme: s.theme, sort: s.sort, layout: s.layout, open: s.open });
 }
 
 export function setPref(patch) {

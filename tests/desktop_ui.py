@@ -5,9 +5,9 @@
     python3 tests/desktop_ui.py --app desktop/target/release/model-library --out shots
 
 Checks: the interface loads in the real app (the desktop platform, not the plain
-web page), the library folder is made on first start (~/Model Library, with
-_library/ and Unsorted/), the settings page shows it, and the theme button
-reaches night. Exits non-zero on any failure.
+web page), the first start asks where the library goes and, taking the
+suggestion, makes it at ~/Model Library (with _library/ and Unsorted/), the
+settings page shows it, and the theme button reaches night. Exits non-zero on any failure.
 """
 import argparse
 import json
@@ -67,8 +67,14 @@ def wait(js, timeout=60, what=""):
 
 
 try:
-    if not wait("document.querySelector('.home h1')", 90, "the home page"):
+    if not wait("document.querySelector('#first-run')", 90, "the first-start screen"):
         raise SystemExit("the interface never appeared; skipping the rest")
+    time.sleep(0.5)
+    shot("00-first-run")
+    # the first start asks where the library goes: take the suggested folder
+    d.execute_script("document.querySelector('#use-default').click()")
+    if not wait("document.querySelector('.home h1') && !document.querySelector('#first-run')", 30, "the home page"):
+        raise SystemExit("the library wasn't made; skipping the rest")
     time.sleep(0.5)
     shot("00-home")
     report["platform"] = d.execute_script("return window.__modlib?.platform?.kind || ''")
@@ -77,7 +83,7 @@ try:
     if report["platform"] != "desktop":
         failures.append(f"platform: {report['platform']}")
 
-    # the library folder, made on first start
+    # the library folder, made where the first start suggested
     made = {p: (library / p).is_dir() for p in ("_library", "_library/schemas", "Unsorted")}
     made["library.json"] = (library / "_library/library.json").is_file()
     report["library"] = {"path": str(library), **made}

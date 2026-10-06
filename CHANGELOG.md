@@ -20,8 +20,8 @@ The code started as a trimmed copy of [Claude Grid Workshop](https://github.com/
 
 | Path | What |
 | --- | --- |
-| `web/` | The front end (no build step). `app.js`: start-up and routing. `web/ui/`: Preact + htm islands (`shell.js` mounts them; `sidebar.js`, `home.js`, `settings.js`, `chrome.js` for the top bar and status bar, `library.js` for library actions, `state.js` for shared state and preferences). `platform.js` / `platform-desktop.js`: the seam between the page and the backend (desktop now, a server later). |
-| `desktop/core/` | Rust, no GUI: `api.rs` (the app's command table, `App::call`), `library.rs` (the library folder: `_library/library.json`, format number, read-only for newer formats), `config.rs` (what stays on this computer). `src/bin/modlib-cli.rs`: `library-info` and `serve` (the backend over HTTP, for tests now and the Docker build later). |
+| `web/` | The front end (no build step). `app.js`: start-up and routing. `web/ui/`: Preact + htm islands (`shell.js` mounts them; `sidebar.js` with the schema trees, `home.js` with the first-start screen, `browser.js` for the model grid/list and search, `details.js` for the selected model, `dialogs.js` for New schema and Edit details, `settings.js`, `chrome.js` for the top bar and status bar, `library.js` for library and model actions, `state.js` for shared state and preferences). `platform.js` / `platform-desktop.js`: the seam between the page and the backend (desktop now, a server later). |
+| `desktop/core/` | Rust, no GUI: `api.rs` (the app's command table, `App::call`), `library.rs` (the library folder: `_library/library.json`, format number, read-only for newer formats), `schema.rs` (schema files, folder-name templates), `model.rs` (a model folder: its files, kinds, cover, `model.json`), `index.rs` (finding models, the in-memory index and its cache on this computer, search), `config.rs` (what stays on this computer). `src/bin/modlib-cli.rs`: `library-info`, `library-scan`, `make-test-library` and `serve` (the backend over HTTP, for tests now and the Docker build later). |
 | `desktop/src-tauri/` | The Tauri app: a thin layer over `api.rs`, plus dialogs, the file manager and the `library://` protocol. Version in `tauri.conf.json`. |
 | `tools/` | `build_desktop.py` (web/ to `build/desktop/ui`, fonts), `set_version.py`, `vendor_preact.py`. |
 | `tests/` | `desktop_page.py` (acceptance test: the page + the real backend through `modlib-cli serve` and `tauri_shim.js`, in Chromium), `desktop_ui.py` (WebDriver on the built app). |
@@ -47,7 +47,8 @@ The sandbox has a network allowlist and is reset between sessions.
 
 ### Known limitations now
 
-- No models yet: Phase 0 is the shell. The sidebar's places and the Schemas list are placeholders.
+- No importing yet (Phase 2): models are folders put into the library by hand, then *Read the folders again* on Home. Schemas can be made but not changed (Phase 4).
+- The index lives in memory and is cached per computer (`<data dir>/index/<library id>.json`); 10,000 models take about 1 s to read the first time and under a second after. Thumbnails aren't generated yet: covers are pictures already in the folder.
 - `Cargo.lock` isn't committed yet: the first CI run makes it (the Tauri crates can't be resolved in a cloud session). Commit `ci-out/Cargo.lock` from the `desktop-ci-linux` branch once it exists.
 - The `library://` protocol reads whole files into memory and has no range requests; videos and large STLs need that (Phase 3).
 - The app icons are Grid Workshop's; the interface has its own mark (a stack of layers). New icons are to do.
@@ -55,11 +56,23 @@ The sandbox has a network allowlist and is reset between sessions.
 
 ### Next (roadmap)
 
-Phase 1 in `docs/PLAN.md`: schema files, `model.json` sidecars (port `meta.rs` from Grid Workshop for inheritance), scanning into a SQLite index on each computer, browsing by category, search.
+Phase 2 in `docs/PLAN.md`: the import wizard (files, folders and ZIPs; moved by default, or copied), placing models by schema, and thumbnails.
 
 ---
 
 ## Unreleased
+
+Phase 1 (0.1): schemas, model details and search (design in docs/PLAN.md, "Phase 1 design"; notes in "Phase 1 notes").
+
+- **The first start asks where the library goes** (owner's note, 2026-10-06): use the suggested `~/Model Library` or choose any folder. The library stays an ordinary folder you can move and open again.
+- **New schema…** in the menu makes a schema: its name, top folder, levels (Game, Faction…), the model folder name (`{name} ({author})`) and its own fields (text, number, choice, yes or no, date), with a preview of where models will go.
+- **Models are found in the folders**: under a schema's folder, the folders at the bottom level are models and the path gives their category; each folder in `Unsorted/` is a model. Folders without a `model.json` are listed with their name and author read from the folder name.
+- **Browsing**: each schema's categories are a tree in the menu with counts; All models, Unsorted and Favourites list theirs; a grid or a list, sorted by name, newest or size, with author and tag chips to narrow down.
+- **Search** in each place: words match the start of names, authors, tags, categories and fields, accents ignored; `author:`, `tag:`, `schema:`, a level (`faction:tyranid`) or a field (`scale:32mm`) filter, with quotes for spaces.
+- **Model details** beside the list: cover, authors, category, source, the schema's fields, tags, notes, and the files (parts keep their sub-folders) by kind. **Edit details…** writes `model.json` (keeping keys it doesn't know); a model's first edit or star gives it an id. **Star** keeps favourites in the library.
+- `modlib-cli library-scan` and `make-test-library` time a generated 10,000-model library; the acceptance test checks it opens in seconds and searches in under 100 ms.
+
+## 0.0.0 (2026-10-06)
 
 Phase 0 (0.0): the new repository, seeded from Claude Grid Workshop (owner's decision, 2026-10-06).
 

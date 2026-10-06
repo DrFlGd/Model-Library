@@ -51,7 +51,13 @@ pub struct Library {
 }
 
 pub fn valid_id(id: &str) -> Result<()> {
-    if id.is_empty() || id.len() > 96 || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.') || id.starts_with('.') {
+    if id.is_empty()
+        || id.len() > 96
+        || !id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
+        || id.starts_with('.')
+    {
         bail!("invalid id {id}");
     }
     Ok(())
@@ -81,19 +87,35 @@ pub fn iso_from_unix(secs: i64) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
-    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3600, rem % 3600 / 60, rem % 60)
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
 }
 
 /// The time now, as [`iso_from_unix`] writes it.
 pub fn now() -> String {
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     iso_from_unix(secs as i64)
 }
 
 fn random_id(prefix: &str) -> String {
     use sha2::{Digest, Sha256};
-    let seed = format!("{:?}{}{:?}", std::time::SystemTime::now(), std::process::id(), std::thread::current().id());
-    format!("{prefix}{}", &hex::encode(Sha256::digest(seed.as_bytes()))[..16])
+    let seed = format!(
+        "{:?}{}{:?}",
+        std::time::SystemTime::now(),
+        std::process::id(),
+        std::thread::current().id()
+    );
+    format!(
+        "{prefix}{}",
+        &hex::encode(Sha256::digest(seed.as_bytes()))[..16]
+    )
 }
 
 impl Library {
@@ -101,7 +123,8 @@ impl Library {
     /// already holds models is left as it is: only `_library/` and `Unsorted/` are added.
     pub fn open(root: impl Into<PathBuf>) -> Result<Self> {
         let root = root.into();
-        std::fs::create_dir_all(&root).with_context(|| format!("couldn't create {}", root.display()))?;
+        std::fs::create_dir_all(&root)
+            .with_context(|| format!("couldn't create {}", root.display()))?;
         let meta_path = root.join(APP_DIR).join("library.json");
         if meta_path.is_file() {
             let format = read_json_object(&meta_path)["format"].as_u64().unwrap_or(0);
@@ -110,17 +133,31 @@ impl Library {
                     "This library was made by a newer version of Model Library (library format {format}; this version reads up to {FORMAT}). \
                      It's open read-only: update the app to change it."
                 );
-                return Ok(Self { root, read_only: Some(msg) });
+                return Ok(Self {
+                    root,
+                    read_only: Some(msg),
+                });
             }
         }
-        let lib = Self { root, read_only: None };
+        let lib = Self {
+            root,
+            read_only: None,
+        };
         for d in SUBDIRS {
             let p = lib.root.join(d);
-            std::fs::create_dir_all(&p).with_context(|| format!("couldn't create {}", p.display()))?;
+            std::fs::create_dir_all(&p)
+                .with_context(|| format!("couldn't create {}", p.display()))?;
         }
         if !meta_path.is_file() {
-            let name = lib.root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Library".into());
-            write_json(&meta_path, &json!({ "format": FORMAT, "id": random_id("lib-"), "name": name, "created": now(), "favourites": [] }))?;
+            let name = lib
+                .root
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "Library".into());
+            write_json(
+                &meta_path,
+                &json!({ "format": FORMAT, "id": random_id("lib-"), "name": name, "created": now(), "favourites": [] }),
+            )?;
         }
         let readme = lib.root.join(APP_DIR).join("README.txt");
         if !readme.exists() {
@@ -204,7 +241,12 @@ impl Library {
     /// The library-relative form of a path inside the library (None if outside).
     pub fn relative(&self, p: &Path) -> Option<String> {
         let rel = p.strip_prefix(&self.root).ok()?;
-        Some(rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/"))
+        Some(
+            rel.components()
+                .map(|c| c.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/"),
+        )
     }
 
     pub fn resolve(&self, rel: &str) -> Result<PathBuf> {
@@ -222,7 +264,12 @@ pub fn slug(s: &str) -> String {
             out.push('-');
         }
     }
-    out.trim_matches('-').chars().take(60).collect::<String>().trim_end_matches('-').to_string()
+    out.trim_matches('-')
+        .chars()
+        .take(60)
+        .collect::<String>()
+        .trim_end_matches('-')
+        .to_string()
 }
 
 #[cfg(test)]
@@ -258,7 +305,8 @@ mod tests {
         let meta = lib.meta();
         assert_eq!(meta["format"], json!(FORMAT));
         assert_eq!(meta["name"], "My Models");
-        lib.update_meta(json!({ "name": "Minis", "id": "changed" })).unwrap();
+        lib.update_meta(json!({ "name": "Minis", "id": "changed" }))
+            .unwrap();
         let again = Library::open(&dir).unwrap();
         assert_eq!(again.meta()["id"], meta["id"]);
         assert_eq!(again.info()["name"], "Minis");
@@ -271,8 +319,15 @@ mod tests {
         std::fs::create_dir_all(dir.join("Wargames/Tyranid")).unwrap();
         std::fs::write(dir.join("Wargames/Tyranid/hive tyrant.stl"), "solid x").unwrap();
         Library::open(&dir).unwrap();
-        assert_eq!(std::fs::read_to_string(dir.join("Wargames/Tyranid/hive tyrant.stl")).unwrap(), "solid x");
-        let mut top: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("Wargames/Tyranid/hive tyrant.stl")).unwrap(),
+            "solid x"
+        );
+        let mut top: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
         top.sort();
         assert_eq!(top, ["Unsorted", "Wargames", "_library"]);
         let _ = std::fs::remove_dir_all(&dir);
@@ -282,7 +337,11 @@ mod tests {
     fn newer_format_is_read_only() {
         let dir = temp_dir("newer");
         std::fs::create_dir_all(dir.join("_library")).unwrap();
-        std::fs::write(dir.join("_library/library.json"), r#"{"format": 99, "id": "x", "name": "Future"}"#).unwrap();
+        std::fs::write(
+            dir.join("_library/library.json"),
+            r#"{"format": 99, "id": "x", "name": "Future"}"#,
+        )
+        .unwrap();
         let lib = Library::open(&dir).unwrap();
         assert!(lib.read_only().is_some());
         assert!(lib.set_favourites(&json!(["a"])).is_err());
@@ -297,7 +356,10 @@ mod tests {
         let lib = Library::open(&dir).unwrap();
         assert_eq!(lib.favourites(), json!([]));
         lib.set_favourites(&json!(["m1", "m2"])).unwrap();
-        assert_eq!(Library::open(&dir).unwrap().favourites(), json!(["m1", "m2"]));
+        assert_eq!(
+            Library::open(&dir).unwrap().favourites(),
+            json!(["m1", "m2"])
+        );
         assert!(lib.set_favourites(&json!("m1")).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }

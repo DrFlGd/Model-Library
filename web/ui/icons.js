@@ -34,5 +34,9 @@ export const Icon = {
   download: (s) => svg(html`<path d="M12 4v11M7 10l5 5 5-5M5 20h14" />`, s),
   cog: (s) => svg(html`<circle cx="12" cy="12" r="2.5" /><path d="M10.5 3h3l.5 2.6 1.9.8 2.2-1.5 2.1 2.1-1.5 2.2.8 1.9 2.5.4v3l-2.5.5-.8 1.9 1.5 2.2-2.1 2.1-2.2-1.5-1.9.8-.5 2.5h-3l-.5-2.5-1.9-.8-2.2 1.5-2.1-2.1 1.5-2.2-.8-1.9L3 13.5v-3l2.6-.5.8-1.9-1.5-2.2 2.1-2.1 2.2 1.5 1.9-.8z" />`, s),
   pin: (s) => svg(html`<path d="M9 3h6l-1 6 3 3v2H7v-2l3-3z" /><path d="M12 14v7" />`, s),
+  folder: (s) => svg(html`<path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />`, s),
+  refresh: (s) => svg(html`<path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 4v7h-7" />`, s),
+  image: (s) => svg(html`<rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 16l-5-5-8 8" />`, s),
+  layers: (s) => svg(html`<path d="M3 8.5l9-4.5 9 4.5-9 4.5z" /><path d="M3 12.5l9 4.5 9-4.5" /><path d="M3 16.5l9 4.5 9-4.5" />`, s),
   code: (s) => svg(html`<path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16" />`, s),
 };

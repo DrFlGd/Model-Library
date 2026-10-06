@@ -4,11 +4,17 @@
 //!
 //! - [`config`]: what the app keeps on this computer (open library, preferences)
 //! - [`library`]: the portable library folder
+//! - [`schema`]: schemas, with their folder levels, model folder names and fields
+//! - [`model`]: one model folder and its model.json
+//! - [`index`]: every model in the library, searched in memory, cached on this computer
 //! - [`api`]: the commands the page calls
 
 pub mod api;
 pub mod config;
+pub mod index;
 pub mod library;
+pub mod model;
+pub mod schema;
 
 pub use library::Library;
 

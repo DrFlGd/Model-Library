@@ -32,7 +32,10 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn load(path: &Path) -> Self {
-        std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        std::fs::read(path)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default()
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
@@ -96,9 +99,17 @@ pub fn read_json_object(path: &Path) -> Value {
 /// Write via a temporary file and rename, so a crash never leaves half a file.
 pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| format!("couldn't create {}", parent.display()))?;
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("couldn't create {}", parent.display()))?;
     }
-    let tmp = path.with_extension(format!("tmp-{}-{:?}", std::process::id(), std::thread::current().id()).replace(['(', ')'], ""));
+    let tmp = path.with_extension(
+        format!(
+            "tmp-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        )
+        .replace(['(', ')'], ""),
+    );
     std::fs::write(&tmp, data).with_context(|| format!("couldn't write {}", tmp.display()))?;
     std::fs::rename(&tmp, path).with_context(|| format!("couldn't write {}", path.display()))?;
     Ok(())
@@ -118,7 +129,11 @@ pub fn sorted(v: &Value) -> Value {
         Value::Object(m) => {
             let mut keys: Vec<&String> = m.keys().collect();
             keys.sort();
-            Value::Object(keys.into_iter().map(|k| (k.clone(), sorted(&m[k]))).collect())
+            Value::Object(
+                keys.into_iter()
+                    .map(|k| (k.clone(), sorted(&m[k])))
+                    .collect(),
+            )
         }
         Value::Array(a) => Value::Array(a.iter().map(sorted).collect()),
         other => other.clone(),

@@ -10,7 +10,7 @@ The design and the phased plan are in [docs/PLAN.md](docs/PLAN.md). Built on the
 
 ## Status
 
-**Phase 0:** the app, its library folder and settings. No models yet: schemas and model details come in Phase 1, importing in Phase 2.
+**Phase 1:** schemas, model details and search. Model folders put into the library by hand are listed by category, searched, and their details edited into `model.json`. Importing comes in Phase 2.
 
 Installers are on the [releases page](https://github.com/DrFlGd/Model-Library/releases) once CI publishes one (Windows: the `-setup.exe`, unsigned, so SmartScreen asks once; Linux: the `.deb` or `.AppImage`).
 

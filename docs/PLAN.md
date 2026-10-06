@@ -207,3 +207,37 @@ Built (2026-10-06): the repository seeded from Grid Workshop with the OpenSCAD p
 - **Interface.** Home (the library, its layout, what's coming), placeholders for All models, Unsorted and Favourites, Settings (rename, show in folder, open another or a recent library, theme), the status bar with the open library. Same look and themes as Grid Workshop, with its own mark.
 - **Tests.** Rust unit tests for the library and commands; `tests/desktop_page.py` (9 checks, including a moved library opening the same); `tests/desktop_ui.py` on the built app; CI checks a library made on Linux opens the same on Windows.
 
+
+## Phase 1 design
+
+Written before the code (2026-10-06). Goal: a library of model folders (made by hand, or by the import of Phase 2) opens, browses by schema and category, searches, and shows and edits each model's details.
+
+**Which folders are models.** Under a schema's top folder, the folders at depth *levels + 1* are models (`Wargames/<Game>/<Faction>/<Model>/` for a two-level schema), and so is any folder holding a `model.json`, at any depth. The folder names above a model are its category values: **the path is the truth**, so a folder moved by hand in a file manager shows in its new place. Each folder directly in `Unsorted/` is a model with no schema. Nothing below a model folder is a model (its sub-folders are parts, Phase 3). Folders starting with `_` are the app's and aren't categories.
+
+**Models without a model.json** are listed too, with what the folder says: the name and author parsed from the schema's model-folder template (`Hive Tyrant (Author Name)` → name *Hive Tyrant*, author *Author Name*). The first edit, or starring the model, writes its `model.json` with a new id. Until then its id is derived from its path.
+
+**Schemas** are `_library/schemas/<id>.json` (format, id, name, folder, levels, model_folder template, fields). Phase 1 adds **New schema…** (name, top folder, levels, model folder template, fields), with *Wargames: Game > Faction* as the example it starts from. Changing an existing schema re-lays the library and waits for Phase 4.
+
+**Model details** are the sidecar of section 4: name, authors, released, source (site, URL), license, tags, notes and the schema's own fields. Editing them rewrites `model.json` (unknown keys kept). Changing the name doesn't rename the folder yet (Phase 4). Inheritance from `_category.json` files (section 4) also moves to Phase 4, with the category editor.
+
+**The index: in memory, cached on each computer.** A change from section 6: instead of SQLite, the core builds an in-memory index from the folders and caches it in the app's data folder (`index/<library id>.json`, with each model's `model.json` and folder modified times, so opening again rereads only what changed). Ten thousand models are a few megabytes and search in milliseconds, it needs no native dependency on Windows, and SQLite stays an option if collections outgrow it. A **Rescan** button rereads everything (a file added deep inside a model's sub-folder doesn't change the model folder's modified time).
+
+**Each model in the index** has its id, path, schema, category values, details, and a summary of its files by kind (models: STL, 3MF, OBJ, STEP…; slicer and support projects: gcode, Lychee, Chitubox, netfabb…; images; documents; videos; archives; other), total size, and a cover picture (the sidecar's `cover`, else the first image in `_media/`, else in the folder).
+
+**Search** runs in the core: words match the name, authors, tags, category values, field values and file names (prefixes count, accents ignored), and typed filters narrow it: `author:`, `tag:`, `schema:`, `kind:` (has a file of that kind), and a schema's level keys (`faction:tyranid`). Results come sorted (name, recently added, size) and in pages, with counts of authors and tags for filter chips.
+
+**Interface.** The sidebar lists the schemas with their category trees and counts; *All models*, *Unsorted* and *Favourites* list models. A place shows a search box, sort, grid or list view, and model cards (cover or a kind icon, name, author, category). Selecting a model opens a details panel (category path, details, files by kind, Show in folder, star); *Edit details…* opens a form with the schema's fields.
+
+**Done when:** a hand-made library of a few hundred models opens, browses by category and searches; a generated library of 10,000 models opens in seconds and searches in under 100 ms (`modlib-cli make-test-library` and a timed check in CI).
+
+## Phase 1 notes
+
+Built 2026-10-06, as designed above, with these differences and details:
+
+- **The first start asks where the library goes** (Jerred's note during the phase: the library folder must be configurable and portable, as in Grid Workshop). The core no longer makes `~/Model Library` on its own; `app_info` reports `first_run` and the suggested `default_library`, and Home shows *Use ~/Model Library* or *Choose a folder…* until one is opened. Settings still opens or switches libraries at any time.
+- **New schema…** starts empty with *Wargames*, *Game* and *Faction* as placeholder hints rather than filled-in values, so nobody makes a "Wargames" schema by accident. The preview line shows where a model would go.
+- **Rescan** is *Read the folders again* on Home (`library_scan` with `full`); the index also refreshes itself when a model is edited or starred, and opening the app again rereads only folders whose modified time changed.
+- **Ids.** A model without `model.json` has an id derived from its path (`p` + hash), so a star or an edit first writes its `model.json` (with a time-ordered `m…` id, the name and author it was showing, its schema and category) and favourites follow the new id.
+- **Search** also matches file names and a schema's field keys (`scale:32mm`); level filters match the start of a value (`faction:space`). Field values that aren't text (numbers, yes or no) are filterable but not searched as words.
+- **Timings** (cloud sandbox, release build, 10,000 generated models): first read about 1 s, reopen from the cache under 1 s, a search with a filter about 5–7 ms; the cache is about 6 MB. CI checks the same with `make-test-library` and `library-scan` in `desktop_page.py` (`--big`).
+- Not done here, as planned: thumbnails (Phase 2), viewing files and parts (Phase 3), changing schemas and `_category.json` inheritance (Phase 4).

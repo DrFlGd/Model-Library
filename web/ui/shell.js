@@ -6,13 +6,17 @@ import { ui, initState } from "./state.js";
 import { setContext, ctx } from "./context.js";
 import { Sidebar } from "./sidebar.js";
 import { TopButtons, StatusBar } from "./chrome.js";
-import { Home, BrowseEmpty } from "./home.js";
+import { Home } from "./home.js";
+import { Browser } from "./browser.js";
+import { Dialogs } from "./dialogs.js";
 import { Settings } from "./settings.js";
+import { loadOverview } from "./library.js";
 
 function Main() {
   const route = useStore(ui, (s) => s.route);
-  if (route === "settings") return html`<${Settings} />`;
-  if (route.startsWith("browse:")) return html`<${BrowseEmpty} />`;
+  const blocked = useStore(ui, (s) => s.firstRun && !s.library);
+  if (route === "settings" && !blocked) return html`<${Settings} />`;
+  if (route.startsWith("browse:") && !blocked) return html`<${Browser} key=${route} />`;
   return html`<${Home} />`;
 }
 
@@ -21,12 +25,14 @@ export function mountShell(context) {
   window.__modlib = ctx; // for tests
   initState(context.platform.store);
   const info = context.platform.info || {};
-  ui.set({ library: info.library || null, libraryError: info.library_error || null, recent: info.recent_libraries || [] });
+  ui.set({ library: info.library || null, libraryError: info.library_error || null, recent: info.recent_libraries || [], firstRun: !!info.first_run });
   const mount = (id, C) => { const el = document.getElementById(id); if (el) render(html`<${C} />`, el); };
   mount("topbuttons", TopButtons);
   mount("sidebar-root", Sidebar);
   mount("main-root", Main);
   mount("statusbar", StatusBar);
+  mount("dialog-root", Dialogs);
+  loadOverview();
 }
 
 export { ui };

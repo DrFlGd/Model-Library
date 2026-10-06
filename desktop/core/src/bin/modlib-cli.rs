@@ -2,6 +2,8 @@
 //!
 //!   modlib-cli --version
 //!   modlib-cli library-info --library <dir>
+//!   modlib-cli library-scan --library <dir> [--cache <file>]   (models found, timings; twice with a cache)
+//!   modlib-cli make-test-library --out <dir> [--models 10000]   (made-up models, for timing)
 //!   modlib-cli serve --ui <dir> --home <dir> [--library <dir>] [--port 8790]
 //!
 //! `serve` runs the app's commands behind a local web server, so the page can be
@@ -58,6 +60,33 @@ async fn run() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&lib.info())?);
             Ok(())
         }
+        "library-scan" => {
+            let lib = modlib_core::Library::open(PathBuf::from(a.need("--library")?))?;
+            let cache = a.flag("--cache").map(PathBuf::from);
+            let ix = modlib_core::index::Index::build(&lib, cache.as_deref(), false);
+            let t = std::time::Instant::now();
+            let again = modlib_core::index::Index::build(&lib, cache.as_deref(), false);
+            let reopen = t.elapsed().as_millis();
+            let q = again.query("all", "tyrant scale:32mm", "name", 0, 100, &[]);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &json!({ "models": ix.models.len(), "first_ms": ix.ms as u64, "reopen_ms": reopen as u64, "reopen_read": again.read, "search_us": q["us"], "search_hits": q["total"] })
+                )?
+            );
+            Ok(())
+        }
+        "make-test-library" => {
+            let out = PathBuf::from(a.need("--out")?);
+            let n: usize = a
+                .flag("--models")
+                .map(|n| n.parse())
+                .transpose()?
+                .unwrap_or(10_000);
+            modlib_core::index::make_test_library(&out, n)?;
+            eprintln!("{n} models in {}", out.display());
+            Ok(())
+        }
         "serve" => serve(a).await,
         other => bail!("unknown command {other}"),
     }
@@ -65,11 +94,21 @@ async fn run() -> Result<()> {
 
 /// The app's backend with its settings under `home` (config/, data/).
 fn app_for(home: &Path, library_url: &str) -> Result<Arc<App>> {
-    App::new(AppPaths { config_dir: home.join("config"), data_dir: home.join("data"), library_url: library_url.into() })
+    App::new(AppPaths {
+        config_dir: home.join("config"),
+        data_dir: home.join("data"),
+        library_url: library_url.into(),
+    })
 }
 
 fn content_type(path: &str) -> &'static str {
-    match path.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str() {
+    match path
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "html" => "text/html; charset=utf-8",
         "js" | "mjs" => "text/javascript",
         "css" => "text/css",
@@ -118,8 +157,17 @@ fn read_request(stream: &mut std::net::TcpStream) -> Result<Http> {
     let mut parts = first.split(' ');
     let method = parts.next().unwrap_or("").to_string();
     let path = parts.next().unwrap_or("/").to_string();
-    let headers: Vec<(String, String)> = lines.filter_map(|l| l.split_once(':').map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string()))).collect();
-    let len: usize = headers.iter().find(|(k, _)| k == "content-length").and_then(|(_, v)| v.parse().ok()).unwrap_or(0);
+    let headers: Vec<(String, String)> = lines
+        .filter_map(|l| {
+            l.split_once(':')
+                .map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string()))
+        })
+        .collect();
+    let len: usize = headers
+        .iter()
+        .find(|(k, _)| k == "content-length")
+        .and_then(|(_, v)| v.parse().ok())
+        .unwrap_or(0);
     let mut body = buf[head_end + 4..].to_vec();
     while body.len() < len {
         let n = stream.read(&mut chunk)?;
@@ -149,7 +197,11 @@ fn respond(stream: &mut std::net::TcpStream, code: u16, ctype: &str, body: &[u8]
 async fn serve(mut a: Args) -> Result<()> {
     let ui = PathBuf::from(a.need("--ui")?);
     let home = PathBuf::from(a.need("--home")?);
-    let port: u16 = a.flag("--port").map(|p| p.parse()).transpose()?.unwrap_or(8790);
+    let port: u16 = a
+        .flag("--port")
+        .map(|p| p.parse())
+        .transpose()?
+        .unwrap_or(8790);
     if let Some(lib) = a.flag("--library") {
         let mut cfg = modlib_core::config::AppConfig::load(&home.join("config/config.json"));
         cfg.set_library(Path::new(&lib));
@@ -158,7 +210,10 @@ async fn serve(mut a: Args) -> Result<()> {
     let app = app_for(&home, "/library/")?;
     let picks: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
     let listener = std::net::TcpListener::bind(("127.0.0.1", port))?;
-    eprintln!("serving on http://127.0.0.1:{port}/ (home {})", home.display());
+    eprintln!(
+        "serving on http://127.0.0.1:{port}/ (home {})",
+        home.display()
+    );
     let rt = tokio::runtime::Handle::current();
     let accept = tokio::task::spawn_blocking(move || -> Result<()> {
         for conn in listener.incoming() {
@@ -168,18 +223,39 @@ async fn serve(mut a: Args) -> Result<()> {
             let picks = picks.clone();
             let rt = rt.clone();
             std::thread::spawn(move || {
-                let Ok(req) = read_request(&mut stream) else { return };
+                let Ok(req) = read_request(&mut stream) else {
+                    return;
+                };
                 let path = req.path.split('?').next().unwrap_or("/").to_string();
                 let r: Result<()> = rt.block_on(async {
                     if let Some(cmd) = path.strip_prefix("/invoke/") {
                         let args: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
                         match cmd {
-                            "api" | "api_bytes" => match app.call(args["cmd"].as_str().unwrap_or(""), args["args"].clone()).await {
-                                Ok(Reply::Json(v)) => respond(&mut stream, 200, "application/json", &serde_json::to_vec(&v)?),
-                                Ok(Reply::Bytes(b)) => respond(&mut stream, 200, "application/octet-stream", &b),
+                            "api" | "api_bytes" => match app
+                                .call(args["cmd"].as_str().unwrap_or(""), args["args"].clone())
+                                .await
+                            {
+                                Ok(Reply::Json(v)) => respond(
+                                    &mut stream,
+                                    200,
+                                    "application/json",
+                                    &serde_json::to_vec(&v)?,
+                                ),
+                                Ok(Reply::Bytes(b)) => {
+                                    respond(&mut stream, 200, "application/octet-stream", &b)
+                                }
                                 Err(e) => {
-                                    eprintln!("{} {}: {e}", args["cmd"].as_str().unwrap_or(""), args["args"]);
-                                    respond(&mut stream, 400, "application/json", &serde_json::to_vec(&json!(e))?)
+                                    eprintln!(
+                                        "{} {}: {e}",
+                                        args["cmd"].as_str().unwrap_or(""),
+                                        args["args"]
+                                    );
+                                    respond(
+                                        &mut stream,
+                                        400,
+                                        "application/json",
+                                        &serde_json::to_vec(&json!(e))?,
+                                    )
                                 }
                             },
                             "pick_folder" | "pick_file" => {
@@ -191,10 +267,22 @@ async fn serve(mut a: Args) -> Result<()> {
                                         Some(p.remove(0))
                                     }
                                 };
-                                respond(&mut stream, 200, "application/json", &serde_json::to_vec(&json!(next))?)
+                                respond(
+                                    &mut stream,
+                                    200,
+                                    "application/json",
+                                    &serde_json::to_vec(&json!(next))?,
+                                )
                             }
-                            "reveal" | "open_path" | "open_url" => respond(&mut stream, 200, "application/json", b"null"),
-                            other => respond(&mut stream, 404, "application/json", &serde_json::to_vec(&json!(format!("unknown command {other}")))?),
+                            "reveal" | "open_path" | "open_url" => {
+                                respond(&mut stream, 200, "application/json", b"null")
+                            }
+                            other => respond(
+                                &mut stream,
+                                404,
+                                "application/json",
+                                &serde_json::to_vec(&json!(format!("unknown command {other}")))?,
+                            ),
                         }
                     } else if path == "/test/pick" {
                         let v: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
@@ -205,10 +293,16 @@ async fn serve(mut a: Args) -> Result<()> {
                     } else if let Some(rel) = path.strip_prefix("/library/") {
                         match app.library_file(rel) {
                             Ok(b) => respond(&mut stream, 200, content_type(rel), &b),
-                            Err(e) => respond(&mut stream, 404, "text/plain", e.to_string().as_bytes()),
+                            Err(e) => {
+                                respond(&mut stream, 404, "text/plain", e.to_string().as_bytes())
+                            }
                         }
                     } else if req.method == "GET" {
-                        let rel = if path == "/" { "index.html".to_string() } else { modlib_core::api::percent_decode(path.trim_start_matches('/')) };
+                        let rel = if path == "/" {
+                            "index.html".to_string()
+                        } else {
+                            modlib_core::api::percent_decode(path.trim_start_matches('/'))
+                        };
                         let p = modlib_core::library::rel_inside(&rel).map(|r| ui.join(r));
                         match p.ok().and_then(|p| std::fs::read(p).ok()) {
                             Some(b) => respond(&mut stream, 200, content_type(&rel), &b),
