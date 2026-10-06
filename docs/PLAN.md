@@ -288,3 +288,33 @@ Built 2026-10-06, as designed above, with these details:
 - **Drag and drop** uses Tauri's `tauri://drag-drop` event (paths of the dropped items); it can't be exercised by the page test, which uses the Add buttons.
 - **Loose folders** on Home are non-empty top-level folders that aren't a category's, `Unsorted` or the app's; sorting one moves its contents out and leaves the empty folder (no longer listed).
 - Not done: a regroup by dragging rows (Split covers the common case of a collection folder), unpacking archives (decision: ZIPs stay zipped), checking for duplicates by content hash (Phase 5).
+
+## Phase 3 design
+
+Written before the code (2026-10-06). Goal: see what's in each model: its parts, variants, files inside ZIPs, the 3D models themselves, its pictures, PDFs, videos and readmes, with a thumbnail on every card. Done when an armour set shows as one model with its parts, and a zipped model previews without unpacking.
+
+**The model page.** Double-clicking a card, or **Open** in the details panel, opens `#/model/<id>`: a large viewer on the left and, on the right, the model's details and its files as a tree. Tabs above the viewer switch between **3D**, **Pictures**, **Documents** and **Videos** (only the ones the model has). Back returns to where you were.
+
+**Parts and variants.** Sub-folders show as a part tree (Helmet, Arms, Legs…), each part clickable to view. Folders named like a variant (Presupported, Pre-supported, Supported, Unsupported, No supports…), at any depth, become a **variant switch** above the tree: picking one shows that variant's files plus the files outside any variant folder. The choice is per model and not saved.
+
+**Inside ZIPs.** A ZIP in the tree unfolds into its entries (read from the archive's directory, nothing unpacked). 3D files and pictures inside a ZIP open in the viewer straight from the archive; nested archives are listed, not opened. 7z and RAR stay closed (no library to read them here).
+
+**The 3D viewer** is Grid Workshop's three.js viewer (orbit, iso/top/front views, edges), without its Gridfinity grid: a plain floor grid in 10 mm squares, with the model's size shown. The core reads STL (binary and text), OBJ and 3MF (including Bambu/Orca projects whose meshes live in separate files, with component and build transforms) and sends the page triangles as binary STL, so the page has one loader. Very large meshes (over 2 million triangles) are shown without edges.
+
+**Thumbnails** are made by the core, not the page, so the Docker server can make them too: a small software renderer draws the model's main 3D file (the largest at the shallowest depth, preferring files outside an "unsupported" folder; inside a ZIP if that's all there is) from the same three-quarter view as the viewer, flat-shaded in the app's amber, on a transparent background, 400×300, into `_thumbs/model.png` in the model folder. A card's cover is the model.json `cover`, else a picture in `_media/`, else any picture, else that thumbnail. Making them runs as a job: after each import for the new models, and from **Make previews** on Home for any model without one. Files over 500 MB are skipped.
+
+**Pictures** show as a gallery (click for full size, arrows to step). **Documents:** PDFs open inside the app where the system's web view can show them, with **Open in default app** always there; Markdown and text readmes are shown as formatted text (raw HTML in them is shown as text, never run). **Videos** play in the page; the `library://` protocol (and `serve`) answer range requests so seeking works without reading whole files.
+
+**Set as cover** on a picture (or on the 3D view, which saves a snapshot to `_media/cover.png`) writes the model.json `cover`.
+
+## Phase 3 notes
+
+Built 2026-10-06, as designed above, with these details:
+
+- **Core:** `mesh.rs` (STL binary and text, OBJ, 3MF with components in other files via `p:path`, component and build transforms; `to_stl` for the page), `archive.rs` (ZIP listing without `__MACOSX` and `._` files; reading one entry with a size limit), `thumb.rs` (`pick_main`, `make`, the renderer: 800×600 drawn, averaged down to 400×300, PNG written with flate2), `docs.rs` (pulldown-cmark; HTML events become text; links other than http(s) lose their target). Commands: `model_zip {id, file}`, `model_mesh {id, file, entry?}` (binary STL), `model_entry {id, file, entry}` (bytes), `model_doc {id, file}` (`{html}`), `model_cover {id, file | snapshot}`, `thumbs_make {ids?, force?}` (a job). `model_get` gains `main` and `has_thumb`.
+- **Cover order:** a picture in the folder still wins over the drawn preview (`index.rs` uses `_thumbs/model.png` only when the model has no cover otherwise). So a model imported with its own photo keeps it on its card; the preview is there for the many models without one.
+- **Variants** are matched on the folder name with spaces, dashes and case ignored (`presupported`, `supported`, `withsupports`, `supports`; `unsupported`, `nosupports`, `nosupport`, `withoutsupports`). The supported variant is chosen first; **All** shows everything. The part tree opens two levels (a variant folder, then its parts).
+- **Readme links** are caught by the page and opened in the browser (the window's navigation guard from Phase 0 is the backstop).
+- **Range requests:** `App::library_range` serves both the Tauri protocol and `serve`; an open-ended range returns at most 8 MB, which is what video elements ask for.
+- **Tests:** `api.rs` checks meshes, ZIP entries, readmes, previews and ranges; `desktop_page.py` checks 19–24 (preview on import, the model page with variants, a ZIP's part, covers and a readme, ranges, Make previews). Headless Chromium needs `--enable-unsafe-swiftshader` for WebGL.
+- Not done: textures and 3MF colours in the viewer and previews; slicer files (G-code) in 3D; nested archives; 7z and RAR.

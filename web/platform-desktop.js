@@ -40,6 +40,8 @@ export async function createPlatform() {
     info,
     store,
     api,
+    /** One of the app's commands, answered as bytes (an ArrayBuffer). */
+    apiBytes: (cmd, args = {}) => invoke("api_bytes", { cmd, args }),
     /** A web link in the default browser. */
     openUrl: (url) => invoke("open_url", { url }).catch((err) => console.warn("open_url", err)),
     /** Folders and files dropped on the window (their paths). */

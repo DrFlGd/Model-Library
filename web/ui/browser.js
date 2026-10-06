@@ -7,11 +7,14 @@ import { ui, setPref } from "./state.js";
 import { routeHash, schemaScope } from "./context.js";
 import { Icon } from "./icons.js";
 import { api, libraryUrl, toast } from "./library.js";
+
+/** Open a model's own page. */
+const openModel = (m) => { location.hash = routeHash(`model:${m.id}`); };
 import { ModelDetails } from "./details.js";
 
 const PAGE = 300;
 const SORTS = [["name", "Name"], ["added", "Recently added"], ["size", "Largest"]];
-const KIND_ICON = { model: "box", slicer: "layers", image: "image", doc: "file", video: "image", archive: "folder", other: "file" };
+const KIND_ICON = { model: "box", slicer: "stack", image: "image", doc: "file", video: "image", archive: "folder", other: "file" };
 
 /** The place's title, as links back up its categories. */
 function Title({ scope, overview }) {
@@ -34,7 +37,7 @@ export function Cover({ model, cls = "" }) {
   }
   const kinds = Object.keys(model.files?.kinds || {});
   const kind = ["model", "slicer", "archive", "image", "doc", "video"].find((k) => kinds.includes(k)) || "other";
-  return html`<span class=${`thumb thumb-none ${cls}`}>${Icon[KIND_ICON[kind]](40)}</span>`;
+  return html`<span class=${`thumb thumb-none ${cls}`}>${(Icon[KIND_ICON[kind]] || Icon.file)(40)}</span>`;
 }
 
 /** Click: select one. Ctrl or Cmd click: add or remove it. Shift click: the run from the selected one. */
@@ -56,7 +59,7 @@ function choose(e, m, items) {
 
 function Card({ m, selected, fav, items }) {
   return html`<div class="card" role="option" tabindex="0" data-model=${m.id} aria-selected=${selected ? "true" : "false"}
-    onClick=${(e) => choose(e, m, items)} onKeyDown=${(e) => { if (e.key === "Enter") ui.set({ selection: m.id, picked: [] }); }}>
+    onClick=${(e) => choose(e, m, items)} onDblClick=${() => openModel(m)} onKeyDown=${(e) => { if (e.key === "Enter") openModel(m); }}>
     <${Cover} model=${m} />
     ${fav ? html`<span class="card-fav" title="Favourite">${Icon.star(14, true)}</span>` : null}
     <span class="card-name">${m.name}</span>
@@ -67,7 +70,7 @@ function Card({ m, selected, fav, items }) {
 
 function Row({ m, selected, fav, items }) {
   return html`<div class="row" role="option" tabindex="0" data-model=${m.id} aria-selected=${selected ? "true" : "false"}
-    onClick=${(e) => choose(e, m, items)} onKeyDown=${(e) => { if (e.key === "Enter") ui.set({ selection: m.id, picked: [] }); }}>
+    onClick=${(e) => choose(e, m, items)} onDblClick=${() => openModel(m)} onKeyDown=${(e) => { if (e.key === "Enter") openModel(m); }}>
     <${Cover} model=${m} cls="thumb-sm" />
     <span class="row-name">${m.name}${fav ? html` <span class="badge-star">${Icon.star(12, true)}</span>` : null}</span>
     <span class="row-author">${m.authors.join(", ")}</span>

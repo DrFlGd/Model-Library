@@ -113,8 +113,10 @@ fn mime(path: &str) -> &'static str {
         "3mf" => "model/3mf",
         "json" => "application/json",
         "pdf" => "application/pdf",
-        "mp4" => "video/mp4",
+        "mp4" | "m4v" => "video/mp4",
         "webm" => "video/webm",
+        "mov" => "video/quicktime",
+        "obj" => "text/plain; charset=utf-8",
         "txt" | "md" => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     }
@@ -128,18 +130,26 @@ fn main() {
         .register_asynchronous_uri_scheme_protocol("library", |ctx, request, responder| {
             let app = ctx.app_handle().state::<AppState>().app.clone();
             let path = request.uri().path().to_string();
+            // range requests, so videos seek without reading whole files
+            let range = request.headers().get("range").and_then(|v| v.to_str().ok()).map(String::from);
             tauri::async_runtime::spawn(async move {
                 let res = tokio::task::spawn_blocking(move || {
-                    let body = app.library_file(&path);
+                    let body = app.library_range(&path, range.as_deref());
                     (path, body)
                 })
                 .await;
                 let response = match res {
-                    Ok((path, Ok(body))) => tauri::http::Response::builder()
-                        .status(200)
-                        .header("Content-Type", mime(&path))
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(body),
+                    Ok((path, Ok((code, body, content_range)))) => {
+                        let mut r = tauri::http::Response::builder()
+                            .status(code)
+                            .header("Content-Type", mime(&path))
+                            .header("Accept-Ranges", "bytes")
+                            .header("Access-Control-Allow-Origin", "*");
+                        if let Some(cr) = content_range {
+                            r = r.header("Content-Range", cr);
+                        }
+                        r.body(body)
+                    }
                     Ok((_, Err(e))) => tauri::http::Response::builder().status(404).body(e.to_string().into_bytes()),
                     Err(e) => tauri::http::Response::builder().status(500).body(e.to_string().into_bytes()),
                 };

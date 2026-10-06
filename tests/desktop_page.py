@@ -15,6 +15,10 @@ Phase 2: sorting a messy folder through the Import page (proposals, warnings,
 setting categories for several rows, move with a checked copy), adding a model
 folder by copy, Move to category for one and several models, and sorting a loose
 folder found inside the library.
+Phase 3: a preview drawn on import, a model's page with its 3D view, parts as a
+tree and a Presupported/Unsupported switch, a ZIP's entries shown from inside
+it, a readme rendered safely, pictures and "Use as cover", ranged reads of
+library files (video seeking), and Make previews from Home.
 Phase 1: making a schema, hand-made model folders listed under their categories,
 search with typed filters, a model's details and files, editing details into
 model.json, starring, and 10,000 generated models read and searched in time.
@@ -311,6 +315,110 @@ async def phase2(pg):
     await pg.screenshot(path=str(out / "11-home.png"))
 
 
+def cube(size=10.0):
+    """A closed ASCII STL cube."""
+    v = [(x, y, z) for x in (0, size) for y in (0, size) for z in (0, size)]
+    faces = [(0, 2, 3, 1), (4, 5, 7, 6), (0, 1, 5, 4), (2, 6, 7, 3), (0, 4, 6, 2), (1, 3, 7, 5)]
+    out = ["solid cube"]
+    for a_, b_, c_, d_ in faces:
+        for t in ((a_, b_, c_), (a_, c_, d_)):
+            out += ["facet normal 0 0 0", "outer loop", *(f"vertex {v[i][0]} {v[i][1]} {v[i][2]}" for i in t), "endloop", "endfacet"]
+    return "\n".join(out + ["endsolid cube", ""])
+
+
+async def phase3(pg):
+    import zipfile
+    # 19. a model with parts, variants, a ZIP, a readme and a picture: previewed on import
+    src = home / "Elsewhere/Knight Armour"
+    put(src / "Presupported/Helmet/helmet.stl", cube(20))
+    put(src / "Presupported/Arms/arm.stl", cube(8))
+    put(src / "Unsupported/Helmet/helmet.stl", cube(20))
+    put(src / "README.md", "# Knight Armour\n\nPrint at **0.12 mm**.\n\n<script>window.__pwned = 1</script>\n\n[site](https://example.com) [bad](javascript:alert(1))\n")
+    put(src / "photo.png", PNG)
+    with zipfile.ZipFile(src / "extras.zip", "w") as z:
+        z.writestr("Extras/shield.stl", cube(15))
+        z.writestr("__MACOSX/Extras/._shield.stl", "x")
+    await pg.goto(B + "#/import")
+    await pg.click("#import-clear") if await pg.locator("#import-clear").count() else None
+    pick(src)
+    await pg.click("#import-add-folder")
+    await pg.wait_for_selector("#import-list .imp-row")
+    await import_and_wait(pg)
+    dest = library / "Unsorted/Knight Armour"
+    thumb = (dest / "_thumbs/model.png").is_file()
+    await pg.goto(B + "#/browse/unsorted")
+    card = pg.locator(".card:has(.card-name:text-is('Knight Armour'))")
+    await card.wait_for()
+    cover = await card.locator("img").get_attribute("src") or ""
+    check("a preview is drawn on import (a picture of the model is still its cover)", thumb and cover.endswith("/photo.png"), (thumb, cover))
+
+    # 20. the model's page: 3D view, part tree, variants
+    await card.dblclick()
+    await pg.wait_for_selector("#model-page")
+    await pg.wait_for_selector("#viewer-size, .stage-3d .form-error", timeout=30000)
+    size_text = await pg.inner_text("#viewer-size") if await pg.locator("#viewer-size").count() else await pg.inner_text(".stage-3d .form-error")
+    shown = await pg.inner_text("#viewer-file")
+    variants = await pg.eval_on_selector_all("#variants button", "els => els.map(e => e.textContent + (e.getAttribute('aria-pressed') === 'true' ? '*' : ''))")
+    dirs = await pg.eval_on_selector_all("#part-tree [data-dir]", "els => els.map(e => e.dataset.dir)")
+    await pg.screenshot(path=str(out / "12-model-page.png"))
+    check("a model opens on its own page with a 3D view, parts and variants", "20.0 × 20.0 × 20.0 mm" in size_text and shown == "Presupported/Helmet/helmet.stl"
+          and variants == ["Presupported*", "Unsupported", "All"] and dirs == ["Presupported", "Presupported/Arms", "Presupported/Helmet"], (size_text, shown, variants, dirs))
+    await pg.click("#part-tree [data-file='Presupported/Arms/arm.stl']")
+    await pg.wait_for_function("() => document.querySelector('#viewer-size')?.textContent.startsWith('8.0')")
+    await pg.click("#variants button:text-is('Unsupported')")
+    await pg.wait_for_function("() => document.querySelector('#viewer-file')?.textContent === 'Unsupported/Helmet/helmet.stl'")
+    dirs = await pg.eval_on_selector_all("#part-tree [data-dir]", "els => els.map(e => e.dataset.dir)")
+    check("the variant switch shows that variant's parts", dirs == ["Unsupported", "Unsupported/Helmet"], dirs)
+
+    # 21. a ZIP's entries open from inside it
+    await pg.click("#part-tree [data-file='extras.zip']")
+    await pg.wait_for_selector("#part-tree [data-entry]")
+    entries = await pg.eval_on_selector_all("#part-tree [data-entry]", "els => els.map(e => e.dataset.entry)")
+    await pg.click("#part-tree [data-entry='Extras/shield.stl']")
+    await pg.wait_for_function("() => document.querySelector('#viewer-file')?.textContent === 'extras.zip › Extras/shield.stl' && document.querySelector('#viewer-size')?.textContent.startsWith('15.0')")
+    check("a ZIP's parts are listed and shown without unzipping", entries == ["Extras/shield.stl"] and (dest / "extras.zip").is_file(), entries)
+
+    # 22. "Use as cover" from the 3D view, the readme, the picture
+    await pg.click("#view-cover")
+    await pg.wait_for_function("() => document.querySelector('.toast')?.textContent.includes('cover')")
+    side = json.loads((dest / "model.json").read_text())
+    snap = (dest / "_media/cover.png").read_bytes()[:4] == b"\x89PNG" if (dest / "_media/cover.png").exists() else False
+    await pg.click("[data-tab=docs]")
+    await pg.wait_for_selector("#doc-text h1")
+    doc = await pg.inner_html("#doc-text")
+    pwned = await pg.evaluate("() => window.__pwned || 0")
+    await pg.screenshot(path=str(out / "13-readme.png"))
+    await pg.click("[data-tab=pictures]")
+    await pg.wait_for_selector("#picture-big")
+    await pg.click(".strip-btn[data-file='photo.png']")
+    await pg.click("#picture-cover")
+    await pg.wait_for_function("() => document.querySelector('#picture-cover')?.disabled")
+    side2 = json.loads((dest / "model.json").read_text())
+    check("a view or a picture becomes the cover; readmes show without scripts", snap and side["cover"] == "_media/cover.png" and side2["cover"] == "photo.png"
+          and "<strong>0.12 mm</strong>" in doc and "<script" not in doc and 'href="javascript' not in doc and not pwned, (side.get("cover"), side2.get("cover"), doc[:200], pwned))
+
+    # 23. library files can be read in ranges (videos seek)
+    req = urllib.request.Request(B + "library/Unsorted/Knight%20Armour/README.md", headers={"Range": "bytes=2-7"})
+    with urllib.request.urlopen(req, timeout=5) as r:
+        code, body, cr = r.status, r.read(), r.headers.get("content-range")
+    check("library files are served in ranges", code == 206 and body == b"Knight" and cr and cr.startswith("bytes 2-7/"), (code, body, cr))
+
+    # 24. Make previews, for models added by hand
+    put(library / "Unsorted/Hand Made/hand.stl", cube(5))
+    await pg.goto(B + "#/")
+    await pg.click("#rescan")
+    await pg.wait_for_timeout(500)
+    await pg.click("#make-previews")
+    await pg.wait_for_function("() => /preview/.test(document.querySelector('.toast')?.textContent || '')", timeout=60000)
+    msg = await pg.inner_text(".toast")
+    await pg.goto(B + "#/browse/unsorted")
+    hand = pg.locator(".card:has(.card-name:text-is('Hand Made')) img")
+    await hand.wait_for()
+    src_ = await hand.get_attribute("src")
+    check("Make previews draws the missing ones, shown on the card", (library / "Unsorted/Hand Made/_thumbs/model.png").is_file() and src_.endswith("_thumbs/model.png"), (msg, src_))
+    await pg.screenshot(path=str(out / "14-previews.png"))
+
+
 def big_library():
     """10,000 generated models: read, read again from the cache, searched."""
     big = home / "Big"
@@ -326,7 +434,7 @@ async def main():
     server = start_server()
     try:
         async with async_playwright() as p:
-            b = await p.chromium.launch(executable_path=a.chromium)
+            b = await p.chromium.launch(executable_path=a.chromium, args=["--enable-unsafe-swiftshader", "--use-angle=swiftshader"])
             ctx = await b.new_context(viewport={"width": 1400, "height": 900})
             await ctx.add_init_script(path=str(SHIM))
             pg = await ctx.new_page()
@@ -359,6 +467,7 @@ async def main():
 
             await phase1(pg)
             await phase2(pg)
+            await phase3(pg)
 
             # 3. renaming the library
             await pg.click('.sidebar a[href="#/settings"]')

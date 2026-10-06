@@ -8,6 +8,7 @@ export function setContext(values) { Object.assign(ctx, values); }
 export function routeHash(route) {
   if (route === "home") return "#/";
   if (route.startsWith("browse:")) return `#/browse/${route.slice(7).replace(/^schema:/, "schema/")}`;
+  if (route.startsWith("model:")) return `#/model/${encodeURIComponent(route.slice(6))}`;
   return `#/${route}`;
 }
 
@@ -19,6 +20,7 @@ export function routeFromHash(hash) {
     if (rest[0] === "schema" && rest[1]) return `browse:schema:${rest.slice(1).join("/")}`;
     return `browse:${rest[0] || "all"}`;
   }
+  if (first === "model" && rest[0]) return `model:${decodeURIComponent(rest[0])}`;
   return first === "settings" || first === "import" ? first : "home";
 }
 

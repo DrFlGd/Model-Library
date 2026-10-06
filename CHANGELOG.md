@@ -20,8 +20,8 @@ The code started as a trimmed copy of [Claude Grid Workshop](https://github.com/
 
 | Path | What |
 | --- | --- |
-| `web/` | The front end (no build step). `app.js`: start-up and routing. `web/ui/`: Preact + htm islands (`shell.js` mounts them; `sidebar.js` with the schema trees, `home.js` with the first-start screen, `browser.js` for the model grid/list and search, `details.js` for the selected model, `dialogs.js` for New category, Edit details and Move, `import.js` for the Import page, `category.js` for the category picker, `settings.js`, `chrome.js` for the top bar and status bar, `library.js` for library and model actions, `state.js` for shared state and preferences). `platform.js` / `platform-desktop.js`: the seam between the page and the backend (desktop now, a server later). |
-| `desktop/core/` | Rust, no GUI: `api.rs` (the app's command table, `App::call`), `library.rs` (the library folder: `_library/library.json`, format number, read-only for newer formats), `schema.rs` (schema files, folder-name templates), `model.rs` (a model folder: its files, kinds, cover, `model.json`), `index.rs` (finding models, the in-memory index and its cache on this computer, search), `import.rs` (proposing models from folders, destinations, moving or copying with SHA-256 checks, moving between categories), `config.rs` (what stays on this computer). `src/bin/modlib-cli.rs`: `library-info`, `library-scan`, `make-test-library` and `serve` (the backend over HTTP, for tests now and the Docker build later). |
+| `web/` | The front end (no build step). `app.js`: start-up and routing. `web/ui/`: Preact + htm islands (`shell.js` mounts them; `sidebar.js` with the schema trees, `home.js` with the first-start screen, `browser.js` for the model grid/list and search, `details.js` for the selected model, `dialogs.js` for New category, Edit details and Move, `import.js` for the Import page, `modelpage.js` for a model's own page (viewer, part tree, variants, pictures, documents, videos), `category.js` for the category picker, `settings.js`, `chrome.js` for the top bar and status bar, `library.js` for library and model actions, `state.js` for shared state and preferences). `viewer.js`: the three.js viewer (three.js in `web/vendor/three/`, loaded only on a model's page). `platform.js` / `platform-desktop.js`: the seam between the page and the backend (desktop now, a server later). |
+| `desktop/core/` | Rust, no GUI: `api.rs` (the app's command table, `App::call`), `library.rs` (the library folder: `_library/library.json`, format number, read-only for newer formats), `schema.rs` (schema files, folder-name templates), `model.rs` (a model folder: its files, kinds, cover, `model.json`), `index.rs` (finding models, the in-memory index and its cache on this computer, search), `import.rs` (proposing models from folders, destinations, moving or copying with SHA-256 checks, moving between categories), `mesh.rs` (reading STL, OBJ and 3MF into triangles; binary STL for the viewer), `archive.rs` (listing and reading ZIP entries), `thumb.rs` (choosing a model's main 3D file and drawing its preview, a small software renderer, PNG out), `docs.rs` (readmes as safe HTML), `config.rs` (what stays on this computer). `src/bin/modlib-cli.rs`: `library-info`, `library-scan`, `make-test-library` and `serve` (the backend over HTTP, for tests now and the Docker build later). |
 | `desktop/src-tauri/` | The Tauri app: a thin layer over `api.rs`, plus dialogs, the file manager and the `library://` protocol. Version in `tauri.conf.json`. |
 | `tools/` | `build_desktop.py` (web/ to `build/desktop/ui`, fonts), `set_version.py`, `vendor_preact.py`. |
 | `tests/` | `desktop_page.py` (acceptance test: the page + the real backend through `modlib-cli serve` and `tauri_shim.js`, in Chromium), `desktop_ui.py` (WebDriver on the built app). |
@@ -47,21 +47,34 @@ The sandbox has a network allowlist and is reset between sessions.
 
 ### Known limitations now
 
-- Importing reads ZIPs as files: they aren't opened or unpacked (Phase 3 lists what's inside). 7z and RAR are kept as archives too. Schemas can be made but not changed (Phase 4).
+- ZIPs are read in place (listed, and their 3D files and pictures shown) but never unpacked; 7z and RAR are kept as archives and not opened. Schemas can be made but not changed (Phase 4).
 - The duplicate check compares file counts and sizes only; no hashing of the library yet (Phase 5's duplicate report).
-- The index lives in memory and is cached per computer (`<data dir>/index/<library id>.json`); 10,000 models take about 1 s to read the first time and under a second after. Thumbnails aren't generated yet: covers are pictures already in the folder.
+- The index lives in memory and is cached per computer (`<data dir>/index/<library id>.json`); 10,000 models take about 1 s to read the first time and under a second after.
+- Previews are drawn by the core's own renderer (`thumb.rs`, flat shaded, no textures or colours from 3MF). Models whose 3D file can't be read get no preview and are tried again by every *Make previews*. G-code and other slicer files aren't shown in 3D.
 - `Cargo.lock` isn't committed yet: the first CI run makes it (the Tauri crates can't be resolved in a cloud session). Commit `ci-out/Cargo.lock` from the `desktop-ci-linux` branch once it exists.
-- The `library://` protocol reads whole files into memory and has no range requests; videos and large STLs need that (Phase 3).
+- The `library://` protocol and `serve` answer range requests (8 MB at a time when the end is open), so videos seek; a whole-file read still loads it into memory. 3D files over 500 MB aren't shown.
 - The app icons are Grid Workshop's; the interface has its own mark (a stack of layers). New icons are to do.
 - Installers aren't code-signed, and there's no auto-update.
 
 ### Next (roadmap)
 
-Phase 3 in `docs/PLAN.md`: viewing models (part tree, variants, files inside ZIPs, a 3D viewer, thumbnails, pictures, PDFs and videos).
+Phase 4 in `docs/PLAN.md`: editing categories, with folders moved to match. The owner wants to test Phase 3 in depth before Phase 4 starts.
 
 ---
 
 ## Unreleased
+
+Phase 3 (0.3): viewing models (design in docs/PLAN.md, "Phase 3 design"; notes in "Phase 3 notes").
+
+- **A model's own page**: double-click a model, press Enter, or use **Open** in its details. A large 3D view (STL, OBJ, 3MF; turn, zoom, pan; 3/4, top and front views; edges; size in mm and triangle count), with tabs for its **Pictures**, **Documents** and **Videos**.
+- **Parts as a tree**: the model's files keep their folders (Helmet, Arms…); click a part to show it. Folders named Presupported, Supported, Unsupported and the like are **variants**: a switch shows one variant's parts (supported first) or all.
+- **ZIPs open in place**: a ZIP in the tree unfolds into its entries, and its 3D files and pictures are shown straight from the archive, never unpacked.
+- **Previews**: importing draws `_thumbs/model.png` from the model's main 3D file (supported variant first, then the shallowest, then the largest), used as the card picture when the model has no picture of its own. **Make previews** on Home draws the missing ones for models added by hand. **Use as cover** saves the 3D view or a picture as the model's cover.
+- **Readmes** (Markdown, text) are shown formatted; raw HTML shows as text and only web links are kept, opening in the browser. PDFs show in the page; other documents open in their own app.
+- **Videos** (MP4, WebM, M4V, MOV) play in the page and seek: library files are served in ranges.
+- `modlib-cli thumb --model <folder>` draws one model's preview.
+
+## 0.2.0 (2026-10-06)
 
 Phase 2 (0.2): importing, and moving models between categories (design in docs/PLAN.md, "Phase 2 design"; notes in "Phase 2 notes").
 

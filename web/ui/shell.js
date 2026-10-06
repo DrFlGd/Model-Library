@@ -11,6 +11,7 @@ import { Browser } from "./browser.js";
 import { Dialogs } from "./dialogs.js";
 import { Settings } from "./settings.js";
 import { ImportPage, onDropped } from "./import.js";
+import { ModelPage } from "./modelpage.js";
 import { loadOverview } from "./library.js";
 
 function Main() {
@@ -18,6 +19,7 @@ function Main() {
   const blocked = useStore(ui, (s) => s.firstRun && !s.library);
   if (route === "settings" && !blocked) return html`<${Settings} />`;
   if (route === "import" && !blocked) return html`<${ImportPage} />`;
+  if (route.startsWith("model:") && !blocked) return html`<${ModelPage} key=${route} id=${route.slice(6)} />`;
   if (route.startsWith("browse:") && !blocked) return html`<${Browser} key=${route} />`;
   return html`<${Home} />`;
 }

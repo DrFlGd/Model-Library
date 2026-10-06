@@ -5,6 +5,7 @@ import { ctx } from "./context.js";
 
 export const isDesktop = () => ctx.platform?.kind === "desktop";
 export const api = (cmd, args) => ctx.platform.api(cmd, args);
+export const apiBytes = (cmd, args) => ctx.platform.apiBytes(cmd, args);
 
 /** Show a short message at the bottom of the window. */
 export function toast(text, ms = 3500) {
@@ -90,6 +91,12 @@ export const libraryUrl = (rel) => ctx.platform.library?.url(rel);
 export function showModelFolder(model) {
   const lib = ui.get().library;
   if (lib) ctx.platform.library.openPath(`${lib.path}/${model.rel}`);
+}
+
+/** Open one of a model's files in its default app. */
+export function openModelFile(model, rel) {
+  const lib = ui.get().library;
+  if (lib) ctx.platform.library.openPath(`${lib.path}/${model.rel}/${rel}`);
 }
 
 /** Star or unstar a model (starring gives it a model.json, so the star lasts). */

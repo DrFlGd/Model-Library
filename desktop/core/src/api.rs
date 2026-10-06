@@ -5,7 +5,7 @@
 use crate::config::{AppConfig, Prefs};
 use crate::index::Index;
 use crate::library::{self, Library};
-use crate::{import, model, schema};
+use crate::{archive, import, mesh, model, schema, thumb};
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -269,8 +269,34 @@ impl App {
                 }
             }
         }
+        // previews for the new models
+        let made: Vec<String> = results
+            .iter()
+            .filter_map(|r| r["dest"].as_str().map(String::from))
+            .collect();
+        for (i, d) in made.iter().enumerate() {
+            self.job_progress(jid, json!({ "item": i, "items": made.len(), "name": "Making previews", "bytes": total_bytes, "total_bytes": total_bytes }));
+            let dir = PathBuf::from(d);
+            if !thumb::has(&dir) {
+                if let Err(e) = thumb::make(&dir) {
+                    eprintln!("preview of {d}: {e:#}");
+                }
+            }
+        }
         self.job_progress(jid, json!({ "item": items.len(), "items": items.len(), "bytes": total_bytes, "total_bytes": total_bytes }));
         results
+    }
+
+    /// A model's folder and index entry, by id.
+    async fn model_dir(&self, args: &Value) -> Result<(PathBuf, Value), String> {
+        let id = arg(args, "id").map_err(e2s)?.to_string();
+        let found = self
+            .with_index(None, |ix, lib| {
+                ix.get(&id).map(|m| (lib.resolve(m.rel()), m.v.clone()))
+            })
+            .await?;
+        let (dir, v) = found.ok_or("That model isn't in the library any more.")?;
+        Ok((dir.map_err(e2s)?, v))
     }
 
     pub async fn call(self: &Arc<Self>, cmd: &str, args: Value) -> Result<Reply, String> {
@@ -400,6 +426,115 @@ impl App {
                     Ok(json!({ "results": results, "mode": if mv { "move" } else { "copy" } }))
                 }))
             }
+            "model_zip" => {
+                let (dir, _) = self.model_dir(&args).await?;
+                let file =
+                    crate::library::rel_inside(arg(&args, "file").map_err(e2s)?).map_err(e2s)?;
+                j(json!(archive::list(&dir.join(file)).map_err(e2s)?))
+            }
+            "model_mesh" => {
+                let (dir, _) = self.model_dir(&args).await?;
+                let (file, entry) = (
+                    arg(&args, "file").map_err(e2s)?.to_string(),
+                    args["entry"].as_str().map(String::from),
+                );
+                let stl = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
+                    let bytes = thumb::file_bytes(&dir, &file, entry.as_deref())?;
+                    Ok(mesh::to_stl(&mesh::read(
+                        entry.as_deref().unwrap_or(&file),
+                        &bytes,
+                    )?))
+                })
+                .await
+                .map_err(|e| e.to_string())?
+                .map_err(e2s)?;
+                Ok(Reply::Bytes(stl))
+            }
+            "model_entry" => {
+                let (dir, _) = self.model_dir(&args).await?;
+                let (file, entry) = (
+                    arg(&args, "file").map_err(e2s)?,
+                    arg(&args, "entry").map_err(e2s)?,
+                );
+                Ok(Reply::Bytes(
+                    thumb::file_bytes(&dir, file, Some(entry)).map_err(e2s)?,
+                ))
+            }
+            "model_doc" => {
+                let (dir, _) = self.model_dir(&args).await?;
+                let file = arg(&args, "file").map_err(e2s)?;
+                let bytes = thumb::file_bytes(&dir, file, args["entry"].as_str()).map_err(e2s)?;
+                j(json!({ "html": crate::docs::to_html(file, &bytes) }))
+            }
+            "model_cover" => {
+                let (dir, v) = self.model_dir(&args).await?;
+                let cover = match args["snapshot"].as_str() {
+                    Some(data) => {
+                        use base64::Engine;
+                        let b64 = data.split_once(',').map(|(_, b)| b).unwrap_or(data);
+                        let png = base64::engine::general_purpose::STANDARD
+                            .decode(b64.trim())
+                            .map_err(|e| format!("not a picture: {e}"))?;
+                        if !png.starts_with(b"\x89PNG") {
+                            return Err("not a PNG".into());
+                        }
+                        self.library()?.writable().map_err(e2s)?;
+                        crate::config::write_atomic(&dir.join("_media/cover.png"), &png)
+                            .map_err(e2s)?;
+                        json!("_media/cover.png")
+                    }
+                    None => args["file"].clone(),
+                };
+                Box::pin(self.call(
+                    "model_update",
+                    json!({ "id": v["id"], "patch": { "cover": cover } }),
+                ))
+                .await
+            }
+            "thumbs_make" => {
+                let force = args["force"].as_bool() == Some(true);
+                let only: Option<Vec<String>> = args["ids"].as_array().map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(String::from)
+                        .collect()
+                });
+                self.library()?.writable().map_err(e2s)?;
+                let dirs: Vec<(String, PathBuf)> = self
+                    .with_index(None, |ix, lib| {
+                        ix.models
+                            .iter()
+                            .filter(|m| {
+                                only.as_ref()
+                                    .is_none_or(|o| o.iter().any(|id| id == m.id()))
+                            })
+                            .filter(|m| force || m.v["files"]["cover"].is_null())
+                            .filter_map(|m| {
+                                Some((
+                                    m.v["name"].as_str().unwrap_or("").to_string(),
+                                    lib.resolve(m.rel()).ok()?,
+                                ))
+                            })
+                            .collect()
+                    })
+                    .await?;
+                let n = dirs.len();
+                j(self.spawn_job("Making previews", move |app, jid, cancel| {
+                    let (mut made, mut none, mut failed) = (0, 0, vec![]);
+                    for (i, (name, dir)) in dirs.iter().enumerate() {
+                        if cancel.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        app.job_progress(&jid, json!({ "item": i, "items": n, "name": name }));
+                        match thumb::make(dir) {
+                            Ok(true) => made += 1,
+                            Ok(false) => none += 1,
+                            Err(e) => failed.push(json!({ "name": name, "error": e2s(e) })),
+                        }
+                    }
+                    Ok(json!({ "made": made, "no_3d": none, "failed": failed }))
+                }))
+            }
             "job" => {
                 let id = arg(&args, "id").map_err(e2s)?;
                 let jobs = self.jobs.lock().unwrap();
@@ -499,6 +634,10 @@ impl App {
                 let dir = dir.map_err(e2s)?;
                 v["files_list"] = json!(model::list_files(&dir).into_iter().map(|(rel, size)| json!({ "rel": rel, "size": size, "kind": model::file_kind(&rel) })).collect::<Vec<_>>());
                 v["details"] = model::read_sidecar(&dir);
+                // the 3D file shown first (the one its thumbnail is drawn from)
+                v["main"] = json!(thumb::pick_main(&dir)
+                    .map(|(file, entry)| json!({ "file": file, "entry": entry })));
+                v["has_thumb"] = json!(thumb::has(&dir));
                 j(v)
             }
             "model_update" => {
@@ -562,6 +701,37 @@ impl App {
             }
             other => Err(format!("unknown command {other}")),
         }
+    }
+
+    /// Part of a file in the open library for an HTTP `Range` header ("bytes=a-b"):
+    /// (status, bytes, Content-Range). Without one, the whole file (200).
+    pub fn library_range(
+        &self,
+        rel: &str,
+        range: Option<&str>,
+    ) -> Result<(u16, Vec<u8>, Option<String>)> {
+        use std::io::{Read, Seek, SeekFrom};
+        let lib = self.library().map_err(|e| anyhow!(e))?;
+        let path = lib.resolve(&percent_decode(rel.trim_start_matches('/')))?;
+        let Some(r) = range.and_then(|r| r.trim().strip_prefix("bytes=")) else {
+            return Ok((200, std::fs::read(&path)?, None));
+        };
+        let total = std::fs::metadata(&path)?.len();
+        let (a, b) = r.split_once('-').unwrap_or((r, ""));
+        let (start, end) = match (a.trim().parse::<u64>().ok(), b.trim().parse::<u64>().ok()) {
+            (Some(s), Some(e)) => (s, e.min(total.saturating_sub(1))),
+            (Some(s), None) => (s, (s + (8 << 20)).min(total).saturating_sub(1)), // 8 MB at a time
+            (None, Some(n)) => (total.saturating_sub(n), total.saturating_sub(1)),
+            _ => return Ok((200, std::fs::read(&path)?, None)),
+        };
+        if start >= total || end < start {
+            return Ok((416, vec![], Some(format!("bytes */{total}"))));
+        }
+        let mut f = std::fs::File::open(&path)?;
+        f.seek(SeekFrom::Start(start))?;
+        let mut buf = vec![0; (end - start + 1) as usize];
+        f.read_exact(&mut buf)?;
+        Ok((206, buf, Some(format!("bytes {start}-{end}/{total}"))))
     }
 
     /// A file in the open library, by its library-relative path (the `library://` protocol).
@@ -837,6 +1007,118 @@ mod tests {
         )
         .await;
         assert_eq!(q["total"], 2);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    async fn bytes(app: &Arc<App>, cmd: &str, args: Value) -> Vec<u8> {
+        match app.call(cmd, args).await.unwrap() {
+            Reply::Bytes(b) => b,
+            Reply::Json(v) => panic!("json {v}"),
+        }
+    }
+
+    async fn wait(app: &Arc<App>, job: &Value) -> Value {
+        let id = job["job"].as_str().unwrap().to_string();
+        for _ in 0..500 {
+            let done = call(app, "job", json!({ "id": id })).await;
+            if done["done"] == true {
+                return done;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("job didn't finish")
+    }
+
+    #[tokio::test]
+    async fn shows_meshes_zips_readmes_and_previews() {
+        use std::io::Write;
+        let (app, home) = app("view");
+        let lib = home.join("Lib");
+        call(
+            &app,
+            "library_open",
+            json!({ "path": lib.display().to_string() }),
+        )
+        .await;
+        let dir = lib.join("Unsorted/Armour (Jo)");
+        std::fs::create_dir_all(dir.join("Presupported/Helmet")).unwrap();
+        std::fs::create_dir_all(dir.join("Unsupported")).unwrap();
+        std::fs::write(
+            dir.join("Presupported/Helmet/helmet.stl"),
+            mesh::tests::cube_stl_text(),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("Unsupported/body.stl"),
+            mesh::tests::cube_stl_text().repeat(3),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("README.md"),
+            "# Armour\n\n<script>alert(1)</script>\n\n[site](https://example.com) [bad](javascript:x)",
+        )
+        .unwrap();
+        let mut z = zip::ZipWriter::new(std::fs::File::create(dir.join("extra.zip")).unwrap());
+        z.start_file::<_, ()>("parts/arm.stl", Default::default())
+            .unwrap();
+        z.write_all(mesh::tests::cube_stl_text().as_bytes())
+            .unwrap();
+        z.start_file::<_, ()>("__MACOSX/._arm.stl", Default::default())
+            .unwrap();
+        z.finish().unwrap();
+        call(&app, "library_scan", json!({ "full": true })).await;
+        let q = call(&app, "models_query", json!({ "scope": "all" })).await;
+        let id = q["items"][0]["id"].as_str().unwrap().to_string();
+        // the main file prefers the supported variant
+        let m = call(&app, "model_get", json!({ "id": id })).await;
+        assert_eq!(m["main"]["file"], "Presupported/Helmet/helmet.stl", "{m}");
+        assert_eq!(m["has_thumb"], false);
+        let stl = bytes(
+            &app,
+            "model_mesh",
+            json!({ "id": id, "file": "Unsupported/body.stl" }),
+        )
+        .await;
+        assert_eq!(u32::from_le_bytes(stl[80..84].try_into().unwrap()), 9);
+        let entries = call(&app, "model_zip", json!({ "id": id, "file": "extra.zip" })).await;
+        assert_eq!(entries.as_array().unwrap().len(), 1, "{entries}");
+        assert_eq!(entries[0]["name"], "parts/arm.stl");
+        let stl = bytes(
+            &app,
+            "model_mesh",
+            json!({ "id": id, "file": "extra.zip", "entry": "parts/arm.stl" }),
+        )
+        .await;
+        assert_eq!(stl.len(), 84 + 50 * 3);
+        assert!(app
+            .call("model_mesh", json!({ "id": id, "file": "../../x.stl" }))
+            .await
+            .is_err());
+        let doc = call(&app, "model_doc", json!({ "id": id, "file": "README.md" })).await;
+        let html = doc["html"].as_str().unwrap();
+        assert!(
+            html.contains("<h1>Armour</h1>")
+                && !html.contains("<script")
+                && html.contains("https://example.com")
+                && !html.contains("href=\"javascript"),
+            "{html}"
+        );
+        // previews: made for models without a cover, then used as the cover
+        let done = wait(&app, &call(&app, "thumbs_make", json!({})).await).await;
+        assert_eq!(done["result"]["made"], 1, "{done}");
+        assert!(dir.join(thumb::THUMB).is_file());
+        let q = call(&app, "models_query", json!({ "scope": "all" })).await;
+        assert_eq!(q["items"][0]["files"]["cover"], thumb::THUMB);
+        let done = wait(&app, &call(&app, "thumbs_make", json!({})).await).await;
+        assert_eq!(done["result"]["made"], 0);
+        // ranges, for videos
+        let rel = "Unsorted/Armour%20(Jo)/README.md";
+        let all = app.library_range(rel, None).unwrap();
+        assert_eq!(all.0, 200);
+        let (code, part, cr) = app.library_range(rel, Some("bytes=2-7")).unwrap();
+        assert_eq!((code, part.as_slice()), (206, &all.1[2..8]));
+        assert_eq!(cr.unwrap(), format!("bytes 2-7/{}", all.1.len()));
+        assert_eq!(app.library_range(rel, Some("bytes=99999-")).unwrap().0, 416);
         let _ = std::fs::remove_dir_all(&home);
     }
 }

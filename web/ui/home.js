@@ -4,7 +4,7 @@ import { html } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui } from "./state.js";
 import { ctx, routeHash, schemaScope } from "./context.js";
-import { isDesktop, openLibrary, showLibraryFolder, rescan } from "./library.js";
+import { api, isDesktop, openLibrary, showLibraryFolder, rescan, followJob, loadOverview, toast } from "./library.js";
 import { sortFolder } from "./import.js";
 
 const TREE = `_library/                  the app's own files
@@ -19,11 +19,24 @@ Wargames/
         _media/              pictures, PDFs, videos
         _thumbs/             previews`;
 
+/** Draw a preview for every model that has none yet. */
+async function makePreviews() {
+  try {
+    const { job } = await api("thumbs_make", {});
+    const done = await followJob(job, "Making previews");
+    await loadOverview();
+    if (done.error) throw new Error(done.error);
+    const r = done.result || {};
+    if (!r.made && !r.no_3d && !r.failed?.length) return toast("Every model has a preview already.");
+    toast(`Made ${r.made || 0} ${r.made === 1 ? "preview" : "previews"}${r.failed?.length ? `; ${r.failed.length} couldn't be drawn` : ""}.`, 5000);
+  } catch (e) { toast(`Couldn't make previews: ${e.message || e}`, 6000); }
+}
+
 const NEXT = [
   ["Phase 0", "The app, its library folder and settings"],
   ["Phase 1", "Categories, model details and search"],
-  ["Phase 2", "Importing models: files, folders and ZIPs, moved or copied into place, and moving models between categories", true],
-  ["Phase 3", "Viewing models, their parts, pictures, PDFs and videos"],
+  ["Phase 2", "Importing models: files, folders and ZIPs, moved or copied into place, and moving models between categories"],
+  ["Phase 3", "Viewing models: a 3D viewer, parts and variants, previews, pictures, readmes, PDFs and videos", true],
   ["Phase 4", "Editing categories, with folders moved to match"],
 ];
 
@@ -45,6 +58,7 @@ export function Home() {
       <button type="button" class="ghost" onClick=${() => openLibrary()}>Open another library…</button>
       <button type="button" class="ghost" id="rescan" onClick=${() => rescan(true)} disabled=${!lib}>Read the folders again</button>
     </div>` : null}
+    ${lib && !lib.read_only ? html`<div class="home-actions"><button type="button" class="ghost" id="make-previews" onClick=${makePreviews}>Make previews for models without one</button></div>` : null}
     ${ov ? html`<div class="home-card home-counts" id="home-counts">
       <h2>In this library</h2>
       <p><a href=${routeHash("browse:all")}><b>${ov.all}</b> ${ov.all === 1 ? "model" : "models"}</a>${ov.unsorted ? html`, <a href=${routeHash("browse:unsorted")}>${ov.unsorted} unsorted</a>` : null}.

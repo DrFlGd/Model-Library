@@ -99,7 +99,10 @@ fn read_model(lib: &Library, dir: &Path, schema: Option<&Schema>, cats: &[String
         None => schema::parse_folder_name("{name} ({author})", &folder_name),
     };
     let files = model::list_files(dir);
-    let summary = model::summarise(&files, &side);
+    let mut summary = model::summarise(&files, &side);
+    if summary["cover"].is_null() && crate::thumb::has(dir) {
+        summary["cover"] = json!(crate::thumb::THUMB);
+    }
     let id = side["id"]
         .as_str()
         .map(String::from)

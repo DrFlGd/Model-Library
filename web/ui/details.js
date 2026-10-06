@@ -57,6 +57,7 @@ export function ModelDetails({ id }) {
         : html`<a href=${routeHash("browse:unsorted")}>Unsorted</a>`}</p>
     </div>
     <div class="insp-actions">
+      <a class="button primary compact" id="details-open" href=${routeHash(`model:${m.id}`)}>${Icon.eye(15)} Open</a>
       <button type="button" class="ghost" id="details-star" aria-pressed=${fav ? "true" : "false"} onClick=${star} disabled=${s.readOnly}>${Icon.star(15, fav)} ${fav ? "Starred" : "Star"}</button>
       <button type="button" class="ghost" id="details-edit" onClick=${() => ui.set({ dialog: { type: "edit-model", model: m, schema } })} disabled=${s.readOnly}>${Icon.edit(15)} Edit details…</button>
       <button type="button" class="ghost" id="details-move" title="Move to category" aria-label="Move to category" disabled=${s.readOnly}

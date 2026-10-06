@@ -4,6 +4,7 @@
 //!   modlib-cli library-info --library <dir>
 //!   modlib-cli library-scan --library <dir> [--cache <file>]   (models found, timings; twice with a cache)
 //!   modlib-cli make-test-library --out <dir> [--models 10000]   (made-up models, for timing)
+//!   modlib-cli thumb --model <dir>   (draw a model folder's _thumbs/model.png)
 //!   modlib-cli serve --ui <dir> --home <dir> [--library <dir>] [--port 8790]
 //!
 //! `serve` runs the app's commands behind a local web server, so the page can be
@@ -87,6 +88,16 @@ async fn run() -> Result<()> {
             eprintln!("{n} models in {}", out.display());
             Ok(())
         }
+        "thumb" => {
+            let dir = PathBuf::from(a.need("--model")?);
+            let t = std::time::Instant::now();
+            let made = modlib_core::thumb::make(&dir)?;
+            println!(
+                "{}",
+                json!({ "made": made, "ms": t.elapsed().as_millis() as u64, "from": modlib_core::thumb::pick_main(&dir) })
+            );
+            Ok(())
+        }
         "serve" => serve(a).await,
         other => bail!("unknown command {other}"),
     }
@@ -131,6 +142,7 @@ fn content_type(path: &str) -> &'static str {
 struct Http {
     method: String,
     path: String,
+    range: Option<String>,
     body: Vec<u8>,
 }
 
@@ -176,13 +188,32 @@ fn read_request(stream: &mut std::net::TcpStream) -> Result<Http> {
         }
         body.extend_from_slice(&chunk[..n]);
     }
-    Ok(Http { method, path, body })
+    let range = headers
+        .iter()
+        .find(|(k, _)| k == "range")
+        .map(|(_, v)| v.clone());
+    Ok(Http {
+        method,
+        path,
+        range,
+        body,
+    })
 }
 
 fn respond(stream: &mut std::net::TcpStream, code: u16, ctype: &str, body: &[u8]) -> Result<()> {
+    respond_with(stream, code, ctype, body, "")
+}
+
+fn respond_with(
+    stream: &mut std::net::TcpStream,
+    code: u16,
+    ctype: &str,
+    body: &[u8],
+    extra: &str,
+) -> Result<()> {
     use std::io::Write;
     let head = format!(
-        "HTTP/1.1 {code} {}\r\ncontent-type: {ctype}\r\ncontent-length: {}\r\naccess-control-allow-origin: *\r\ncache-control: no-store\r\nconnection: close\r\n\r\n",
+        "HTTP/1.1 {code} {}\r\ncontent-type: {ctype}\r\ncontent-length: {}\r\naccess-control-allow-origin: *\r\ncache-control: no-store\r\naccept-ranges: bytes\r\n{extra}connection: close\r\n\r\n",
         if code < 400 { "OK" } else { "Error" },
         body.len()
     );
@@ -291,8 +322,15 @@ async fn serve(mut a: Args) -> Result<()> {
                         }
                         respond(&mut stream, 200, "application/json", b"true")
                     } else if let Some(rel) = path.strip_prefix("/library/") {
-                        match app.library_file(rel) {
-                            Ok(b) => respond(&mut stream, 200, content_type(rel), &b),
+                        match app.library_range(rel, req.range.as_deref()) {
+                            Ok((code, b, cr)) => respond_with(
+                                &mut stream,
+                                code,
+                                content_type(rel),
+                                &b,
+                                &cr.map(|c| format!("content-range: {c}\r\n"))
+                                    .unwrap_or_default(),
+                            ),
                             Err(e) => {
                                 respond(&mut stream, 404, "text/plain", e.to_string().as_bytes())
                             }
