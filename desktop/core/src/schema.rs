@@ -263,6 +263,175 @@ pub fn create(lib: &Library, spec: &Value) -> Result<Schema> {
     Ok(Schema::from_value(&v).unwrap())
 }
 
+// ------------------------------------------------------------ subcategories
+
+/// Subcategories made in the app, kept in the schema file so they're listed (and
+/// their folders kept) even with no models: every node's path of values.
+/// Stored nested: "subcategories": [{"name": "A", "subcategories": [...]}].
+pub fn subcategories(v: &Value) -> Vec<Vec<String>> {
+    fn walk(nodes: &Value, prefix: &mut Vec<String>, out: &mut Vec<Vec<String>>) {
+        for n in nodes.as_array().into_iter().flatten() {
+            let Some(name) = n["name"].as_str().filter(|s| !s.is_empty()) else {
+                continue;
+            };
+            prefix.push(name.to_string());
+            out.push(prefix.clone());
+            walk(&n["subcategories"], prefix, out);
+            prefix.pop();
+        }
+    }
+    let mut out = vec![];
+    walk(&v["subcategories"], &mut vec![], &mut out);
+    out
+}
+
+/// Write the subcategory paths back, nested and sorted (every prefix of a path is kept too).
+pub fn set_subcategories(v: &mut Value, paths: &[Vec<String>]) {
+    fn insert(nodes: &mut Vec<Value>, path: &[String]) {
+        let Some((first, rest)) = path.split_first() else {
+            return;
+        };
+        let i = match nodes.iter().position(|n| {
+            n["name"]
+                .as_str()
+                .is_some_and(|s| s.eq_ignore_ascii_case(first))
+        }) {
+            Some(i) => i,
+            None => {
+                nodes.push(json!({ "name": first, "subcategories": [] }));
+                nodes.len() - 1
+            }
+        };
+        let mut kids = nodes[i]["subcategories"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        insert(&mut kids, rest);
+        nodes[i]["subcategories"] = json!(kids);
+    }
+    fn sort(nodes: &mut [Value]) {
+        nodes.sort_by_key(|n| n["name"].as_str().unwrap_or("").to_lowercase());
+        for n in nodes.iter_mut() {
+            let mut kids = n["subcategories"].as_array().cloned().unwrap_or_default();
+            sort(&mut kids);
+            if kids.is_empty() {
+                n.as_object_mut().unwrap().shift_remove("subcategories");
+            } else {
+                n["subcategories"] = json!(kids);
+            }
+        }
+    }
+    let mut nodes = vec![];
+    for p in paths.iter().filter(|p| !p.is_empty()) {
+        insert(&mut nodes, p);
+    }
+    sort(&mut nodes);
+    if nodes.is_empty() {
+        if let Some(o) = v.as_object_mut() {
+            o.shift_remove("subcategories");
+        }
+    } else {
+        v["subcategories"] = json!(nodes);
+    }
+}
+
+/// Whether `dir` is a subcategory folder some schema keeps (not to be tidied away).
+pub fn kept_folder(lib: &Library, dir: &std::path::Path) -> bool {
+    list(lib).iter().any(|s| {
+        subcategories(&s.raw).iter().any(|p| {
+            let mut d = lib.root().join(&s.folder);
+            for v in p {
+                d.push(v);
+            }
+            d == dir
+        })
+    })
+}
+
+/// Add a subcategory under `path` (values from the top) as `name`; makes its folder.
+pub fn add_subcategory(
+    lib: &Library,
+    id: &str,
+    path: &[String],
+    name: &str,
+) -> Result<Vec<String>> {
+    lib.writable()?;
+    let s = list(lib)
+        .into_iter()
+        .find(|s| s.id == id)
+        .ok_or_else(|| anyhow::anyhow!("There's no category {id} any more."))?;
+    if path.len() >= s.levels.len() {
+        bail!(
+            "{} is the last level: models go below it, not subcategories.",
+            s.levels.last().map(|l| l.1.as_str()).unwrap_or("This")
+        );
+    }
+    let label = &s.levels[path.len()].1;
+    let name = clean_folder_name(name.trim(), 80);
+    if name.is_empty() {
+        bail!("Give the {label} a name.");
+    }
+    if name.starts_with('_') {
+        bail!("A {label} can't start with _ (those folders are the app's).");
+    }
+    let mut full: Vec<String> = path.iter().map(|v| clean_folder_name(v, 80)).collect();
+    full.push(name);
+    let mut v = s.to_json();
+    let mut all = subcategories(&v);
+    if !all.iter().any(|p| {
+        p.len() == full.len() && p.iter().zip(&full).all(|(a, b)| a.eq_ignore_ascii_case(b))
+    }) {
+        all.push(full.clone());
+    }
+    set_subcategories(&mut v, &all);
+    save(lib, &v)?;
+    let mut dir = lib.root().join(&s.folder);
+    for x in &full {
+        dir.push(x);
+    }
+    std::fs::create_dir_all(dir)?;
+    Ok(full)
+}
+
+/// Remove an empty subcategory (and the ones below it): its folders go if they're empty.
+pub fn remove_subcategory(lib: &Library, id: &str, path: &[String]) -> Result<()> {
+    lib.writable()?;
+    let s = list(lib)
+        .into_iter()
+        .find(|s| s.id == id)
+        .ok_or_else(|| anyhow::anyhow!("There's no category {id} any more."))?;
+    let mut v = s.to_json();
+    let below = |p: &Vec<String>| {
+        p.len() >= path.len() && p.iter().zip(path).all(|(a, b)| a.eq_ignore_ascii_case(b))
+    };
+    let all: Vec<Vec<String>> = subcategories(&v)
+        .into_iter()
+        .filter(|p| !below(p))
+        .collect();
+    set_subcategories(&mut v, &all);
+    save(lib, &v)?;
+    let mut dir = lib.root().join(&s.folder);
+    for x in path {
+        dir.push(x);
+    }
+    remove_empty_tree(&dir);
+    Ok(())
+}
+
+/// Remove a folder and its sub-folders if there's nothing but empty folders in them.
+pub fn remove_empty_tree(dir: &std::path::Path) -> bool {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    let mut empty = true;
+    for e in rd.flatten() {
+        if !(e.path().is_dir() && remove_empty_tree(&e.path())) {
+            empty = false;
+        }
+    }
+    empty && std::fs::remove_dir(dir).is_ok()
+}
+
 /// Where a level of an edited schema takes its values from: an old level (by
 /// index), or a value given for every model already there (a new level).
 #[derive(Clone, Debug, PartialEq)]

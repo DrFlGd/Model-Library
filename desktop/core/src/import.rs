@@ -717,7 +717,10 @@ fn prune_empty(lib: &Library, ix: &Index, mut dir: Option<&Path>) {
         .chain([lib.root().join(UNSORTED), lib.root().to_path_buf()])
         .collect();
     while let Some(d) = dir {
-        if stops.iter().any(|s| s == d) || !d.starts_with(lib.root()) {
+        if stops.iter().any(|s| s == d)
+            || !d.starts_with(lib.root())
+            || crate::schema::kept_folder(lib, d)
+        {
             break;
         }
         if std::fs::remove_dir(d).is_err() {

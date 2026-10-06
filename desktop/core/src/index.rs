@@ -348,6 +348,9 @@ impl Index {
                         serde_json::from_value(m.v["path"].clone()).unwrap_or_default();
                     tree.add(&path);
                 }
+                for p in schema::subcategories(&s.raw) {
+                    tree.touch(&p);
+                }
                 let mut v = s.to_json();
                 v["count"] = json!(count);
                 v["tree"] = tree.to_json();
@@ -539,6 +542,23 @@ impl Tree {
                 }
             };
             self.children[i].1.add(rest);
+        }
+    }
+    /// A subcategory made in the app: listed even with no models in it.
+    fn touch(&mut self, path: &[String]) {
+        if let Some((first, rest)) = path.split_first() {
+            let i = match self
+                .children
+                .iter()
+                .position(|(v, _)| v.eq_ignore_ascii_case(first))
+            {
+                Some(i) => i,
+                None => {
+                    self.children.push((first.clone(), Tree::default()));
+                    self.children.len() - 1
+                }
+            };
+            self.children[i].1.touch(rest);
         }
     }
     fn to_json(&self) -> Value {

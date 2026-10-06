@@ -9,13 +9,13 @@ import { sortFolder } from "./import.js";
 
 const TREE = `_library/                  the app's own files
 Unsorted/                  models with no category yet
-Wargames/
-  Warhammer 40k/
-    Tyranid/
-      Hive Tyrant (Author)/  one folder per model
+Category/                  a category's top folder
+  Subcategory/             one folder per level,
+    Subcategory/           as many at each level as you like
+      Model name (Author)/   one folder per model
         model.json           author, source, date…
-        Hive Tyrant.stl
-        Arms/                parts keep their folders
+        Model name.stl
+        Parts/               parts keep their folders
         _media/              pictures, PDFs, videos
         _thumbs/             previews`;
 

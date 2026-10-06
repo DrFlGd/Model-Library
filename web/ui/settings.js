@@ -49,7 +49,7 @@ function VariantFolders({ lib }) {
     <ul class="chip-list" id="variant-names">${names.map((n) => html`<li key=${n} class="chip-item"><span>${n}</span>
       <button type="button" class="chip-x" aria-label=${`Remove ${n}`} title="Remove" disabled=${off} onClick=${() => save(names.filter((x) => x !== n))}>×</button></li>`)}</ul>
     <form class="inline-form" onSubmit=${add}>
-      <input id="variant-add" type="text" maxlength="60" placeholder="Add a name, e.g. Lychee" value=${text} onInput=${(e) => setText(e.target.value)} aria-label="New variant folder name" disabled=${off} />
+      <input id="variant-add" type="text" maxlength="60" placeholder="Add a folder name" value=${text} onInput=${(e) => setText(e.target.value)} aria-label="New variant folder name" disabled=${off} />
       <button type="submit" class="ghost" id="variant-add-btn" disabled=${off || !text.trim()}>Add</button>
       <button type="button" class="ghost" id="variant-reset" disabled=${off} onClick=${() => save(null)}>Reset to the defaults</button>
     </form>

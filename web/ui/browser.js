@@ -6,7 +6,7 @@ import { useStore } from "../lib/store.js";
 import { ui, setPref } from "./state.js";
 import { routeHash, schemaScope } from "./context.js";
 import { Icon } from "./icons.js";
-import { api, libraryUrl, toast } from "./library.js";
+import { api, libraryUrl, toast, loadOverview } from "./library.js";
 
 /** Open a model's own page. */
 const openModel = (m) => { location.hash = routeHash(`model:${m.id}`); };
@@ -29,12 +29,19 @@ function Title({ scope, overview }) {
 }
 
 /** Changing the category shown: edit it (its own page), or rename or move a value. */
-function PlaceTools({ scope, readOnly }) {
+function PlaceTools({ scope, readOnly, overview, empty }) {
   if (readOnly || !scope.startsWith("schema:")) return null;
   const [id, ...values] = scope.slice(7).split("/").map(decodeURIComponent);
+  const sc = overview?.schemas?.find((s) => s.id === id);
+  const add = sc && values.length < sc.levels.length
+    ? html`<button type="button" class="ghost" id="add-subcategory" title=${`Add a ${sc.levels[values.length].label.toLowerCase()} here`} onClick=${() => ui.set({ dialog: { type: "add-subcategory", schemaId: id, path: values } })}>${Icon.plus(14)} Add ${sc.levels[values.length].label.toLowerCase()}…</button>` : null;
+  const remove = values.length && empty
+    ? html`<button type="button" class="ghost" id="remove-subcategory" title="Remove this empty subcategory and its folder" onClick=${async () => {
+      try { await api("subcategory_remove", { schema: id, path: values }); await loadOverview(); location.hash = routeHash(`browse:${schemaScope(id, values.slice(0, -1))}`); toast(`Removed ${values[values.length - 1]}.`); }
+      catch (e) { toast(e.message || String(e), 6000); } }}>Remove</button>` : null;
   return values.length
-    ? html`<button type="button" class="ghost" id="rename-node" title="Rename, merge or move this category, with its folders" onClick=${() => ui.set({ dialog: { type: "rename-node", schemaId: id, path: values } })}>${Icon.edit(14)} Rename or move…</button>`
-    : html`<button type="button" class="ghost" id="edit-schema" title="Edit this category: its levels, folders and fields" onClick=${() => ui.set({ dialog: { type: "edit-schema", schemaId: id } })}>${Icon.edit(14)} Edit category…</button>`;
+    ? html`${add}<button type="button" class="ghost" id="rename-node" title="Rename, merge or move this category, with its folders" onClick=${() => ui.set({ dialog: { type: "rename-node", schemaId: id, path: values } })}>${Icon.edit(14)} Rename or move…</button>${remove}`
+    : html`${add}<button type="button" class="ghost" id="edit-schema" title="Edit this category: its levels, folders and fields" onClick=${() => ui.set({ dialog: { type: "edit-schema", schemaId: id } })}>${Icon.edit(14)} Edit category…</button>`;
 }
 
 /** A model's cover picture, or an icon for the kind of files it has. */
@@ -137,7 +144,7 @@ export function Browser() {
       <div class="browse-head">
         <div class="browse-title"><${Title} scope=${scope} overview=${s.overview} />
           <span class="browse-count" id="browse-count" data-q=${result ? result.q : null}>${result ? `${result.total} ${result.total === 1 ? "model" : "models"}` : ""}</span>
-          <${PlaceTools} scope=${scope} readOnly=${!!s.library?.read_only} /></div>
+          <${PlaceTools} scope=${scope} readOnly=${!!s.library?.read_only} overview=${s.overview} empty=${!!result && !s.q && result.total === 0} /></div>
         <label class="search small browse-search"><span class="visually-hidden">Search this place</span>
           <input id="search" type="search" value=${text} placeholder="Search names, authors, tags… or author:jo tag:presupported" autocomplete="off" spellcheck="false"
             onInput=${(e) => setText(e.target.value)} /></label>

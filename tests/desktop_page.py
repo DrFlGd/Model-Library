@@ -133,7 +133,7 @@ async def phase1(pg):
     await pg.wait_for_function("() => location.hash === '#/browse/schema/wargames'")
     schema = json.loads((library / "_library/schemas/wargames.json").read_text())
     check("a category (schema) is made from the menu", (library / "Wargames").is_dir() and [l["label"] for l in schema["levels"]] == ["Game", "Faction"]
-          and schema["fields"][0]["choices"] == ["28mm", "32mm"] and preview == "Wargames / <Game> / <Faction> / Hive Tyrant (Jo Smith)"
+          and schema["fields"][0]["choices"] == ["28mm", "32mm"] and preview == "Wargames / <Game> / <Faction> / Model name (Author)"
           and head.lower() == "categories" and dtitle == "New category", (preview, head, dtitle, schema))
 
     # 10. model folders made by hand are found under their categories
@@ -500,6 +500,25 @@ async def phase4(pg):
     await pg.wait_for_selector("#edit-schema-dialog", state="detached", timeout=60000)
     moved = (library / "Tabletop/Warhammer 40k/Tyranid/Hive Guard (Jo Smith)/guard.stl").is_file() and not (library / "Wargames").exists()
     check("editing a category relabels a level, and a new top folder moves its models", relabelled and moved, (sch["levels"], moved))
+
+    # 28b. subcategories made in the app, at any level, kept with no models
+    await pg.goto(B + "#/browse/schema/wargames/Warhammer%2040k")
+    for name in ("Orks", "Aeldari"):
+        await pg.click("#add-subcategory")
+        await pg.fill("#subcat-name", name)
+        await pg.click("#subcat-dialog button[type=submit]")
+        await pg.wait_for_selector("#subcat-dialog", state="detached")
+    await pg.goto(B + "#/browse/schema/wargames/Warhammer%2040k/Orks")
+    await pg.wait_for_selector("#remove-subcategory")
+    tops = await pg.evaluate("async () => (await window.__modlib.platform.api('library_overview')).schemas[0].tree[0].children.map(c => c.value)")
+    made = (library / "Tabletop/Warhammer 40k/Orks").is_dir() and (library / "Tabletop/Warhammer 40k/Aeldari").is_dir()
+    sch = json.loads((library / "_library/schemas/wargames.json").read_text())
+    await pg.screenshot(path=str(out / "18-subcategories.png"))
+    await pg.click("#remove-subcategory")
+    await pg.wait_for_function("() => !location.hash.includes('Orks')")
+    gone = not (library / "Tabletop/Warhammer 40k/Orks").exists()
+    check("subcategories are added in the app, kept with no models, and removed", made and gone and "Orks" in tops and "Aeldari" in tops
+          and [n["name"] for n in sch["subcategories"][0]["subcategories"]] == ["Aeldari", "Orks"], (made, gone, tops, sch.get("subcategories")))
 
     # 29. several models' details at once
     await pg.goto(B + "#/browse/schema/wargames")

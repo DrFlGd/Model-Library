@@ -7,7 +7,7 @@ import { routeHash, schemaScope } from "./context.js";
 import { Icon } from "./icons.js";
 import { api, loadOverview, saveDetails, moveModels, toast } from "./library.js";
 import { CategoryPicker } from "./category.js";
-import { RenameNode, EditSchema, DeleteSchema, EditPicked } from "./categories.js";
+import { RenameNode, EditSchema, DeleteSchema, EditPicked, AddSubcategory } from "./categories.js";
 
 export const FIELD_TYPES = [["text", "Text"], ["number", "Number"], ["choice", "Choice"], ["yes-no", "Yes or no"], ["date", "Date"]];
 export const close = () => ui.set({ dialog: null });
@@ -43,9 +43,9 @@ function NewSchema() {
   const [template, setTemplate] = useState("{name} ({author})");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const top = folderish(folder || name) || "Wargames";
-  const shownLevels = levels.map((l, i) => l.trim() || (levels.length === 2 ? ["Game", "Faction"][i] : `Level ${i + 1}`));
-  const sample = (template.includes("{name}") ? template : "{name} ({author})").replace("{name}", "Hive Tyrant").replace("{author}", "Jo Smith");
+  const top = folderish(folder || name) || "Category";
+  const shownLevels = levels.map((l, i) => l.trim() || `Level ${i + 1}`);
+  const sample = (template.includes("{name}") ? template : "{name} ({author})").replace("{name}", "Model name").replace("{author}", "Author");
   const setAt = (list, set, i, v) => set(list.map((x, j) => (j === i ? v : x)));
   const submit = async () => {
     setBusy(true);
@@ -63,16 +63,16 @@ function NewSchema() {
     }
   };
   return html`<${Dialog} title="New category" id="schema-dialog" onSubmit=${submit} busy=${busy} error=${error} submitLabel="Make category">
-    <p class="muted">A category is a kind of model with its own top folder, such as Wargames. Its levels are the folders below that (Game, Faction), and every model gets a folder at the bottom.</p>
+    <p class="muted">A category has its own top folder. Its levels are the folders below that: name each level here, then add as many subcategories at each level as you like from the category's page (or let importing make them). Every model gets its own folder at the bottom.</p>
     <div class="form-two">
       <label class="field-block"><span>Name</span>
-        <input id="schema-name" type="text" required maxlength="60" placeholder="Wargames" value=${name} onInput=${(e) => setName(e.target.value)} /></label>
+        <input id="schema-name" type="text" required maxlength="60" placeholder="Category name" value=${name} onInput=${(e) => setName(e.target.value)} /></label>
       <label class="field-block"><span>Top folder</span>
         <input id="schema-folder" type="text" maxlength="60" placeholder=${folderish(name) || "Same as the name"} value=${folder} onInput=${(e) => setFolder(e.target.value)} /></label>
     </div>
     <div class="field-block"><span class="field-label">Levels</span>
       ${levels.map((l, i) => html`<div class="level-row" key=${i}>
-        <input type="text" class="schema-level" maxlength="40" placeholder=${levels.length === 2 ? ["Game", "Faction"][i] : `Level ${i + 1}`} value=${l} aria-label=${`Level ${i + 1}`}
+        <input type="text" class="schema-level" maxlength="40" placeholder=${`Level ${i + 1}, such as ${["Type", "Subtype", "Group", "Set", "Part", "Size"][i] || "Group"}`} value=${l} aria-label=${`Level ${i + 1}`}
           onInput=${(e) => setAt(levels, setLevels, i, e.target.value)} />
         <button type="button" class="ghost" aria-label=${`Remove level ${i + 1}`} onClick=${() => setLevels(levels.filter((_, j) => j !== i))}>${Icon.close(13)}</button>
       </div>`)}
@@ -82,12 +82,12 @@ function NewSchema() {
       <input id="schema-template" type="text" maxlength="80" value=${template} onInput=${(e) => setTemplate(e.target.value)} />
       <small class="muted">Use {name} and {author}. Folders already named this way are read back into a model's name and author.</small></label>
     <div class="field-block"><span class="field-label">Fields</span>
-      <small class="muted">Details every model of this kind can have, such as Scale or Presupported. Name, authors, tags, source and release date are always there.</small>
+      <small class="muted">Details every model in this category can have, such as a size or a material. Name, authors, tags, source and release date are always there.</small>
       ${fields.map((f, i) => html`<div class="field-row" key=${i}>
-        <input type="text" class="schema-field" maxlength="40" placeholder="Scale" value=${f.label} aria-label=${`Field ${i + 1}`} onInput=${(e) => setAt(fields, setFields, i, { ...f, label: e.target.value })} />
+        <input type="text" class="schema-field" maxlength="40" placeholder="Field name" value=${f.label} aria-label=${`Field ${i + 1}`} onInput=${(e) => setAt(fields, setFields, i, { ...f, label: e.target.value })} />
         <select aria-label=${`Field ${i + 1} type`} class="schema-field-type" value=${f.type} onChange=${(e) => setAt(fields, setFields, i, { ...f, type: e.target.value })}>
           ${FIELD_TYPES.map(([v, l]) => html`<option value=${v} key=${v}>${l}</option>`)}</select>
-        ${f.type === "choice" ? html`<input type="text" class="schema-field-choices" placeholder="28mm, 32mm, 75mm" value=${f.choices || ""} aria-label=${`Field ${i + 1} choices`}
+        ${f.type === "choice" ? html`<input type="text" class="schema-field-choices" placeholder="First choice, second choice" value=${f.choices || ""} aria-label=${`Field ${i + 1} choices`}
           onInput=${(e) => setAt(fields, setFields, i, { ...f, choices: e.target.value })} />` : null}
         <button type="button" class="ghost" aria-label=${`Remove field ${i + 1}`} onClick=${() => setFields(fields.filter((_, j) => j !== i))}>${Icon.close(13)}</button>
       </div>`)}
@@ -157,7 +157,7 @@ function EditModel({ model, schema }) {
       <label class="field-block"><span>Licence</span><input id="edit-license" type="text" value=${form.license} onInput=${set("license")} /></label>
     </div>
     <label class="field-block"><span>Source</span><input id="edit-source" type="url" placeholder="https://…" value=${form.source} onInput=${set("source")} /></label>
-    <label class="field-block"><span>Tags</span><input id="edit-tags" type="text" placeholder="presupported, monster" value=${form.tags} onInput=${set("tags")} /></label>
+    <label class="field-block"><span>Tags</span><input id="edit-tags" type="text" placeholder="tag one, tag two" value=${form.tags} onInput=${set("tags")} /></label>
     ${schema?.fields?.length ? html`<div class="form-two">${schema.fields.map((f) => html`<label class="field-block" key=${f.key}><span>${f.label}</span>
       <${FieldInput} field=${f} value=${fields[f.key]} onChange=${(v) => setFields({ ...fields, [f.key]: v })} /></label>`)}</div>` : null}
     ${images.length ? html`<label class="field-block"><span>Cover picture</span>
@@ -208,6 +208,7 @@ export function Dialogs() {
   if (!dialog) return null;
   if (dialog.type === "new-schema") return html`<${NewSchema} />`;
   if (dialog.type === "move-models") return html`<${MoveModels} models=${dialog.models} />`;
+  if (dialog.type === "add-subcategory") return html`<${AddSubcategory} schemaId=${dialog.schemaId} path=${dialog.path} />`;
   if (dialog.type === "rename-node") return html`<${RenameNode} schemaId=${dialog.schemaId} path=${dialog.path} />`;
   if (dialog.type === "edit-schema") return html`<${EditSchema} schemaId=${dialog.schemaId} />`;
   if (dialog.type === "delete-schema") return html`<${DeleteSchema} schemaId=${dialog.schemaId} />`;

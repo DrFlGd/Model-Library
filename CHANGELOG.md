@@ -64,6 +64,9 @@ Phase 5 in `docs/PLAN.md`: large collections (adopting tidy folders in place, a 
 
 ## Unreleased
 
+- **Subcategories are made in the app** (owner's request): **Add <level>…** on a category's page or any subcategory's page adds one below it, as many at each level as you like (1; 2a, 2b, 2c; 2a1, 2a2…). They're kept in the category file (`subcategories`) with their folders made at once, so they show and keep their folders with no models in them; **Remove** takes away an empty one. Renaming, merging and editing a category carry them along.
+- **General wording** (owner's request): examples in the interface no longer refer to wargaming (the New category dialog, Home's folder example, placeholders).
+
 Phase 4 (0.4): editing categories (design in docs/PLAN.md, "Phase 4 design"; notes in "Phase 4 notes").
 
 - **Rename or move…** on a category's page (Warhammer 40k › Tyranid): rename it, merge it into one that's already there by giving that name, or move it under another value. A preview shows every folder that moves, and any that would clash and get a number.

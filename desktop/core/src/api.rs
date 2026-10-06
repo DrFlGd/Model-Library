@@ -861,6 +861,55 @@ impl App {
                     .map_err(e2s)?;
                 j(r)
             }
+            "subcategory_add" | "subcategory_remove" => {
+                let lib = self.library()?;
+                let id = arg(&args, "schema").map_err(e2s)?.to_string();
+                let path: Vec<String> = args["path"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect();
+                if cmd == "subcategory_add" {
+                    let made = schema::add_subcategory(
+                        &lib,
+                        &id,
+                        &path,
+                        args["name"].as_str().unwrap_or(""),
+                    )
+                    .map_err(e2s)?;
+                    self.with_index(Some(false), |_, _| ()).await?;
+                    return j(json!({ "path": made }));
+                }
+                if path.is_empty() {
+                    return Err("Choose a subcategory to remove.".into());
+                }
+                let n = self
+                    .with_index(None, |ix, _| {
+                        ix.models
+                            .iter()
+                            .filter(|m| m.v["schema"] == json!(id))
+                            .filter(|m| {
+                                let p: Vec<String> =
+                                    serde_json::from_value(m.v["path"].clone()).unwrap_or_default();
+                                p.len() >= path.len()
+                                    && p.iter().zip(&path).all(|(a, b)| a.eq_ignore_ascii_case(b))
+                            })
+                            .count()
+                    })
+                    .await?;
+                if n > 0 {
+                    return Err(format!(
+                        "{} has {n} {} in it: move or merge them first.",
+                        path.join(" › "),
+                        if n == 1 { "model" } else { "models" }
+                    ));
+                }
+                schema::remove_subcategory(&lib, &id, &path).map_err(e2s)?;
+                self.with_index(Some(false), |_, _| ()).await?;
+                j(json!({ "removed": path }))
+            }
             "schema_create" => {
                 let lib = self.library()?;
                 let s = schema::create(&lib, &args["schema"]).map_err(e2s)?;
@@ -1388,6 +1437,96 @@ mod tests {
         )
         .await;
         assert_eq!(q["total"], 0);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[tokio::test]
+    async fn subcategories_are_made_kept_renamed_and_removed() {
+        let (app, home) = app("subcats");
+        let lib = home.join("Lib");
+        call(
+            &app,
+            "library_open",
+            json!({ "path": lib.display().to_string() }),
+        )
+        .await;
+        call(&app, "schema_create", json!({ "schema": { "name": "Prints", "levels": [{ "label": "Group" }, { "label": "Kind" }, { "label": "Style" }] } })).await;
+        for (path, name) in [
+            (json!([]), "1"),
+            (json!([]), "2"),
+            (json!(["2"]), "A"),
+            (json!(["2"]), "B"),
+            (json!(["2"]), "C"),
+            (json!(["2", "A"]), "1"),
+            (json!(["2", "A"]), "2"),
+        ] {
+            call(
+                &app,
+                "subcategory_add",
+                json!({ "schema": "prints", "path": path, "name": name }),
+            )
+            .await;
+        }
+        assert!(app
+            .call(
+                "subcategory_add",
+                json!({ "schema": "prints", "path": ["2", "A", "1"], "name": "x" })
+            )
+            .await
+            .is_err());
+        assert!(lib.join("Prints/2/A/2").is_dir());
+        let ov = call(&app, "library_overview", json!({})).await;
+        let tree = &ov["schemas"][0]["tree"];
+        assert_eq!(tree[1]["value"], "2");
+        assert_eq!(tree[1]["children"].as_array().unwrap().len(), 3);
+        assert_eq!(tree[1]["children"][0]["children"][1]["value"], "2");
+        // a model moved out of a subcategory leaves its folder in place
+        std::fs::create_dir_all(lib.join("Prints/2/A/1/Thing")).unwrap();
+        std::fs::write(lib.join("Prints/2/A/1/Thing/t.stl"), "solid").unwrap();
+        call(&app, "library_scan", json!({ "full": true })).await;
+        let q = call(&app, "models_query", json!({ "scope": "all" })).await;
+        let id = q["items"][0]["id"].clone();
+        call(
+            &app,
+            "models_move",
+            json!({ "ids": [id], "schema": "prints", "values": ["2", "B", "x"] }),
+        )
+        .await;
+        assert!(
+            lib.join("Prints/2/A/1").is_dir() && lib.join("Prints/2/B/x/Thing/t.stl").is_file()
+        );
+        // a non-empty one can't be removed; renaming an empty one renames its folder
+        assert!(app
+            .call(
+                "subcategory_remove",
+                json!({ "schema": "prints", "path": ["2", "B"] })
+            )
+            .await
+            .is_err());
+        let change =
+            json!({ "kind": "category", "schema": "prints", "from": ["2", "A"], "to": ["2", "D"] });
+        let done = wait(
+            &app,
+            &call(&app, "relayout_apply", json!({ "change": change })).await,
+        )
+        .await;
+        assert_eq!(done["result"]["state"], "done", "{done}");
+        assert!(lib.join("Prints/2/D/1").is_dir() && !lib.join("Prints/2/A").exists());
+        call(
+            &app,
+            "subcategory_remove",
+            json!({ "schema": "prints", "path": ["2", "D"] }),
+        )
+        .await;
+        assert!(!lib.join("Prints/2/D").exists());
+        let ov = call(&app, "library_overview", json!({})).await;
+        let kids: Vec<Value> = ov["schemas"][0]["tree"][1]["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["value"].clone())
+            .collect();
+        assert_eq!(kids, vec![json!("B"), json!("C")]);
         let _ = std::fs::remove_dir_all(&home);
     }
 }

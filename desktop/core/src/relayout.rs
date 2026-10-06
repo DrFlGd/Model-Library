@@ -93,18 +93,51 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
                     wanted.push((m, v, None));
                 }
             }
-            if wanted.is_empty() {
-                bail!("There are no models in {}.", from.join(" › "));
+            let under = |p: &Vec<String>| p.len() >= from.len() && p[..from.len()] == from[..];
+            let pinned = schema::subcategories(&old.raw);
+            if wanted.is_empty() && !pinned.iter().any(under) {
+                bail!("There's nothing in {}.", from.join(" › "));
             }
             let what = if from[..from.len() - 1] == to[..to.len() - 1] {
                 format!("Renamed {} to {}", from.last().unwrap(), to.last().unwrap())
             } else {
                 format!("Moved {} to {}", from.join(" › "), to.join(" › "))
             };
-            (what, Some(old.clone()))
+            // subcategories made in the app follow too
+            let moved: Vec<Vec<String>> = pinned
+                .iter()
+                .map(|p| {
+                    if under(p) {
+                        let mut v = to.clone();
+                        v.extend_from_slice(&p[from.len()..]);
+                        v
+                    } else {
+                        p.clone()
+                    }
+                })
+                .collect();
+            let mut v = old.to_json();
+            schema::set_subcategories(&mut v, &moved);
+            (what, Schema::from_value(&v))
         }
         "schema" => {
-            let (v, levels) = schema::edited(lib, &old, &change["spec"])?;
+            let (mut v, levels) = schema::edited(lib, &old, &change["spec"])?;
+            let mapped: Vec<Vec<String>> = schema::subcategories(&old.raw)
+                .iter()
+                .map(|p| {
+                    let mut out = vec![];
+                    for l in &levels {
+                        match l {
+                            LevelFrom::Old(i) if *i < p.len() => out.push(p[*i].clone()),
+                            LevelFrom::Old(_) => break,
+                            LevelFrom::New(x) => out.push(x.clone()),
+                        }
+                    }
+                    out
+                })
+                .filter(|p| !p.is_empty())
+                .collect();
+            schema::set_subcategories(&mut v, &mapped);
             let new =
                 Schema::from_value(&v).ok_or_else(|| anyhow!("That category isn't valid."))?;
             let rename = change["rename_folders"].as_bool() == Some(true);
@@ -266,10 +299,41 @@ pub fn brief(j: &Value) -> Value {
     json!({ "id": j["id"], "label": j["label"], "created": j["created"], "state": j["state"], "direction": j["direction"], "models": moves, "error": j["error"] })
 }
 
+/// Subcategory folders after a change: `target`'s are made, `other`'s that
+/// `target` doesn't keep are removed when they're empty.
+fn sync_folders(lib: &Library, target: &Value, other: &Value) -> Result<()> {
+    let dirs = |v: &Value| -> Vec<PathBuf> {
+        let Some(top) = v["folder"].as_str() else {
+            return vec![];
+        };
+        schema::subcategories(v)
+            .iter()
+            .map(|p| p.iter().fold(lib.root().join(top), |d, x| d.join(x)))
+            .collect()
+    };
+    let keep = dirs(target);
+    let mut gone: Vec<PathBuf> = dirs(other)
+        .into_iter()
+        .filter(|d| !keep.contains(d))
+        .collect();
+    gone.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
+    for d in gone {
+        let _ = std::fs::remove_dir(&d); // only if empty
+    }
+    for d in keep {
+        std::fs::create_dir_all(d)?;
+    }
+    Ok(())
+}
+
 /// Remove empty folders from `dir` upwards, up to (not including) the stops.
 fn prune(lib: &Library, stops: &[PathBuf], mut dir: Option<&Path>) {
     while let Some(d) = dir {
-        if stops.iter().any(|s| s == d) || !d.starts_with(lib.root()) || d == lib.root() {
+        if stops.iter().any(|s| s == d)
+            || !d.starts_with(lib.root())
+            || d == lib.root()
+            || schema::kept_folder(lib, d)
+        {
             break;
         }
         if std::fs::remove_dir(d).is_err() {
@@ -381,6 +445,7 @@ pub fn apply(
             Value::Null => schema::remove(lib, j["schema"].as_str().unwrap_or(""))?,
             v => schema::save(lib, v)?,
         }
+        sync_folders(lib, &j["schema_after"], &j["schema_before"])?;
         let (before, after) = (
             j["schema_before"]["folder"].as_str(),
             j["schema_after"]["folder"].as_str(),
@@ -480,6 +545,7 @@ pub fn undo(
     }
     if failed.is_empty() {
         schema::save(lib, &j["schema_before"])?;
+        sync_folders(lib, &j["schema_before"], &j["schema_after"])?;
         let (before, after) = (
             j["schema_before"]["folder"].as_str(),
             j["schema_after"]["folder"].as_str(),

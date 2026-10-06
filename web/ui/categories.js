@@ -28,7 +28,7 @@ function ChangePreview({ change, onPlan }) {
   if (error) return html`<p class="warn-note" id="change-preview" role="status">${error}</p>`;
   if (!plan) return html`<p class="muted" id="change-preview">Working out what moves…</p>`;
   return html`<div class="change-preview" id="change-preview" data-moving=${plan.moving}>
-    <p><b>${plan.moving ? `${plan.moving} ${plan.moving === 1 ? "model folder moves" : "model folders move"}` : "No folders move"}</b>${plan.models > plan.moving ? `, ${plan.models - plan.moving} stay where they are` : ""}.${" "}
+    <p><b>${plan.moving ? `${plan.moving} ${plan.moving === 1 ? "model folder moves" : "model folders move"}` : "No model folders move"}</b>${plan.models > plan.moving ? `, ${plan.models - plan.moving} stay where they are` : ""}.${" "}
       ${plan.clashes ? html` <span class="warn-text">${plan.clashes} ${plan.clashes === 1 ? "lands" : "land"} on a folder that's already there and ${plan.clashes === 1 ? "gets" : "get"} a number, such as "(2)".</span>` : null}
       You can undo it from Home.</p>
     ${plan.sample.length ? html`<ul class="move-sample">${plan.sample.map((m) => html`<li key=${m.from}><span class="preview-path">${m.from}</span><span class="muted"> → </span><span class="preview-path">${m.to}</span></li>`)}
@@ -69,13 +69,43 @@ export function RenameNode({ schemaId, path }) {
     location.hash = routeHash(`browse:${schemaScope(schemaId, values.map((v) => v.trim()))}`);
     toast(`${plan?.label || "Done"}. You can undo it from Home.`, 5000);
   });
-  return html`<${Dialog} title=${`Rename or move ${path[path.length - 1]}`} id="rename-dialog" onSubmit=${submit} busy=${busy || !plan || !plan.moving} error=${error} submitLabel="Move folders">
+  return html`<${Dialog} title=${`Rename or move ${path[path.length - 1]}`} id="rename-dialog" onSubmit=${submit} busy=${busy || !plan} error=${error} submitLabel="Move folders">
     <p class="muted">Change the ${last.label.toLowerCase()} to rename it. Use a ${last.label.toLowerCase()} that's already there to merge the two. Change a level above to move it. Every model below it moves to match.</p>
     <div class="cat-picker">${levels.map((l, i) => html`<label class="field-block" key=${l.key}><span>${l.label}</span>
       <input type="text" id=${`rename-${l.key}`} value=${values[i]} list=${`rename-list-${i}`} onInput=${(e) => setValues(values.map((v, j) => (j === i ? e.target.value : v)))} />
       <datalist id=${`rename-list-${i}`}>${valuesAt(sc, values, i).map((v) => html`<option value=${v} key=${v} />`)}</datalist></label>`)}</div>
     ${merges ? html`<p class="warn-note" id="rename-merge">${values[path.length - 1].trim()} is already there: the two will be merged.</p>` : null}
     ${change ? html`<${ChangePreview} change=${change} onPlan=${setPlan} />` : null}
+  <//>`;
+}
+
+/** Add a subcategory below a category or one of its subcategories (its folder is made too). */
+export function AddSubcategory({ schemaId, path }) {
+  const overview = useStore(ui, (s) => s.overview);
+  const sc = overview?.schemas?.find((s) => s.id === schemaId);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  if (!sc) return null;
+  const level = sc.levels[path.length];
+  const submit = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await api("subcategory_add", { schema: schemaId, path, name });
+      await loadOverview();
+      close();
+      toast(`Added ${name.trim()} to ${[sc.name, ...path].join(" › ")}.`);
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return html`<${Dialog} title=${`Add a ${level?.label.toLowerCase() || "subcategory"}`} id="subcat-dialog" onSubmit=${submit} busy=${busy || !name.trim()} error=${error} submitLabel="Add">
+    <p class="muted">A new ${level?.label.toLowerCase()} in ${[sc.name, ...path].join(" › ")}. Its folder is made now, so it's there to import or move models into, even before it has any.</p>
+    <label class="field-block"><span>Name</span><input id="subcat-name" type="text" required maxlength="80" value=${name} onInput=${(e) => setName(e.target.value)} /></label>
+    <div class="field-block"><span class="field-label">Folder</span><code class="preview-path">${[sc.folder, ...path, name.trim() || "…"].join(" / ")}</code></div>
   <//>`;
 }
 
@@ -128,7 +158,7 @@ export function EditSchema({ schemaId }) {
         <input type="text" class="es-field" maxlength="40" value=${f.label} aria-label=${`Field ${i + 1}`} onInput=${(e) => setAt(fields, setFields, i, { ...f, label: e.target.value })} />
         <select aria-label=${`Field ${i + 1} type`} value=${f.type} onChange=${(e) => setAt(fields, setFields, i, { ...f, type: e.target.value })}>
           ${FIELD_TYPES.map(([v, label]) => html`<option value=${v} key=${v}>${label}</option>`)}</select>
-        ${f.type === "choice" ? html`<input type="text" placeholder="28mm, 32mm, 75mm" value=${f.choices || ""} aria-label=${`Field ${i + 1} choices`} onInput=${(e) => setAt(fields, setFields, i, { ...f, choices: e.target.value })} />` : null}
+        ${f.type === "choice" ? html`<input type="text" placeholder="First choice, second choice" value=${f.choices || ""} aria-label=${`Field ${i + 1} choices`} onInput=${(e) => setAt(fields, setFields, i, { ...f, choices: e.target.value })} />` : null}
         <button type="button" class="ghost" aria-label=${`Remove field ${i + 1}`} onClick=${() => setFields(fields.filter((_, j) => j !== i))}>${Icon.close(13)}</button>
       </div>`)}
       <div><button type="button" class="ghost" onClick=${() => setFields([...fields, { label: "", type: "text" }])}>${Icon.plus(13)} Add a field</button></div>
@@ -187,7 +217,7 @@ export function EditPicked({ models }) {
   return html`<${Dialog} title=${`Edit ${models.length} models`} id="bulk-dialog" onSubmit=${submit} busy=${busy} error=${error} submitLabel="Save">
     <p class="muted">Only what you fill in changes; the rest of each model's details stay as they are.</p>
     <div class="form-two">
-      <label class="field-block"><span>Add tags</span><input id="bulk-tags-add" type="text" placeholder="presupported, monster" value=${form.tags_add} onInput=${set("tags_add")} /></label>
+      <label class="field-block"><span>Add tags</span><input id="bulk-tags-add" type="text" placeholder="tag one, tag two" value=${form.tags_add} onInput=${set("tags_add")} /></label>
       <label class="field-block"><span>Remove tags</span><input id="bulk-tags-remove" type="text" list="bulk-tag-list" placeholder=${tags.slice(0, 3).join(", ")} value=${form.tags_remove} onInput=${set("tags_remove")} />
         <datalist id="bulk-tag-list">${tags.map((t) => html`<option value=${t} key=${t} />`)}</datalist></label>
       <label class="field-block"><span>Authors</span><input id="bulk-authors" type="text" placeholder="Replaces theirs; separate several with commas" value=${form.authors} onInput=${set("authors")} /></label>
