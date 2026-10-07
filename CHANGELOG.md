@@ -65,6 +65,8 @@ The UI pass in `docs/PLAN.md` ("UI pass design") is done: actions (0.5.1), undo 
 
 ## Unreleased
 
+## 0.5.4 (2026-10-07)
+
 Import follow-ups (owner's asks after the UI pass; design and notes in docs/PLAN.md, "Import follow-ups").
 
 - **Choose which folder level is the model** on Import: Make this folder one model, Make every folder at this level a model (for maker › release › model collections where the app took the parts for models), Make each folder a model for several selected, and Split into models. A model's panel shows the folders above it; click one to make it the model instead. Each has Undo.
