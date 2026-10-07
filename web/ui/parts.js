@@ -15,6 +15,7 @@ import { ui, resolvedTheme, setPref } from "./state.js";
 import { ctx } from "./context.js";
 import { Icon } from "./icons.js";
 import { api, apiBytes, isDesktop, libraryUrl, openModelFile, toast, loadOverview, recorded, followIds } from "./library.js";
+import { ViewSwitch, SortMenu } from "./layout.js";
 import { size } from "./details.js";
 import { openMenu, typing } from "./actions.js";
 
@@ -196,9 +197,7 @@ function AllFiles({ files, src, open, current }) {
   return html`<div class="all-files" id="all-files">
     <div class="parts-tools">
       <input type="search" class="parts-filter" placeholder="Search files" aria-label="Search files" value=${q} onInput=${(e) => setQ(e.target.value)} />
-      <select aria-label="Sort files" title="Sort" class="parts-sort" value=${by} onChange=${(e) => setBy(e.target.value)}>
-        <option value="folder">Folder</option><option value="name">Name</option><option value="size">Largest first</option><option value="kind">Kind</option>
-      </select>
+      <${SortMenu} id="files-sort" options=${FILE_SORTS} value=${by} onChange=${setBy} />
     </div>
     <ul class="tree flat">${rows.map(({ f, folder, name }) => html`<${FileRow} key=${f.rel} f=${f} name=${name} folder=${folder} src=${src} open=${open} current=${current} />`)}</ul>
     ${!rows.length ? html`<p class="tree-note muted">No files match.</p>` : null}
@@ -282,13 +281,14 @@ function FileGrid({ files, src, open, current }) {
   ${list.length > shown.length ? html`<button type="button" class="ghost" onClick=${() => setLimit(limit + 240)}>Show more (${list.length - shown.length} left)</button>` : null}</div>`;
 }
 
-const VIEWS = [["folders", "Folders"], ["all", "List"], ["type", "By type"], ["grid", "Grid"]];
+const VIEWS = [["folders", "Folders", "folder"], ["all", "List", "list"], ["type", "By type", "grouped"], ["grid", "Grid", "grid"]];
+const FILE_SORTS = [["folder", "Folder"], ["name", "Name"], ["size", "Largest first"], ["kind", "Kind"]];
 
 /** A model's files in the view chosen last (Folders, All files, By type, Grid). */
 export function PartsViews({ src, files, names, open, current, treeKey }) {
   const view = useStore(ui, (s) => s.partsView || "folders");
   return html`<div class="parts">
-    <div class="seg parts-views" role="group" aria-label="Show the files as">${VIEWS.map(([k, label]) => html`<button type="button" key=${k} data-view=${k} aria-pressed=${view === k ? "true" : "false"} onClick=${() => setPref({ partsView: k })}>${label}</button>`)}</div>
+    <${ViewSwitch} id="parts-views" label="Show the files as" views=${VIEWS} value=${view} onChange=${(k) => setPref({ partsView: k })} />
     ${view === "folders" ? html`<ul class="tree" id="part-tree"><${TreeNode} node=${tree(files)} src=${src} open=${open} current=${current} depth=${0} names=${names} key=${treeKey} /></ul>` : null}
     ${view === "all" ? html`<${AllFiles} files=${files} src=${src} open=${open} current=${current} />` : null}
     ${view === "type" ? html`<${ByType} files=${files} src=${src} open=${open} current=${current} />` : null}

@@ -36,6 +36,12 @@ Shift, Ctrl+A, Esc, E, M, S, Ctrl+Z), Undo in messages, the Category menu, a
 selection that doesn't follow into another place, filter chips that come off,
 the theme button's four choices, Starred's count, Import's menu, keys and undo,
 messages clear of Import's footer, and files with no viewer greyed.
+UI pass, step 2: Move to category's preview and Undo, Edit details and Import
+undone, an older change undone from Home, Read again as a job.
+UI pass, step 3: one page header on every page, one view switcher and sort menu,
+the list's sorting headers, "Searching for …" in another place, the details
+panel changed in place, Home's sections and Library menu, and the same panel on
+Duplicates and Import.
 Writes <out>/library-info.json and <out>/library.zip for the cross-platform check.
 """
 import argparse
@@ -161,7 +167,7 @@ async def phase1(pg):
     model_folder("Wargames/Warhammer 40k/Space Marines/Captain (Jo Smith)", {"captain.zip": "PK"})
     model_folder("Unsorted/Benchy", {"benchy.stl": "solid x"})
     await pg.goto(B + "#/")
-    await pg.click("#rescan")
+    await library_menu(pg, "rescan")
     await pg.wait_for_function("() => document.querySelector('#home-counts')?.textContent.includes('4 models')")
     await pg.click('.sidebar a[href="#/browse/schema/wargames/Warhammer%2040k"]')
     tree = await pg.eval_on_selector_all("#schema-tree .nav-link", "els => els.map(e => e.textContent.trim())")
@@ -174,7 +180,7 @@ async def phase1(pg):
 
     # 11. search, with typed filters
     await pg.goto(B + "#/browse/all")
-    await pg.wait_for_selector(".browse-title h1:has-text('All models')")
+    await pg.wait_for_selector(".page-head h1:has-text('All models')")
     await count(pg)
     found = [await search(pg, "tyrant"), await search(pg, "author:\"jo smith\""), await search(pg, "schema:wargames carni"), await search(pg, "in:\"space marines\"")]
     await search(pg, "nothing-like-this")
@@ -186,9 +192,9 @@ async def phase1(pg):
     await pg.click(".card:has-text('Hive Tyrant')")
     await pg.wait_for_selector("#details-files")
     files = await pg.eval_on_selector_all("#details-files li span:first-child", "els => els.map(e => e.textContent)")
-    by = await pg.inner_text("#details-authors")
+    by = await pg.input_value("#details-authors")
     cover = await pg.evaluate("() => { const i = document.querySelector('.card[aria-selected=true] img'); return !!i && i.complete && i.naturalWidth > 0; }")
-    check("a model shows its details, parts and cover", files == ["Arms/left.stl", "Arms/right.stl", "_media/cover.png", "body.stl", "readme.pdf"] and by == "by Jo Smith" and cover, (files, by, cover))
+    check("a model shows its details, parts and cover", files == ["Arms/left.stl", "Arms/right.stl", "_media/cover.png", "body.stl", "readme.pdf"] and by == "Jo Smith" and cover, (files, by, cover))
 
     # 13. editing details writes model.json (the folder keeps its name)
     await pg.click("#details-edit")
@@ -198,7 +204,7 @@ async def phase1(pg):
     await pg.screenshot(path=str(out / "07-edit.png"))
     await pg.click("#details-dialog button[type=submit]")
     await pg.wait_for_selector("#details-dialog", state="detached")
-    await pg.wait_for_selector("#details-tags")
+    await pg.wait_for_function("() => document.querySelector('#details-tags')?.value === 'monster, big'")
     d = library / "Wargames/Warhammer 40k/Tyranid/Hive Tyrant (Jo Smith)"
     side = json.loads((d / "model.json").read_text())
     scale = await pg.inner_text('#details-list dd[data-field="scale"]')
@@ -209,7 +215,7 @@ async def phase1(pg):
 
     # 14. starring
     await pg.click(".card:has-text('Carnifex')")
-    await pg.wait_for_selector("#details-name:has-text('Carnifex')")
+    await pg.wait_for_function("() => document.querySelector('#details-name')?.value === 'Carnifex'")
     await pg.click("#details-star")
     await pg.wait_for_selector('#details-star[aria-pressed="true"]')
     favs = json.loads((library / "_library/library.json").read_text()).get("favourites", [])
@@ -264,6 +270,28 @@ async def send_to(pg, schema="", place=None, new=None):
 
 async def clear_toast(pg):
     await pg.evaluate("() => { const t = document.querySelector('.toast'); if (t) { t.textContent = ''; t.hidden = true; } }")
+
+
+async def menu_item(pg, button, action):
+    """Open a page's menu (More ▾, Library ▾…) and pick one of its items."""
+    await pg.click(button)
+    await pg.click(f'#context-menu [data-action="{action}"]')
+
+
+async def library_menu(pg, action):
+    await menu_item(pg, "#library-menu", action)
+
+
+async def start_again(pg):
+    """Empty Import's workspace (Start again, under More ▾) if anything is in it."""
+    await pg.wait_for_selector("#sort-page[data-ready]")
+    await pg.click("#import-more")
+    item = pg.locator('#context-menu [data-action="import-clear"]')
+    if await item.count():
+        await item.click()
+        await pg.wait_for_selector("#sort-page .sw-empty")
+    else:
+        await pg.keyboard.press("Escape")
 
 
 async def toast_text(pg, pattern, timeout=30000):
@@ -328,11 +356,10 @@ async def phase2(pg):
     await pg.screenshot(path=str(out / "10-imported.png"), full_page=True)
 
     # 16. adding one model folder by copy, after starting the workspace again
-    await pg.click("#import-clear")  # can be undone, so it doesn't ask
-    await pg.wait_for_selector("#import-clear", state="detached")
+    await start_again(pg)  # can be undone, so it doesn't ask
     put(home / "Elsewhere/Gargoyle/gargoyle.stl")
     pick(home / "Elsewhere/Gargoyle")
-    await pg.click("#import-add-folder")
+    await menu_item(pg, "#import-more", "import-add-folder")
     await pg.wait_for_selector('#sort-list tr[data-name="Gargoyle"], #sort-tree .sw-item[data-name="Gargoyle"]')
     await sort_rows(pg)
     await pick_rows(pg, "Gargoyle")
@@ -371,7 +398,7 @@ async def phase2(pg):
     # 18. a loose folder inside the library is offered for sorting
     put(library / "Old stuff/Lictor/lictor.stl")
     await pg.goto(B + "#/")
-    await pg.click("#rescan")
+    await library_menu(pg, "rescan")
     await pg.wait_for_selector("#home-loose .sort-loose")
     await pg.click("#home-loose .sort-loose")
     await pg.wait_for_selector("#sort-page[data-ready]")
@@ -415,7 +442,7 @@ async def phase3(pg):
     await pg.goto(B + "#/import")
     await pg.wait_for_selector("#sort-page[data-ready]")
     pick(src)
-    await pg.click("#import-add-folder")
+    await menu_item(pg, "#import-more", "import-add-folder")
     await pg.wait_for_function("() => !document.querySelector('#import-progress')")
     await sort_rows(pg)
     await pick_rows(pg, "Knight Armour")
@@ -498,21 +525,21 @@ async def phase3(pg):
     await pg.click('[data-tab="3d"]')
     await pg.click("#variants button:text-is('All')")  # the variant switch picks the files every view shows
     on_disk = sorted(x.relative_to(dest).as_posix() for x in dest.rglob("*") if x.is_file() and x.name != "model.json" and not x.relative_to(dest).as_posix().startswith("_thumbs/"))
-    await pg.click('.parts-views [data-view="all"]')
+    await pg.click('#parts-views [data-view="all"]')
     await pg.wait_for_selector("#all-files")
     every = await pg.eval_on_selector_all("#all-files [data-file]", "els => els.map(e => e.dataset.file)")
     await pg.fill("#all-files .parts-filter", "helmet")
     await pg.wait_for_function("() => document.querySelectorAll('#all-files [data-file]').length === 2")
-    await pg.click('.parts-views [data-view="type"]')
+    await pg.click('#parts-views [data-view="type"]')
     kinds = await pg.eval_on_selector_all("#by-type [data-kind]", "els => els.map(e => e.dataset.kind)")
-    await pg.click('.parts-views [data-view="grid"]')
+    await pg.click('#parts-views [data-view="grid"]')
     await pg.wait_for_selector("#file-grid .file-tile")
     await pg.wait_for_function("() => [...document.querySelectorAll('#file-grid img')].some(i => i.complete && i.naturalWidth > 0 && /preview/.test(i.src))", timeout=30000)
     tiles = await pg.locator("#file-grid .file-tile").count()
     await pg.screenshot(path=str(out / "13b-files-grid.png"))
     await pg.wait_for_timeout(600)  # preferences are saved after a short pause
     kept = json.loads((home / "config/prefs.json").read_text()).get("ml-ui", {}).get("partsView") if (home / "config/prefs.json").exists() else None
-    await pg.click('.parts-views [data-view="folders"]')
+    await pg.click('#parts-views [data-view="folders"]')
     await pg.wait_for_selector("#part-tree")
     check("a model's files show as folders, all files, by type and as a grid of previews", sorted(every) == on_disk and kinds == ["model", "image", "doc", "archive"]
           and tiles == len(on_disk) and kept == "grid", (every, on_disk, kinds, tiles, kept))
@@ -526,9 +553,9 @@ async def phase3(pg):
     # 24. Make previews, for models added by hand
     put(library / "Unsorted/Hand Made/hand.stl", cube(5))
     await pg.goto(B + "#/")
-    await pg.click("#rescan")
+    await library_menu(pg, "rescan")
     await pg.wait_for_timeout(500)
-    await pg.click("#make-previews")
+    await library_menu(pg, "make-previews")
     await pg.wait_for_function("() => /preview/.test(document.querySelector('.toast')?.textContent || '')", timeout=60000)
     msg = await pg.inner_text(".toast")
     await pg.goto(B + "#/browse/unsorted")
@@ -697,9 +724,7 @@ async def phase5(pg):
     await pg.goto(B + "#/import")
     await pg.reload()  # the new category in the pickers
     await pg.wait_for_selector("#sort-page[data-ready]")
-    if await pg.locator("#import-clear").count():
-        await pg.click("#import-clear")
-        await pg.wait_for_selector("#import-clear", state="detached")
+    await start_again(pg)
     pick(share)
     await pg.click("#import-sort")
     await pg.click('[data-view="folders"]', timeout=30000)
@@ -774,9 +799,9 @@ async def phase5(pg):
     await pg.click('.sidebar a[href="#/duplicates"]')
     await pg.wait_for_selector("#dupes-page")
     await pg.click("#dupes-find")
-    group = pg.locator(".dupe-group:has(a:text-is('Bracket copy'))")
+    group = pg.locator(".dupe-group:has(.dupe-name:text-is('Bracket copy'))")
     await group.wait_for(timeout=60000)
-    keep = await group.locator("li.keep a").inner_text()
+    keep = await group.locator("li.keep .dupe-name").inner_text()
     summary = await pg.inner_text("#dupes-summary")
     await pg.screenshot(path=str(out / "22-duplicates.png"), full_page=True)
     hashed = json.loads((h / "Office/Lamp/model.json").read_text()).get("hashes", {})
@@ -829,7 +854,7 @@ async def ui_pass(pg):
     more = await labels_of(pg, "#context-menu .menu-label")
     await pg.keyboard.press("Escape")
     check("the details panel and the right-click menu have the same actions, in the same order",
-          row == ["Open", "Edit details…", "Move to category…", "Star", "Show in folder", "More"]
+          row == ["Open", "Edit details…", "Move to category…", "Star", "Show in folder", "More ▾"]
           and menu == ["Open", "Edit details…", "Move to category…", "Star", "Show in folder", "Make a new preview", "Copy folder path"]
           and more == ["Make a new preview", "Copy folder path"], (row, menu, more))
 
@@ -913,7 +938,7 @@ async def ui_pass(pg):
     await pg.keyboard.press("Escape")
     mp_row = await labels_of(pg, "#model-page .action-row button")
     check("files with no viewer are greyed and open in their own app; the model page has the same row", greyed and "no viewer" in why
-          and file_menu == ["Open in its own app", "Show in folder"] and mp_row == ["Edit details…", "Move to category…", "Star", "Show in folder", "More"], (greyed, why, file_menu, mp_row))
+          and file_menu == ["Open in its own app", "Show in folder"] and mp_row == ["Edit details…", "Move to category…", "Star", "Show in folder", "More ▾"], (greyed, why, file_menu, mp_row))
 
     # 39. Import: right-click, Ctrl+A and Esc, Ctrl+Z, and messages clear of the footer
     more = home / "More"
@@ -921,9 +946,7 @@ async def ui_pass(pg):
     put(more / "Gizmo/gizmo.stl", cube(6))
     await pg.goto(B + "#/import")
     await pg.wait_for_selector("#sort-page[data-ready]")
-    if await pg.locator("#import-clear").count():
-        await pg.click("#import-clear")
-        await pg.wait_for_selector("#import-clear", state="detached")
+    await start_again(pg)
     pick(more)
     await pg.click("#import-sort")
     await pg.wait_for_function("() => !document.querySelector('#import-progress')")
@@ -948,8 +971,7 @@ async def ui_pass(pg):
     check("Import has the same right-click menu, keys and Undo, and messages don't cover its footer",
           imenu[:3] == ["Edit details", "Set category…", "Show in folder"] and "Skip" in imenu and both == "2 models selected" and none == 0
           and "Household" in placed and apart, (imenu, both, none, placed, apart))
-    await pg.click("#import-clear")
-    await pg.wait_for_selector("#import-clear", state="detached")
+    await start_again(pg)
 
 
 async def ui_pass2(pg):
@@ -998,9 +1020,7 @@ async def ui_pass2(pg):
     put(src / "Gadget/gadget.stl", cube(7))
     await pg.goto(B + "#/import")
     await pg.wait_for_selector("#sort-page[data-ready]")
-    if await pg.locator("#import-clear").count():
-        await pg.click("#import-clear")
-        await pg.wait_for_selector("#import-clear", state="detached")
+    await start_again(pg)
     pick(src)
     await pg.click("#import-sort")
     await pg.wait_for_selector('#sort-tree .sw-item[data-name="Gadget"], #sort-list tr[data-name="Gadget"]', timeout=30000)
@@ -1018,7 +1038,7 @@ async def ui_pass2(pg):
     await sort_rows(pg)
     row = await pg.inner_text('#sort-list tr[data-name="Gadget"]')
     check("an import is undone from its results: the files go back and the workspace has them again", inside and back and "Bits and bobs" in row, (inside, back, row))
-    await pg.click("#import-clear")
+    await start_again(pg)
 
     # 43. Home: an older change to details can be undone while newer ones leave its model alone
     q = await api(pg, "models_query", {"scope": "unsorted"})
@@ -1037,9 +1057,132 @@ async def ui_pass2(pg):
     check("Home undoes an older change to details while newer changes leave that model alone", older is True and "boat" not in tags, (rows[:4], tags))
 
     # 44. Read again is a job with Stop in the status bar
-    await pg.click("#rescan")
+    await library_menu(pg, "rescan")
     said = await toast_text(pg, "models, read in|^Stopped")
     check("Read again runs as a job and says what it read", "read in" in said, said)
+
+
+
+async def ui_pass3(pg):
+    """UI pass step 3: one page layout (header, toolbar, details panel, Home)."""
+    # 45. every page starts with the same header: the title and its count, then the page's main button and menu
+    q = await api(pg, "models_query", {"scope": "unsorted", "sort": "name"})
+    knight = next(m for m in q["items"] if m["name"] == "Knight Armour")
+    heads = []
+    for route, ready in [("#/", "#library-menu"), ("#/browse/all", "#browse-count"), ("#/browse/schema/household", "#category-menu"), (f"#/model/{knight['id']}", "#mp-head .action-row"),
+                         ("#/import", "#import-more"), ("#/duplicates", "#dupes-find"), ("#/settings", "#settings-about")]:
+        await pg.goto(B + route)
+        await pg.wait_for_selector(f".page-head {ready}, {ready}")
+        heads.append(await pg.evaluate("() => { const h = document.querySelectorAll('.page-head'); return h.length === 1 ? h[0].querySelector('.page-title h1')?.textContent.trim() || null : h.length; }"))
+    check("every page starts with the same header", heads == ["My Models", "All models", "Household", "Knight Armour", "Import", "Duplicates", "Settings"], heads)
+
+    # 46. one view switcher (icon, label, tooltip) and one sort menu; the list's headers sort too
+    await pg.goto(B + "#/browse/all")
+    await count(pg)
+    switch = await pg.eval_on_selector_all(".view-switch button", "els => els.map(e => [e.dataset.view, !!e.querySelector('svg'), e.querySelector('.view-label')?.textContent, e.title])")
+    await pg.click("#sort")
+    sorts = await labels_of(pg, "#context-menu .menu-label")
+    await pg.click('#context-menu [data-action="sort-size"]')
+    await pg.wait_for_selector('#sort[data-sort="size"]')
+    await pg.click('.view-switch [data-view="list"]')
+    await pg.wait_for_selector("#list-head")
+    sizes = await pg.eval_on_selector_all(".results .row", "els => els.map(e => e.querySelector('.row-size').textContent)")
+    await pg.click('#list-head [data-sort="name"]')
+    await pg.wait_for_selector('#sort[data-sort="name"]')
+    try:  # the rows follow once the new order comes back
+        await pg.wait_for_function("() => { const n = [...document.querySelectorAll('.results .row .row-name')].map(e => e.textContent.trim().toLowerCase()); return n.length > 2 && n.every((x, i) => !i || n[i - 1] <= x); }", timeout=5000)
+    except Exception:
+        pass
+    names = await pg.eval_on_selector_all(".results .row .row-name", "els => els.map(e => e.textContent.trim().toLowerCase())")
+    await pg.click('.view-switch [data-view="grid"]')
+    check("one view switcher and one sort menu, and the list's headers sort",
+          switch == [["grid", True, "Grid", "Grid"], ["list", True, "List", "List"]] and sorts == ["Name", "Recently added", "Largest first"]
+          and len(sizes) > 2 and names == sorted(names), (switch, sorts, sizes[:4], names[:4]))
+
+    # 47. a search carried into another place says so, and can be cleared there
+    await pg.goto(B + "#/browse/all")
+    await search(pg, "knight")
+    await pg.click('.sidebar a[href="#/browse/schema/household"]')
+    await pg.wait_for_function("() => document.querySelector('#search-note')?.textContent.includes('found in Household')")
+    note = await pg.inner_text("#search-note")
+    nothing = await pg.inner_text("#no-results")
+    await pg.click("#search-clear")
+    await pg.wait_for_function("() => !document.querySelector('#search-note') && document.querySelector('#search').value === ''")
+    check("a search carried into another place says so and clears there", note.startswith("Searching for knight") and "0 found in Household" in note and "Search all models" in note
+          and "Nothing in Household" in nothing, (note, nothing))
+
+    # 48. the details panel is changed in place, with Undo; nothing selected sums up the place; several show what they share
+    await pg.goto(B + "#/browse/unsorted")
+    await count(pg)
+    await pg.keyboard.press("Escape")  # nothing selected (a model may still be from earlier)
+    await pg.wait_for_selector("#place-summary #place-counts")
+    summary = await pg.inner_text("#place-summary #place-counts")
+    await pg.click(".card:has(.card-name:text-is('Knight Armour'))")
+    await pg.wait_for_function("() => document.querySelector('#details-name')?.value === 'Knight Armour'")
+    side = library / "Unsorted/Knight Armour/model.json"
+    before = json.loads(side.read_text()).get("authors") or []
+    await clear_toast(pg)
+    await pg.fill("#details-authors", "Ann Smith, Bo Lee")
+    await pg.press("#details-authors", "Enter")
+    said = await toast_text(pg, "^Saved the authors of Knight Armour")
+    saved = json.loads(side.read_text()).get("authors")
+    await pg.click(".toast .toast-action")
+    await toast_text(pg, "^Undone")
+    undone = json.loads(side.read_text()).get("authors") or []
+    await pg.wait_for_function("v => document.querySelector('#details-authors')?.value === v", arg=", ".join(x["name"] for x in before))
+    await pg.click(".card:has(.card-name:text-is('Benchy'))", modifiers=["Control"])
+    await pg.wait_for_selector("#picked-shared")
+    shared = await pg.inner_text("#picked-shared")
+    await pg.keyboard.press("Escape")
+    check("the details panel is changed in place with Undo; it sums up the place, and what several share",
+          "models" in summary and said and saved == [{"name": "Ann Smith"}, {"name": "Bo Lee"}] and undone == before and "Category" in shared and "Unsorted" in shared,
+          (summary, said, saved, undone, shared))
+
+    # 49. Home: recently added, waiting to be sorted, and one Library menu; the layout is in Settings
+    await pg.goto(B + "#/")
+    await pg.wait_for_selector("#home-added .home-model")
+    added = await pg.locator("#home-added .home-model").count()
+    await pg.click("#library-menu")
+    lib_menu = await labels_of(pg, "#context-menu .menu-label")
+    await pg.keyboard.press("Escape")
+    waiting = await pg.inner_text("#home-waiting")
+    await pg.evaluate("() => document.activeElement?.blur()")
+    await clear_toast(pg)
+    await pg.screenshot(path=str(out / "30-home.png"))
+    await pg.goto(B + "#/settings")
+    tree = await pg.inner_text("#settings-about .folder-tree")
+    check("Home has recently added models, what's waiting and the Library menu; the layout is in Settings",
+          added == 6 and lib_menu == ["Show in folder", "Read again", "Make missing previews", "Open another library…"] and "Unsorted" in waiting and "model.json" in tree,
+          (added, lib_menu, waiting))
+
+    # 50. Duplicates and Import have the same details panel
+    await pg.goto(B + "#/duplicates")
+    await pg.click("#dupes-find")
+    first = pg.locator(".dupe-models li").first
+    await first.wait_for(timeout=60000)
+    name = await first.locator(".dupe-name").inner_text()
+    await first.click()
+    await pg.wait_for_function("n => document.querySelector('#model-details #details-name')?.value === n", arg=name)
+    dupes_row = await labels_of(pg, "#model-details .action-row button")
+    await clear_toast(pg)
+    await pg.screenshot(path=str(out / "31-duplicates-panel.png"))
+    src = home / "Panel test"
+    put(src / "Widget two/widget.stl", cube(6))
+    await pg.goto(B + "#/import")
+    await start_again(pg)
+    pick(src)
+    await pg.click("#import-sort")
+    await pg.wait_for_selector("#sort-summary")
+    empty_panel = await pg.inner_text("#sort-summary")
+    await sort_rows(pg)
+    await pick_rows(pg, "Widget two")
+    inside = await pg.evaluate("() => !!document.querySelector('#sort-details #details-name') && !!document.querySelector('#sort-details #sort-actions')")
+    import_switch = await pg.eval_on_selector_all("#sort-page .toolbar .view-switch button", "els => els.map(e => !!e.querySelector('svg') && !!e.querySelector('.view-label'))")
+    await clear_toast(pg)
+    await pg.screenshot(path=str(out / "32-import-panel.png"))
+    await start_again(pg)
+    check("Duplicates and Import show the same details panel, and Import the same view switcher", dupes_row[:2] == ["Open", "Edit details…"] and "with no category" in empty_panel and inside
+          and import_switch == [True] * 4, (name, dupes_row, empty_panel, inside, import_switch))
 
 
 def big_library():
@@ -1085,7 +1228,7 @@ async def main():
             labels = await pg.eval_on_selector_all(".sidebar .nav-label", "els => els.map(e => e.textContent.trim())")
             await pg.click('.sidebar a[href="#/browse/unsorted"]')
             await pg.wait_for_selector("#no-results")
-            unsorted = await pg.inner_text(".browse-title h1")
+            unsorted = await pg.inner_text(".page-head h1")
             active = await pg.inner_text(".sidebar .nav-link.active .nav-label")
             check("the menu's places open", labels == ["Home", "Import", "All models", "Unsorted", "Starred", "Duplicates", "Settings"] and unsorted == "Unsorted" and active == "Unsorted", (labels, unsorted, active))
 
@@ -1096,6 +1239,7 @@ async def main():
             await phase5(pg)
             await ui_pass(pg)
             await ui_pass2(pg)
+            await ui_pass3(pg)
 
             # 3. renaming the library
             await pg.click('.sidebar a[href="#/settings"]')

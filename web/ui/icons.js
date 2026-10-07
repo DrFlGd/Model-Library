@@ -15,6 +15,8 @@ export const Icon = {
   moon: (s) => svg(html`<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />`, s),
   sun: (s) => svg(html`<circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />`, s),
   auto: (s) => html`<svg width=${s || 16} height=${s || 16} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" /></svg>`,
+  check: (s) => svg(html`<path d="M5 12.5l4.5 4.5L19 7.5" />`, s),
+  sort: (s) => svg(html`<path d="M7 4v16M4 17l3 3 3-3M14 6h7M14 12h5M14 18h3" />`, s),
   more: (s) => svg(html`<circle cx="5" cy="12" r="1.2" /><circle cx="12" cy="12" r="1.2" /><circle cx="19" cy="12" r="1.2" />`, s),
   copy: (s) => svg(html`<rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" />`, s),
   trash: (s) => svg(html`<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />`, s),

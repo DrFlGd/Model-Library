@@ -9,17 +9,18 @@ import { useStore } from "../lib/store.js";
 import { ui, setPref } from "./state.js";
 import { routeHash, schemaScope } from "./context.js";
 import { Icon } from "./icons.js";
-import { api, libraryUrl, toast } from "./library.js";
-import { ModelDetails } from "./details.js";
-import { ActionRow, MODEL_ACTIONS, menuItems, openMenu, usePageKeys, runKey, letter, selectAllKey, editDetails, writable } from "./actions.js";
+import { api, toast } from "./library.js";
+import { ModelDetails, SelectedPanel, PlaceSummary, Cover, size } from "./details.js";
+import { MODEL_ACTIONS, menuItems, openMenu, usePageKeys, runKey, letter, selectAllKey, editDetails, writable } from "./actions.js";
 import { categoryItems } from "./categories.js";
+import { PageHead, ViewSwitch, SortMenu, SearchNote } from "./layout.js";
 
 /** Open a model's own page. */
 const openModel = (m) => { location.hash = routeHash(`model:${m.id}`); };
 
 const PAGE = 300;
 const SORTS = [["name", "Name"], ["added", "Recently added"], ["size", "Largest first"]];
-const KIND_ICON = { model: "box", slicer: "stack", image: "image", doc: "file", video: "image", archive: "folder", other: "file" };
+const VIEWS = [["grid", "Grid", "grid"], ["list", "List", "list"]];
 const CTX = { page: "browse" };
 
 /** The place's title, as links back up its categories. */
@@ -34,24 +35,20 @@ function Title({ scope, overview }) {
     i === crumbs.length - 1 ? label : html`<a href=${routeHash(`browse:${schemaScope(id, path)}`)}>${label}</a>`}`)}</h1>`;
 }
 
-/** The category shown: one menu, the same at every level and on the sidebar. */
-function CategoryButton({ scope }) {
-  if (!scope.startsWith("schema:")) return null;
+/** The place's name in words (the last of its crumbs). */
+function placeName(scope, overview) {
+  if (scope === "all") return "All models";
+  if (scope === "unsorted") return "Unsorted";
+  if (scope === "favs") return "Starred";
   const [id, ...values] = scope.slice(7).split("/").map(decodeURIComponent);
-  return html`<button type="button" class="ghost" id="category-menu" aria-haspopup="menu" title="Add, edit, rename or delete"
-    onClick=${(e) => openMenu(e.currentTarget, categoryItems(id, values))}>${Icon.layers(14)} ${values.length ? "Subcategory" : "Category"} ▾</button>`;
+  return values.length ? values[values.length - 1] : overview?.schemas?.find((s) => s.id === id)?.name || id;
 }
 
-/** A model's cover picture, or an icon for the kind of files it has. */
-export function Cover({ model, cls = "" }) {
-  const [failed, setFailed] = useState(false);
-  const cover = model.files?.cover;
-  if (cover && !failed) {
-    return html`<span class=${`thumb ${cls}`}><img src=${libraryUrl(`${model.rel}/${cover}`)} alt="" loading="lazy" onError=${() => setFailed(true)} /></span>`;
-  }
-  const kinds = Object.keys(model.files?.kinds || {});
-  const kind = ["model", "slicer", "archive", "image", "doc", "video"].find((k) => kinds.includes(k)) || "other";
-  return html`<span class=${`thumb thumb-none ${cls}`}>${(Icon[KIND_ICON[kind]] || Icon.file)(40)}</span>`;
+/** The category shown: one menu, the same at every level and on the sidebar. */
+function categoryMenu(scope) {
+  if (!scope.startsWith("schema:")) return null;
+  const [id, ...values] = scope.slice(7).split("/").map(decodeURIComponent);
+  return { id: "category-menu", label: values.length ? "Subcategory" : "Category", icon: "layers", title: "Add, edit, rename or delete", items: () => categoryItems(id, values) };
 }
 
 const cardEl = (id) => document.querySelector(`.results [data-model="${CSS.escape(id)}"]`);
@@ -97,18 +94,20 @@ function Row({ m, selected, fav, items, onMenu }) {
     <span class="row-name">${m.name}${fav ? html` <span class="badge-star" title="Starred">${Icon.star(12, true)}</span>` : null}</span>
     <span class="row-author">${m.authors.join(", ")}</span>
     <span class="row-cat">${m.path.join(" › ") || (m.schema ? "" : "Unsorted")}</span>
+    <span class="row-added">${(m.added || "").slice(0, 10)}</span>
+    <span class="row-size">${size(m.files?.bytes || 0)}</span>
   </div>`;
 }
 
-/** Several models selected: what can be done to all of them. */
-function Selected({ models }) {
-  return html`<aside class="inspector" aria-label="Selected models" id="picked-panel">
-    <h2 class="insp-title">${models.length} models selected</h2>
-    <p class="insp-sub">Ctrl or Cmd-click adds or removes one, Shift-click selects a run, Ctrl+A selects everything shown and Esc clears.</p>
-    <${ActionRow} targets=${models} ctx=${CTX} idPrefix="picked" />
-    <div><button type="button" class="ghost" id="picked-clear" title="Clear selection (Esc)" onClick=${() => ui.set({ picked: [] })}>Clear selection</button></div>
-    <ul class="insp-files">${models.map((m) => html`<li key=${m.id}><span>${m.name}</span><span class="muted">${m.path.join(" › ") || "Unsorted"}</span></li>`)}</ul>
-  </aside>`;
+/** The list's column headers: Name, Added and Size sort when clicked, as on Import. */
+function ListHead({ sort }) {
+  const col = (k, label, cls) => html`<button type="button" class=${`linkish ${cls}`} data-sort=${k} aria-pressed=${sort === k ? "true" : "false"}
+    title=${`Sort by ${label.toLowerCase()}`} onClick=${() => setPref({ sort: k })}>${label}${sort === k ? " ▾" : ""}</button>`;
+  return html`<div class="list-head" id="list-head" aria-hidden="true">
+    <span class="row-tick-gap"></span><span class="thumb-gap"></span>
+    ${col("name", "Name", "row-name")}<span class="row-author">Authors</span><span class="row-cat">Category</span>
+    ${col("added", "Added", "row-added")}${col("size", "Size", "row-size")}
+  </div>`;
 }
 
 /** Search filters in the search text (author:jo, tag:"big one"). */
@@ -132,8 +131,8 @@ export function Browser() {
     if (!s.library) return;
     const n = ++seq.current;
     const q = s.q;
-    api("models_query", { scope, q, sort: s.sort, limit }).then((r) => { if (n === seq.current) setResult({ ...r, q }); },
-      (e) => { if (n === seq.current) { setResult({ total: 0, items: [], facets: {}, q, error: e.message || String(e) }); } });
+    api("models_query", { scope, q, sort: s.sort, limit }).then((r) => { if (n === seq.current) setResult({ ...r, q, scope }); },
+      (e) => { if (n === seq.current) { setResult({ total: 0, items: [], facets: {}, q, scope, error: e.message || String(e) }); } });
   }, [scope, s.q, s.sort, limit, s.rev, s.favs.length, s.library?.path]);
   // typing searches after a short pause
   useEffect(() => {
@@ -199,23 +198,20 @@ export function Browser() {
     ...(facets.tags || []).slice(0, 8).filter((f) => !isOn("tag", f.value)).map((f) => ["tag", f]),
   ];
   const View = s.layout === "list" ? Row : Card;
+  const name = placeName(scope, s.overview);
+  // the answer for this place and search (the last one stays up while the next comes)
+  const fresh = result && result.q === s.q && result.scope === scope ? result : null;
+  const count = html`<span class="page-count" id="browse-count" data-q=${result ? result.q : null} data-scope=${result ? result.scope : null}>${result ? `${result.total} ${result.total === 1 ? "model" : "models"}` : ""}</span>`;
+  const wider = s.q && scope !== "all" ? html`<a href=${routeHash("browse:all")} id="search-everywhere">Search all models</a>` : null;
   return html`<div class="browser">
     <div class="browse-main">
-      <div class="browse-head">
-        <div class="browse-title"><${Title} scope=${scope} overview=${s.overview} />
-          <span class="browse-count" id="browse-count" data-q=${result ? result.q : null}>${result ? `${result.total} ${result.total === 1 ? "model" : "models"}` : ""}</span>
-          <${CategoryButton} scope=${scope} /></div>
-        <label class="search small browse-search"><span class="visually-hidden">Search this place</span>
+      <${PageHead} title=${html`<${Title} scope=${scope} overview=${s.overview} />`} count=${count} menu=${categoryMenu(scope)} />
+      <div class="toolbar">
+        <label class="search small toolbar-search"><span class="visually-hidden">Search this place</span>
           <input id="search" data-search type="search" value=${text} placeholder="Search names, authors, tags… or author:jo tag:presupported" autocomplete="off" spellcheck="false"
             title="Search (/)" onInput=${(e) => setText(e.target.value)} /></label>
-        <div class="browse-tools">
-          <label class="tool-select"><span class="visually-hidden">Sort</span>
-            <select id="sort" title="Sort" value=${s.sort} onChange=${(e) => setPref({ sort: e.target.value })}>${SORTS.map(([v, l]) => html`<option value=${v} key=${v}>${l}</option>`)}</select></label>
-          <div class="seg" role="group" aria-label="View">
-            <button type="button" aria-pressed=${s.layout === "grid" ? "true" : "false"} title="Grid" aria-label="Grid" onClick=${() => setPref({ layout: "grid" })}>${Icon.grid(15)}</button>
-            <button type="button" aria-pressed=${s.layout === "list" ? "true" : "false"} title="List" aria-label="List" onClick=${() => setPref({ layout: "list" })} data-layout="list">${Icon.list(15)}</button>
-          </div>
-        </div>
+        <${SortMenu} id="sort" options=${SORTS} value=${s.sort} onChange=${(v) => setPref({ sort: v })} />
+        <${ViewSwitch} views=${VIEWS} value=${s.layout === "list" ? "list" : "grid"} onChange=${(v) => setPref({ layout: v })} />
       </div>
       ${chips.length ? html`<div class="filters" aria-label="Narrow down">${chips.map(([k, f]) => {
         const on = isOn(k, f.value);
@@ -223,15 +219,18 @@ export function Browser() {
           onClick=${() => toggleFilter(k, f.value)} title=${on ? "Show them all again" : `Only ${k === "author" ? "by" : "tagged"} ${f.value}`}>${k === "tag" ? "#" : ""}${f.value} ${on ? html`<span aria-hidden="true">×</span>` : html`<span class="muted">${f.count}</span>`}</button>`;
       })}</div>` : null}
       <div class="browse-scroll">
+        <${SearchNote} q=${s.q} found=${fresh ? `${fresh.total} found in ${name}` : ""} wider=${wider} onClear=${() => { setText(""); ui.set({ q: "" }); }} />
         ${result?.error ? html`<p class="warn-note" role="alert">${result.error}</p>` : null}
-        ${result && !items.length && !result.error ? html`<div class="empty" id="no-results">${s.q ? "Nothing matches that search here." : scope === "favs" ? "Nothing starred yet: star a model to keep it here." : "No models here yet."}</div>` : null}
+        ${result && !items.length && !result.error ? html`<div class="empty" id="no-results">${s.q ? `Nothing in ${name} matches that search.` : scope === "favs" ? "Nothing starred yet: star a model to keep it here." : "No models here yet."}</div>` : null}
+        ${s.layout === "list" && items.length ? html`<${ListHead} sort=${s.sort} />` : null}
         <div class=${`results ${s.layout === "list" ? "list-view" : "grid-view"}${picked.length > 1 ? " picking" : ""}`} role="listbox" aria-multiselectable="true" aria-label="Models">
           ${items.map((m) => html`<${View} key=${m.id} m=${m} items=${items} selected=${s.picked.includes(m.id)} fav=${s.favs.includes(m.id)} onMenu=${onMenu} />`)}
         </div>
         ${result && result.total > items.length ? html`<button type="button" class="ghost more-btn" onClick=${() => setLimit(limit + PAGE)}>Show more (${result.total - items.length} left)</button>` : null}
       </div>
     </div>
-    ${picked.length > 1 ? html`<${Selected} models=${picked} />` : html`<${ModelDetails} id=${picked[0]?.id || null} />`}
+    ${picked.length > 1 ? html`<${SelectedPanel} models=${picked} />`
+      : html`<${ModelDetails} id=${picked[0]?.id || null} empty=${html`<${PlaceSummary} name=${name} result=${fresh} />`} />`}
   </div>`;
 }
 

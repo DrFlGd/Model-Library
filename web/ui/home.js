@@ -1,24 +1,17 @@
-// Home: the open library, how its folders are laid out, and what's coming.
-// Also the first-start screen, which asks where the library should go.
+// Home: the place to start (docs/PLAN.md, "UI pass design", step 3): models added
+// lately, what's waiting to be sorted, the changes made lately (with Undo), the
+// categories, and one Library ▾ menu. Also the first-start screen, which asks
+// where the library should go.
 import { html, useState, useEffect } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
-import { ui } from "./state.js";
+import { ui, setPref } from "./state.js";
 import { ctx, routeHash, schemaScope } from "./context.js";
 import { api, isDesktop, openLibrary, showLibraryFolder, rescan, followJob, loadOverview, toast, undoChange, finishChange } from "./library.js";
 import { sortFolder } from "./sort.js";
-import { Icon } from "./icons.js";
+import { Cover } from "./details.js";
+import { PageHead } from "./layout.js";
 
-const TREE = `_library/                  the app's own files
-Unsorted/                  models with no category yet
-Category/                  a category's top folder
-  Subcategory/             as many as you like,
-    Subcategory/           inside each other, as deep as each needs
-      Model name (Author)/   one folder per model, at any level
-        model.json           author, source, date…
-        Model name.stl
-        Parts/               parts keep their folders
-        _media/              pictures, PDFs, videos
-        _thumbs/             previews`;
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 /** Draw a preview for every model that has none yet. */
 async function makePreviews() {
@@ -31,6 +24,17 @@ async function makePreviews() {
     if (!r.made && !r.no_3d && !r.failed?.length) return toast("Every model has a preview already.");
     toast(`Made ${r.made || 0} ${r.made === 1 ? "preview" : "previews"}${r.failed?.length ? `; ${r.failed.length} couldn't be drawn` : ""}.`, 5000);
   } catch (e) { toast(`Couldn't make previews: ${e.message || e}`, 6000); }
+}
+
+/** The Library ▾ menu: what's done to the whole library. */
+function libraryItems(lib) {
+  return [
+    ...(isDesktop() ? [{ id: "show-library", label: "Show in folder", icon: "folder", run: showLibraryFolder }] : []),
+    { id: "rescan", label: "Read again", icon: "refresh", title: "Read every model folder again, in case something changed that the app missed", run: () => rescan(true) },
+    { id: "make-previews", label: "Make missing previews", icon: "image", disabled: lib.read_only ? "The library is read-only." : false,
+      title: "Draw a preview for every model that has none yet", run: makePreviews },
+    ...(isDesktop() ? [{ sep: true }, { id: "open-another", label: "Open another library…", icon: "folder", run: () => openLibrary() }] : []),
+  ];
 }
 
 const STATES = { done: "", undone: "undone", running: "interrupted", undoing: "interrupted while undoing", stopped: "stopped partway", emptied: "copies deleted" };
@@ -50,7 +54,7 @@ function RecentChanges({ lib, rev }) {
   const first = list.find((j) => j.undo === true);
   const broken = list.find((j) => ["running", "undoing", "stopped"].includes(j.state));
   const when = (t) => (t || "").replace("T", " ").slice(0, 16);
-  return html`<div class="home-card home-counts" id="recent-changes">
+  return html`<section class="home-card home-wide" id="recent-changes">
     <h2>Recent changes</h2>
     ${broken && !lib.read_only ? html`<div class="warn-note" role="alert" id="change-broken">
       <p>${broken.label} didn't finish${broken.error ? `: ${broken.error}` : "."} Some folders may have moved and others not.</p>
@@ -59,64 +63,70 @@ function RecentChanges({ lib, rev }) {
           <button type="button" class="ghost" id="putback-change" disabled=${busy} onClick=${() => act(finishChange, broken.id, "The change is made again.")}>Make the change again</button></div>`
         : html`<div class="home-actions"><button type="button" class="primary" id="finish-change" disabled=${busy} onClick=${() => act(finishChange, broken.id, "Finished.")}>Finish it</button>
           <button type="button" class="ghost" id="putback-change" disabled=${busy} onClick=${() => act(undoChange, broken.id, "Put things back as they were.")}>Put things back</button></div>`}</div>` : null}
-    <ul class="ls-list">${list.slice(0, 6).map((j) => html`<li key=${j.id} class=${j.state === "undone" ? "muted" : ""}><span>${j.label} <span class="muted">· ${when(j.created)} · ${j.models} ${j.models === 1 ? "model" : "models"}${STATES[j.state] ? ` · ${STATES[j.state]}` : ""}</span></span>
+    <ul class="ls-list">${list.slice(0, 6).map((j) => html`<li key=${j.id} class=${j.state === "undone" ? "muted" : ""}><span>${j.label} <span class="muted">· ${when(j.created)} · ${plural(j.models, "model", "models")}${STATES[j.state] ? ` · ${STATES[j.state]}` : ""}</span></span>
       ${j.state === "done" && !lib.read_only ? html`<button type="button" class="ghost undo-change" id=${j === first ? "undo-change" : null} data-id=${j.id} disabled=${busy || j.undo !== true}
         title=${j.undo === true ? `Undo: ${j.label}` : j.undo || ""} onClick=${() => act(undoChange, j.id, `Undone: ${j.label.charAt(0).toLowerCase()}${j.label.slice(1)}.`)}>Undo</button>` : null}</li>`)}</ul>
-  </div>`;
+  </section>`;
 }
 
-const NEXT = [
-  ["Phase 0", "The app, its library folder and settings"],
-  ["Phase 1", "Categories, model details and search"],
-  ["Phase 2", "Importing models: files, folders and ZIPs, moved or copied into place, and moving models between categories"],
-  ["Phase 3", "Viewing models: a 3D viewer, parts and variants, previews, pictures, readmes, PDFs and videos"],
-  ["Phase 4", "Editing categories: a tree of subcategories, renamed, merged and moved with folders to match, and undo"],
-  ["Phase 5", "Large collections: sorting a whole folder tree as it is, finding duplicates, noticing changes made outside the app"],
-  ["UI pass", "The same actions, keys and undo on every page, then one page layout", true],
-  ["Phase 6", "Running on a server (Docker) with sign-in, to browse the library from another computer (on hold)"],
-];
+/** The models added last, newest first. */
+function RecentlyAdded({ rev, total }) {
+  const [list, setList] = useState(null);
+  useEffect(() => { api("models_query", { scope: "all", sort: "added", limit: 6 }).then((r) => setList(r.items || []), () => setList([])); }, [rev]);
+  if (!list?.length) return null;
+  const seeAll = (e) => { e.preventDefault(); setPref({ sort: "added" }); location.hash = routeHash("browse:all"); };
+  return html`<section class="home-card home-wide" id="home-added">
+    <div class="home-card-head"><h2>Recently added</h2>${total > list.length ? html`<a href=${routeHash("browse:all")} onClick=${seeAll}>See all ${total}</a>` : null}</div>
+    <div class="home-strip">${list.map((m) => html`<a class="home-model" key=${m.id} href=${routeHash(`model:${m.id}`)} title=${m.name} data-model=${m.id}>
+      <${Cover} model=${m} /><span class="card-name">${m.name}</span><span class="card-sub">${(m.added || "").slice(0, 10)}</span></a>`)}</div>
+  </section>`;
+}
+
+/** Models with no place yet: Unsorted, and folders in the library outside any category. */
+function Waiting({ lib, ov }) {
+  const loose = ov.loose || [];
+  return html`<section class="home-card" id="home-waiting">
+    <h2>Waiting to be sorted</h2>
+    ${ov.unsorted ? html`<p><a href=${routeHash("browse:unsorted")}>${plural(ov.unsorted, "model is", "models are")} in Unsorted</a>: select ${ov.unsorted === 1 ? "it" : "them"} there and choose Move to category… to give ${ov.unsorted === 1 ? "it" : "them"} a place.</p>` : null}
+    ${loose.length ? html`<div id="home-loose">
+      <p>These folders are in the library but not in a category or Unsorted, so their models aren't listed. Sort them to give each model a place.</p>
+      <ul class="ls-list">${loose.map((f) => html`<li key=${f}><span>${f}</span>
+        <button type="button" class="ghost sort-loose" data-folder=${f} onClick=${() => sortFolder(`${lib.path}/${f}`)}>Sort…</button></li>`)}</ul></div>` : null}
+    ${!ov.unsorted && !loose.length ? html`<p class="muted">Nothing: every model has a category. New models come in through <a href=${routeHash("import")}>Import</a>.</p>` : null}
+  </section>`;
+}
+
+function Categories({ ov }) {
+  return html`<section class="home-card" id="home-categories">
+    <h2>Categories</h2>
+    ${ov.schemas.length ? html`<ul class="ls-list">${ov.schemas.map((sc) => html`<li key=${sc.id}><span><a href=${routeHash(`browse:${schemaScope(sc.id)}`)}>${sc.name}</a></span><span class="muted">${plural(sc.count, "model", "models")}</span></li>`)}</ul>`
+      : html`<p>No categories yet: make one with <b>New category…</b> in the menu, then put model folders under its folder.</p>`}
+  </section>`;
+}
 
 export function Home() {
   const s = useStore(ui, (st) => ({ library: st.library, error: st.libraryError, firstRun: st.firstRun, overview: st.overview, rev: st.catalogRev }));
   const lib = s.library;
   if (s.firstRun && !lib) return html`<${FirstRun} />`;
   const ov = s.overview;
+  if (!lib) {
+    return html`<div class="home">
+      <${PageHead} title="Model Library" sub="Organise your 3D models into folders laid out by your own categories." />
+      ${s.error ? html`<p class="warn-note" role="alert">${s.error}</p>` : null}
+      ${isDesktop() ? html`<div class="home-actions"><button type="button" class="primary" id="home-open-library" onClick=${() => openLibrary()}>Open a library…</button></div>` : null}
+    </div>`;
+  }
+  const count = ov ? html`<span class="page-count" id="home-counts">${plural(ov.all, "model", "models")}${ov.unsorted ? `, ${ov.unsorted} unsorted` : ""}</span>` : null;
   return html`<div class="home">
-    <div class="home-head">
-      <h1>${lib ? lib.name : "Model Library"}</h1>
-      <p>${lib ? html`Your library is in <b>${lib.path}</b>. Models go into folders laid out by your categories, so the library makes sense in any file manager, with or without this app.`
-        : "Organise your 3D models into folders laid out by your own categories."}</p>
-    </div>
+    <${PageHead} title=${lib.name} count=${count} sub=${html`Your library is in <b>${lib.path}</b>. How its folders are laid out is in Settings.`}
+      menu=${{ id: "library-menu", label: "Library", icon: "folder", title: "Show in folder, read again, make previews, open another library", items: () => libraryItems(lib) }} />
     ${s.error ? html`<p class="warn-note" role="alert">${s.error}</p>` : null}
-    ${lib?.read_only ? html`<p class="warn-note" role="alert">${lib.read_only}</p>` : null}
-    ${isDesktop() ? html`<div class="home-actions">
-      <button type="button" class="ghost" onClick=${showLibraryFolder} disabled=${!lib}>${Icon.folder(15)} Show in folder</button>
-      <button type="button" class="ghost" id="rescan" onClick=${() => rescan(true)} disabled=${!lib} title="Read every model folder again, in case something changed that the app missed">${Icon.refresh(15)} Read again</button>
-      ${lib && !lib.read_only ? html`<button type="button" class="ghost" id="make-previews" onClick=${makePreviews} title="Draw a preview for every model that has none yet">${Icon.image(15)} Make missing previews</button>` : null}
-      <button type="button" class="ghost" onClick=${() => openLibrary()}>Open another library…</button>
-    </div>` : lib && !lib.read_only ? html`<div class="home-actions"><button type="button" class="ghost" id="make-previews" onClick=${makePreviews}>${Icon.image(15)} Make missing previews</button></div>` : null}
-    ${ov ? html`<div class="home-card home-counts" id="home-counts">
-      <h2>In this library</h2>
-      <p><a href=${routeHash("browse:all")}><b>${ov.all}</b> ${ov.all === 1 ? "model" : "models"}</a>${ov.unsorted ? html`, <a href=${routeHash("browse:unsorted")}>${ov.unsorted} unsorted</a>` : null}.
-        ${ov.schemas.length ? html` Categories: ${ov.schemas.map((sc, i) => html`${i ? ", " : ""}<a href=${routeHash(`browse:${schemaScope(sc.id)}`)} key=${sc.id}>${sc.name} (${sc.count})</a>`)}.`
-          : html` No categories yet: make one with <b>New category…</b> in the menu, then put model folders under its folder.`}</p>
-    </div>` : null}
-    ${lib ? html`<${RecentChanges} lib=${lib} rev=${s.rev} />` : null}
-    ${ov?.loose?.length ? html`<div class="home-card home-counts" id="home-loose">
-      <h2>Folders not sorted yet</h2>
-      <p>These folders are in the library but not in a category or Unsorted, so their models aren't listed. Sort them to give each model a place.</p>
-      <ul class="ls-list">${ov.loose.map((f) => html`<li key=${f}><span>${f}</span>
-        <button type="button" class="ghost sort-loose" data-folder=${f} onClick=${() => sortFolder(`${lib.path}/${f}`)}>Sort…</button></li>`)}</ul>
-    </div>` : null}
-    <div class="home-pair">
-      <section class="home-card">
-        <h2>How the library is laid out</h2>
-        <pre class="folder-tree" aria-label="Example folder layout">${TREE}</pre>
-      </section>
-      <section class="home-card">
-        <h2>What's coming</h2>
-        <ol class="phase-list">${NEXT.map(([phase, what, now]) => html`<li class=${now ? "now" : ""} key=${phase}>${what}${now ? " (this version)" : ""}</li>`)}</ol>
-      </section>
+    ${lib.read_only ? html`<p class="warn-note" role="alert">${lib.read_only}</p>` : null}
+    <div class="home-grid">
+      <${RecentlyAdded} rev=${s.rev} total=${ov?.all || 0} />
+      ${ov ? html`<${Waiting} lib=${lib} ov=${ov} />` : null}
+      ${ov ? html`<${Categories} ov=${ov} />` : null}
+      <${RecentChanges} lib=${lib} rev=${s.rev} />
     </div>
   </div>`;
 }

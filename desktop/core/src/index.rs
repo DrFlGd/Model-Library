@@ -533,8 +533,12 @@ impl Index {
                 .collect::<Vec<_>>()
         };
         let total = hits.len();
+        let bytes: u64 = hits
+            .iter()
+            .map(|m| m.v["files"]["bytes"].as_u64().unwrap_or(0))
+            .sum();
         let items: Vec<&Value> = hits.iter().skip(offset).take(limit).map(|m| &m.v).collect();
-        json!({ "total": total, "items": items, "facets": { "authors": top(authors), "tags": top(tags) }, "us": t.elapsed().as_micros() as u64 })
+        json!({ "total": total, "bytes": bytes, "items": items, "facets": { "authors": top(authors), "tags": top(tags) }, "us": t.elapsed().as_micros() as u64 })
     }
 
     fn matches_filter(&self, m: &Model, key: &str, want: &str) -> bool {
@@ -891,6 +895,15 @@ mod tests {
         );
         let r = ix.query("all", "", "name", 2, 2, &[]);
         assert_eq!(r["total"], 6);
+        // the size of every hit, not just the page shown
+        let all = ix.query("all", "", "name", 0, 50, &[]);
+        let sum: u64 = all["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["files"]["bytes"].as_u64().unwrap())
+            .sum();
+        assert!(sum > 0 && r["bytes"] == sum, "{} {sum}", r["bytes"]);
         assert_eq!(names(r), ["Loose", "Rat Ogre"]);
         assert_eq!(
             ix.query("all", "", "name", 0, 50, &[])["facets"]["authors"][0],

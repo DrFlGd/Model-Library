@@ -5,10 +5,12 @@
 import { html, useState, useEffect } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui } from "./state.js";
-import { routeHash, schemaScope } from "./context.js";
+import { routeHash } from "./context.js";
 import { api, toast } from "./library.js";
 import { FilesView } from "./parts.js";
 import { ActionRow, MODEL_ACTIONS, usePageKeys, runKey, letter, editDetails, writable } from "./actions.js";
+import { PageHead } from "./layout.js";
+import { PlaceLinks } from "./details.js";
 
 const CTX = { page: "model" };
 
@@ -35,15 +37,12 @@ export function ModelPage({ id }) {
   });
   if (error) return html`<div class="pages"><p class="warn-note" role="alert">${error}</p></div>`;
   if (!m) return html`<div class="pages"></div>`;
-  const schema = s.overview?.schemas?.find((x) => x.id === m.schema);
   const back = () => (history.length > 1 ? history.back() : (location.hash = routeHash("browse:all")));
   return html`<div class="model-page" id="model-page" data-model=${m.id}>
-    <div class="mp-head">
-      <button type="button" class="ghost" id="mp-back" onClick=${back} title="Back (Alt+←)">‹ Back</button>
-      <div class="mp-title"><h1 id="mp-name">${m.name}</h1>
-        <p class="insp-sub">${m.authors.length ? `by ${m.authors.join(", ")} · ` : ""}${schema ? html`<a href=${routeHash(`browse:${schemaScope(schema.id)}`)}>${schema.name}</a>${m.path.map((v, i) => html` › <a href=${routeHash(`browse:${schemaScope(schema.id, m.path.slice(0, i + 1))}`)}>${v}</a>`)}` : html`<a href=${routeHash("browse:unsorted")}>Unsorted</a>`}</p></div>
+    <${PageHead} id="mp-head" title=${html`<button type="button" class="ghost back-btn" id="mp-back" onClick=${back} title="Back (Alt+←)">‹ Back</button><h1 id="mp-name">${m.name}</h1>`}
+      sub=${html`${m.authors.length ? `by ${m.authors.join(", ")} · ` : ""}<${PlaceLinks} m=${m} overview=${s.overview} />`}>
       <${ActionRow} targets=${[m]} ctx=${CTX} idPrefix="mp" />
-    </div>
+    </${PageHead}>
     <${FilesView} src=${{ kind: "model", id: m.id, rel: m.rel }} files=${m.files_list} main=${m.main} model=${m} names=${s.names}
       side=${m.details?.notes ? html`<div class="insp-section"><h3>Notes</h3><p class="insp-note">${m.details.notes}</p></div>` : null} />
   </div>`;

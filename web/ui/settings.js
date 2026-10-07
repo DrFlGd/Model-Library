@@ -1,10 +1,35 @@
-// Settings: the open library (name, folder, other libraries), the theme, and
-// the app's version.
+// Settings: the open library (name, folder, variant folders, other libraries),
+// the theme, and About: the app's version, how a library's folders are laid out
+// and what's coming.
 import { html, useState } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui, THEMES, setTheme } from "./state.js";
 import { ctx } from "./context.js";
 import { isDesktop, openLibrary, renameLibrary, showLibraryFolder, setVariantFolders, undoable } from "./library.js";
+import { PageHead } from "./layout.js";
+
+const TREE = `_library/                  the app's own files
+Unsorted/                  models with no category yet
+Category/                  a category's top folder
+  Subcategory/             as many as you like,
+    Subcategory/           inside each other, as deep as each needs
+      Model name (Author)/   one folder per model, at any level
+        model.json           author, source, date…
+        Model name.stl
+        Parts/               parts keep their folders
+        _media/              pictures, PDFs, videos
+        _thumbs/             previews`;
+
+const NEXT = [
+  ["Phase 0", "The app, its library folder and settings"],
+  ["Phase 1", "Categories, model details and search"],
+  ["Phase 2", "Importing models: files, folders and ZIPs, moved or copied into place, and moving models between categories"],
+  ["Phase 3", "Viewing models: a 3D viewer, parts and variants, previews, pictures, readmes, PDFs and videos"],
+  ["Phase 4", "Editing categories: a tree of subcategories, renamed, merged and moved with folders to match, and undo"],
+  ["Phase 5", "Large collections: sorting a whole folder tree as it is, finding duplicates, noticing changes made outside the app"],
+  ["UI pass", "The same actions, keys and undo on every page, and one page layout", true],
+  ["Phase 6", "Running on a server (Docker) with sign-in, to browse the library from another computer (on hold)"],
+];
 
 function RenameForm({ lib }) {
   const [name, setName] = useState(lib.name || "");
@@ -68,7 +93,7 @@ export function Settings() {
   const lib = s.library;
   const others = (s.recent || []).filter((p) => p !== lib?.path);
   return html`<div class="pages"><div class="library-settings">
-    <h1>Settings</h1>
+    <${PageHead} title="Settings" />
     <section class="ls-section" id="settings-library">
       <h2>Library</h2>
       ${lib ? html`
@@ -92,9 +117,14 @@ export function Settings() {
           ${THEMES.map(([v, label]) => html`<option value=${v} key=${v}>${label}</option>`)}
         </select></label>
     </section>
-    <section class="ls-section">
+    <section class="ls-section" id="settings-about">
       <h2>About</h2>
       <p>Model Library ${ctx.platform?.info?.version || ""}</p>
+      <h3>How a library is laid out</h3>
+      <p class="muted">Models go into folders laid out by your categories, so the library makes sense in any file manager, with or without this app.</p>
+      <pre class="folder-tree" aria-label="Example folder layout">${TREE}</pre>
+      <h3>What's coming</h3>
+      <ol class="phase-list">${NEXT.map(([phase, what, now]) => html`<li class=${now ? "now" : ""} key=${phase}>${what}${now ? " (this version)" : ""}</li>`)}</ol>
     </section>
   </div></div>`;
 }

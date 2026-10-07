@@ -1,17 +1,19 @@
 // Duplicates: models whose 3D, slicer and archive files are the same as another
 // model's, and files found in more than one model. Extra copies are set aside in
 // the library's _library/set-aside folder (Undo in the message, or on Home), and
-// deleted from there only when asked. Right-click a model for the same actions as
-// everywhere; Ctrl+A ticks every group and Esc unticks them.
+// deleted from there only when asked. Click a model to see it in the same details
+// panel as the library's (double-click or Enter opens it); right-click for the
+// same actions as everywhere. Ctrl+A ticks every group and Esc unticks them.
 import { html, useState, useEffect } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui } from "./state.js";
 import { ctx, routeHash } from "./context.js";
 import { api, isDesktop, followJob, loadOverview, toast, undoable, undoChange } from "./library.js";
-import { size } from "./details.js";
+import { size, ModelDetails } from "./details.js";
+import { PageHead } from "./layout.js";
 import { Icon } from "./icons.js";
 import { confirmDialog } from "./dialogs.js";
-import { MODEL_ACTIONS, menuItems, openMenu, usePageKeys, selectAllKey } from "./actions.js";
+import { MODEL_ACTIONS, menuItems, openMenu, usePageKeys, selectAllKey, runKey, letter } from "./actions.js";
 
 const placeOf = (overview, m) => {
   if (!m.schema) return "Unsorted";
@@ -30,7 +32,10 @@ function progressText(p) {
   return `${what}: ${size(p.bytes)} of ${size(p.total_bytes)}`;
 }
 
-function Group({ g, keep, setKeep, include, setInclude, overview, readOnly, busy, setAside }) {
+const CTX = { page: "dupes" };
+const openModel = (id) => { location.hash = routeHash(`model:${id}`); };
+
+function Group({ g, keep, setKeep, include, setInclude, overview, readOnly, busy, setAside, picked, pick }) {
   const k = keyOf(g);
   const extra = g.models.filter((m) => m.id !== keep);
   return html`<li class="dupe-group" data-key=${k}>
@@ -39,10 +44,11 @@ function Group({ g, keep, setKeep, include, setInclude, overview, readOnly, busy
         <b>${plural(g.models.length, "copy", "copies")}</b> of the same ${g.files === 1 ? "file" : `${g.files} files`} <span class="muted">· ${size(g.bytes)} each</span></label>
       <button type="button" class="ghost dupe-set-aside" disabled=${readOnly || busy} onClick=${() => setAside(extra.map((m) => m.id))}>Set aside ${extra.length === 1 ? "the other copy" : `the other ${extra.length}`}</button>
     </div>
-    <ul class="dupe-models">${g.models.map((m) => html`<li key=${m.id} class=${m.id === keep ? "keep" : ""} data-model=${m.id}
-      onContextMenu=${(e) => { if (!e.target.closest("input")) openMenu(e, menuItems(MODEL_ACTIONS, [m], { page: "dupes" })); }}>
+    <ul class="dupe-models">${g.models.map((m) => html`<li key=${m.id} class=${m.id === keep ? "keep" : ""} data-model=${m.id} aria-selected=${picked === m.id ? "true" : "false"}
+      onClick=${(e) => { if (!e.target.closest("label, input")) pick(m.id); }} onDblClick=${(e) => { if (!e.target.closest("label, input")) openModel(m.id); }}
+      onContextMenu=${(e) => { if (!e.target.closest("input")) { pick(m.id); openMenu(e, menuItems(MODEL_ACTIONS, [m], CTX)); } }}>
       <label class="dupe-keep" title="Keep this copy"><input type="radio" name=${`keep-${k}`} checked=${m.id === keep} onChange=${() => setKeep(k, m.id)} /> ${m.id === keep ? "Keep" : "Extra"}</label>
-      <span class="dupe-what"><a href=${routeHash(`model:${m.id}`)}>${m.name}</a>
+      <span class="dupe-what"><span class="dupe-name">${m.name}</span>
         <span class="muted dupe-rel">${m.rel}</span></span>
       <span class="muted dupe-meta">${placeOf(overview, m)} · ${plural(m.count || 0, "file", "files")} · ${size(m.bytes)}</span>
     </li>`)}</ul>
@@ -58,12 +64,17 @@ export function DuplicatesPage() {
   const [keep, setKeepMap] = useState({});
   const [skip, setSkip] = useState({});
   const [sharedLimit, setSharedLimit] = useState(50);
+  const [picked, setPicked] = useState(null);
   const load = () => api("dupes_get", {}).then((d) => { setData(d); setError(null); }, (e) => setError(e.message || String(e)));
   useEffect(() => { if (lib) load(); }, [lib?.path]);
   usePageKeys((e) => {
     const groups = data?.groups || [];
+    const m = picked && groups.flatMap((g) => g.models).find((x) => x.id === picked);
+    const l = letter(e);
     if (selectAllKey(e) && groups.length) { e.preventDefault(); setSkip({}); }
     else if (e.key === "Escape" && groups.length) setSkip(Object.fromEntries(groups.map((g) => [keyOf(g), true])));
+    else if (e.key === "Enter" && m) { e.preventDefault(); openModel(m.id); }
+    else if ((l === "e" || l === "m" || l === "s") && m) { e.preventDefault(); runKey(MODEL_ACTIONS, l.toUpperCase(), [m], CTX); }
   });
   if (!lib) return html`<div class="pages"><h1>Duplicates</h1><p>Open a library first.</p></div>`;
   const readOnly = !!lib.read_only;
@@ -117,17 +128,19 @@ export function DuplicatesPage() {
   const chosen = groups.filter((g) => !skip[keyOf(g)]);
   const extras = chosen.flatMap((g) => g.models.filter((m) => m.id !== keepOf(g)).map((m) => m.id));
   const aside = data?.set_aside || { count: 0, bytes: 0 };
+  const pickedHere = picked && groups.some((g) => g.models.some((m) => m.id === picked)) ? picked : null;
   const revealAside = () => ctx.platform.library.openPath(`${lib.path}/${aside.rel}`);
 
-  return html`<div class="pages dupes-page" id="dupes-page">
-    <h1>Duplicates</h1>
-    <p class="muted">Models whose 3D, slicer and archive files are all the same as another model's, and files found in more than one model. Files are compared by what's in them, not by their names.</p>
-    ${error ? html`<p class="warn-note" role="alert">${error}</p>` : null}
-    <div class="home-actions">
+  const count = data?.found ? plural(groups.length, "model with copies", "models with copies") : null;
+  return html`<div class="browser dupes-layout" id="dupes-page">
+   <div class="pages dupes-page">
+    <${PageHead} title="Duplicates" count=${count}
+      sub="Models whose 3D, slicer and archive files are all the same as another model's, and files found in more than one model. Files are compared by what's in them, not by their names.">
       <button type="button" class="primary" id="dupes-find" disabled=${busy} onClick=${find}>${Icon.search(15)} Look for duplicates</button>
-      ${job ? html`<span class="dupes-progress" id="dupes-progress" role="status">${progressText(job.progress)}</span>
-        <button type="button" class="ghost" id="dupes-stop" onClick=${stop}>Stop</button>` : null}
-    </div>
+    </${PageHead}>
+    ${error ? html`<p class="warn-note" role="alert">${error}</p>` : null}
+    ${job ? html`<div class="home-actions"><span class="dupes-progress" id="dupes-progress" role="status">${progressText(job.progress)}</span>
+      <button type="button" class="ghost" id="dupes-stop" onClick=${stop}>Stop</button></div>` : null}
     ${data?.found ? html`<p id="dupes-summary">Looked on ${when(data.found)} through ${plural(data.models || 0, "model", "models")}: ${plural(groups.length, "model has", "models have")} copies, ${plural(data.shared_count || 0, "file is", "files are")} in more than one model${data.wasted ? html`, and about <b>${size(data.wasted)}</b> could be saved` : null}.</p>`
       : html`<p id="dupes-summary" class="muted">Not looked yet. Looking reads the start and end of files that have the same size, then the whole of those that still match, so the first look at a big library takes a while. What's learnt is kept in each model's model.json, so later looks are quick.</p>`}
     ${data?.unreadable?.length ? html`<p class="warn-note">${plural(data.unreadable.length, "file", "files")} couldn't be read, for example ${data.unreadable[0].rel}/${data.unreadable[0].file}.</p>` : null}
@@ -147,7 +160,7 @@ export function DuplicatesPage() {
         <button type="button" class="primary" id="dupes-set-aside" disabled=${readOnly || busy || !extras.length} onClick=${() => setAside(extras)}>Set aside ${plural(extras.length, "extra copy", "extra copies")}</button>
       </div>
       <p class="muted">The copy to keep is chosen for you: one in a category before one in Unsorted, then the one with more files. Choose another if you like, or untick a model to leave it as it is (Ctrl+A ticks them all, Esc unticks them).</p>
-      <ul class="dupe-list">${groups.map((g) => html`<${Group} key=${keyOf(g)} g=${g} keep=${keepOf(g)} overview=${overview} readOnly=${readOnly} busy=${busy} setAside=${setAside}
+      <ul class="dupe-list">${groups.map((g) => html`<${Group} key=${keyOf(g)} g=${g} keep=${keepOf(g)} overview=${overview} readOnly=${readOnly} busy=${busy} setAside=${setAside} picked=${picked} pick=${setPicked}
         setKeep=${(k, id) => setKeepMap({ ...keep, [k]: id })} include=${!skip[keyOf(g)]} setInclude=${(k, on) => setSkip({ ...skip, [k]: !on })} />`)}</ul>
     </section>` : null}
 
@@ -161,5 +174,10 @@ export function DuplicatesPage() {
       ${shared.length > sharedLimit ? html`<button type="button" class="ghost" onClick=${() => setSharedLimit(sharedLimit + 100)}>Show more (${shared.length - sharedLimit} left)</button>` : null}
     </section>` : null}
     ${data?.found && !groups.length && !shared.length ? html`<p class="muted" id="dupes-none">No duplicates.</p>` : null}
+   </div>
+   <${ModelDetails} id=${pickedHere} ctx=${CTX} empty=${html`<div class="place-summary">
+     <h2 class="insp-title">Duplicates</h2>
+     ${data?.found ? html`<p>${plural(groups.length, "model has", "models have")} copies${data.wasted ? `; about ${size(data.wasted)} could be saved` : ""}.</p>` : html`<p>Not looked yet.</p>`}
+     <p class="muted insp-later">Click a model to see its details and files here; double-click or Enter opens it.</p></div>`} />
   </div>`;
 }

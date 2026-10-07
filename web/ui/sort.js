@@ -7,7 +7,7 @@
 // category. Every change here can be undone (the core keeps the workspace as it
 // was). The workspace is kept on this computer, so sorting can go on over
 // several sittings.
-import { html, useState, useEffect, useLayoutEffect, useMemo } from "../lib/html.js";
+import { html, useState, useEffect, useMemo } from "../lib/html.js";
 import { createStore, useStore } from "../lib/store.js";
 import { ui, setPref } from "./state.js";
 import { ctx, routeHash } from "./context.js";
@@ -17,6 +17,7 @@ import { openMenu, usePageKeys, letter, selectAllKey } from "./actions.js";
 import { CategoryPicker } from "./category.js";
 import { size } from "./details.js";
 import { FilesView, LazyPreview } from "./parts.js";
+import { PageHead, ViewSwitch, SortMenu, SearchNote, EditBox } from "./layout.js";
 
 /** The workspace as the core keeps it, and what's selected here. */
 export const sorter = createStore({
@@ -46,6 +47,7 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 export const status = (i) => (i.done ? "done" : i.skip ? "skipped" : i.placed ? "sorted" : "todo");
 const FILTERS = [["todo", "No category"], ["sorted", "Has category"], ["skipped", "Skipped"], ["done", "Imported"], ["all", "All"]];
 const VIEWS = [["folders", "Folders", "folder"], ["list", "List", "table"], ["grid", "Grid", "grid"], ["category", "By category", "grouped"]];
+const SORT_BY = [["folder", "Folder"], ["name", "Name"], ["files", "Most files"], ["size", "Largest first"], ["place", "Where it goes"]];
 
 /** "Category › sub › sub", or Unsorted. */
 function placeLabel(overview, schema, values) {
@@ -446,9 +448,12 @@ function Actions({ s, sel, ix, overview }) {
   </div>`;
 }
 
-/** The focused model's details and files, a folder's, or a loose file's. */
-function Details({ s, ix, overview, names }) {
-  const k = s.focus || "";
+/** The details panel, as in the library (docs/PLAN.md, "UI pass design", step 3):
+ *  what's selected (one model's name, authors and tags changed right here, a
+ *  folder, a loose file, or several), where it goes, what can be done to it, then
+ *  its files. With nothing selected, what the workspace holds. */
+function Details({ s, sel, ix, overview, names, counts }) {
+  const k = s.picked.length === 1 ? s.picked[0] : "";
   const item = k.startsWith("i:") ? ix.byId.get(k.slice(2)) : null;
   const folder = k.startsWith("f:") ? ix.folderByPath.get(k.slice(2)) : null;
   const left = k.startsWith("l:") ? ix.leftByPath.get(k.slice(2)) : null;
@@ -461,7 +466,7 @@ function Details({ s, ix, overview, names }) {
     api("sort_files", { id: item.id }).then((r) => { if (live) setFiles(r); }, (e) => { if (live) setFiles({ error: e.message || String(e) }); });
     return () => { live = false; };
   }, [sig]);
-  const selectOne = (r) => { if (r?.id) sorter.set({ picked: [`i:${r.id}`], focus: `i:${r.id}`, anchor: `i:${r.id}` }); };
+  const actions = sel?.count ? html`<${Actions} s=${s} sel=${sel} ix=${ix} overview=${overview} />` : null;
   if (folder) {
     const inside = s.session.items.filter((i) => under(i.parent, folder.path));
     const todo = inside.filter((i) => status(i) === "todo").length;
@@ -469,11 +474,8 @@ function Details({ s, ix, overview, names }) {
       <h2>${Icon.folder(18)} ${folder.name}</h2>
       <p class="muted sw-path">${folder.path}</p>
       <p>${plural(inside.length, "model", "models")} in it${inside.length ? `, ${todo} with no category yet` : ""}.</p>
-      <div class="sw-buttons">
-        <button type="button" class="ghost" onClick=${() => sorter.set({ picked: [k], anchor: k })}>Select everything in it</button>
-        <button type="button" class="ghost" id="details-join" onClick=${async () => selectOne(await act("sort_join", { folder: folder.path }, () => `Combined ${folder.name} into one model.`))}>${Icon.layers(14)} Combine into one model</button>
-      </div>
-      <p class="muted sw-hint">Select a folder and set its category to set it for everything in it; tick “Keep its folders as subcategories” to bring its folders along.</p>
+      ${actions}
+      <p class="muted sw-hint">Setting a folder's category sets it for everything in it; tick “Keep its folders as subcategories” to bring its folders along.</p>
     </div>`;
   }
   if (left) {
@@ -481,39 +483,36 @@ function Details({ s, ix, overview, names }) {
       <h2>${Icon.file(18)} ${left.name}</h2>
       <p class="muted sw-path">${left.path}</p>
       <p>${size(left.size)}. It isn't part of any model, so it stays where it is unless you make it into one.</p>
-      <div class="sw-buttons"><button type="button" class="ghost" onClick=${async () => selectOne(await act("sort_group", { files: [left.path] }, (r) => `Combined into one model: ${r.items.find((i) => i.id === r.id)?.name || left.name}.`))}>${Icon.layers(14)} Combine into one model</button></div>
+      ${actions}
     </div>`;
   }
-  if (!item) return html`<div class="sw-details sw-details-empty" id="sort-details"><p class="muted">Select a model to see its files and details here.</p></div>`;
+  if (!item) {
+    if (actions) return html`<div class="sw-details" id="sort-details">${actions}</div>`;
+    return html`<div class="sw-details sw-details-empty" id="sort-details">
+      <h2>${Icon.inbox(18)} Workspace</h2>
+      <p id="sort-summary">${plural(counts.all, "model", "models")}: ${counts.todo} with no category, ${counts.sorted} ready to import${counts.skipped ? `, ${counts.skipped} skipped` : ""}${counts.done ? `, ${counts.done} imported` : ""}.</p>
+      <p class="muted sw-hint">Click to select, Ctrl-click to add one, Shift-click for a run, Ctrl+A for everything shown; a selected folder takes everything in it. Right-click for what you can do.</p>
+    </div>`;
+  }
   const save = (field) => (v) => {
     const said = { name: `Renamed ${item.name} to ${v}.`, author: `Saved the authors of ${item.name}.`, tags: `Saved the tags of ${item.name}.` }[field];
     if (v !== (item[field] || "")) act("sort_update", { ids: [item.id], patch: { [field]: v } }, () => said);
   };
   const sm = item.summary || {};
   return html`<div class="sw-details" id="sort-details" data-item=${item.id} key=${item.id}>
-    <div class="sw-fields">
-      <${Box} cls="sw-name-input" id="details-name" label="Name" title="Name (E or F2)" value=${item.name} off=${!!item.done} onSave=${save("name")} />
-      <${Box} id="details-author" label="Authors" placeholder="Authors, separated by commas" value=${item.author} off=${!!item.done} onSave=${save("author")} />
-      <${Box} id="details-tags" label="Tags" placeholder="Tags, separated by commas" value=${item.tags} off=${!!item.done} onSave=${save("tags")} />
+    <div class="panel-fields">
+      <${EditBox} cls="panel-name" id="details-name" label="Name" title="Name (E or F2)" value=${item.name} off=${!!item.done} onSave=${save("name")} />
+      <${EditBox} id="details-author" label="Authors" caption="Authors" placeholder="Authors, separated by commas" value=${item.author} off=${!!item.done} onSave=${save("author")} />
+      <${EditBox} id="details-tags" label="Tags" caption="Tags" placeholder="Tags, separated by commas" value=${item.tags} off=${!!item.done} onSave=${save("tags")} />
     </div>
     <p class="sw-status"><${Place} item=${item} overview=${overview} />
       ${item.done ? html` <a href=${routeHash(`model:${item.done.id}`)}>${item.done.rel}</a>` : null}</p>
     ${item.error ? html`<p class="form-error">${item.error}</p>` : null}
-    <p class="muted sw-path">${item.kind === "folder" ? "Folder" : item.kind === "group" ? `Combined from ${plural(item.sources.length, "thing", "things")}` : plural(item.sources.length, "file", "files")}: ${item.kind === "folder" ? item.path : item.sources.map(baseName).join(", ")}
-      · ${plural(sm.count || 0, "file", "files")}${kindsText(sm) ? ` (${kindsText(sm)})` : ""} · ${size(sm.bytes || 0)}${item.has_sidecar ? " · has its own model.json" : ""}</p>
+    ${item.done ? null : actions}
+    <p class="muted sw-path">${item.kind === "folder" ? "Folder" : item.kind === "group" ? `Combined from ${plural(item.sources.length, "thing", "things")}` : plural(item.sources.length, "file", "files")}: ${item.kind === "folder" ? item.path : item.sources.map(baseName).join(", ")}${" · "}${plural(sm.count || 0, "file", "files")}${kindsText(sm) ? ` (${kindsText(sm)})` : ""} · ${size(sm.bytes || 0)}${item.has_sidecar ? " · has its own model.json" : ""}</p>
     ${(item.warnings || []).map((w) => html`<${Warning} key=${w.kind} w=${w} item=${item} />`)}
     ${files?.error ? html`<p class="form-error">${files.error}</p>` : files ? html`<${FilesView} src=${{ kind: "sort", id: item.id }} files=${files.files} main=${files.main} names=${names} compact=${true} />` : html`<p class="muted">Reading its files…</p>`}
   </div>`;
-}
-
-/** A box saved when you leave it. What's typed stays while the pane is drawn
- *  again (its files arriving); a new value from the workspace replaces it. */
-function Box({ id, cls, label, title, placeholder, value, off, onSave }) {
-  const [v, setV] = useState(value || "");
-  // before the next paint: after it, text typed as the box appeared was put back
-  useLayoutEffect(() => { setV(value || ""); }, [value]);
-  return html`<input type="text" class=${cls} id=${id} aria-label=${label} title=${title} placeholder=${placeholder} value=${v} disabled=${off}
-    onInput=${(e) => setV(e.target.value)} onChange=${(e) => onSave(e.target.value.trim())} />`;
 }
 
 function Warning({ w, item }) {
@@ -579,7 +578,7 @@ export function ImportPage() {
       files: (i) => -(i.summary?.count || 0),
       size: (i) => -(i.summary?.bytes || 0),
       place: (i) => `${status(i)}\u0000${placeLabel(overview, i.schema, i.values)}`,
-    }[view === "list" ? sortBy : "folder"];
+    }[view === "category" ? "folder" : sortBy];
     return list.map((i) => [key(i), i]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).map((x) => x[1]);
   }, [se, view, s.filter, s.q, sortBy, overview]);
   const order = view === "folders" ? rows.slice(0, s.limit).map((r) => r.key) : items.slice(0, s.limit).map((i) => `i:${i.id}`);
@@ -627,7 +626,12 @@ export function ImportPage() {
       if (e.key === "Enter" && it?.done) { e.preventDefault(); location.hash = routeHash(`model:${it.done.id}`); }
       return;
     }
-    if ((l === "e" || e.key === "F2") && cur?.startsWith("i:") && !ix.byId.get(cur.slice(2))?.done) { e.preventDefault(); focusBox("#details-name", e.key === "F2"); return; }
+    if ((l === "e" || e.key === "F2") && cur?.startsWith("i:") && !ix.byId.get(cur.slice(2))?.done) {
+      e.preventDefault();
+      if (st.picked.length !== 1 || st.picked[0] !== cur) sorter.set({ picked: [cur], anchor: cur }); // the panel shows it
+      focusBox("#details-name", e.key === "F2");
+      return;
+    }
     if (l === "m" && selectionOf(st, ix).items.length) { e.preventDefault(); focusBox("#send-schema"); return; }
     if ((e.key === "ArrowDown" || e.key === "ArrowUp") && order.length && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
@@ -666,18 +670,20 @@ export function ImportPage() {
   const startAgain = () => act("sort_clear", {}, () => "Started again: the workspace is empty. Nothing on disk changed.")
     .then((r) => r && sorter.set({ picked: [], focus: null, results: null }));
   const empty = !se || (!se.roots.length && !se.items.length);
+  const wait = busy ? "Wait for the work under way to finish." : false;
+  const moreItems = () => [
+    { id: "import-add-folder", label: "Add a model folder…", icon: "folder", disabled: wait, run: () => pickAndAdd(false) },
+    { id: "import-add-file", label: "Add a file…", icon: "file", disabled: wait, run: () => pickAndAdd(false, true) },
+    ...(!empty ? [{ sep: true }, { id: "sort-rescan", label: "Read again", icon: "refresh", disabled: wait, title: "Pick up files added or removed since, keeping what you decided", run: readAgain }] : []),
+    ...(counts.done ? [{ id: "sort-forget-done", label: "Clear imported", disabled: wait, title: "Take the imported models off this list",
+      run: () => act("sort_clear", { imported: true }, () => `Cleared ${plural(counts.done, "imported model", "imported models")} from the list.`) }] : []),
+    ...(!empty ? [{ id: "import-clear", label: "Start again", icon: "close", disabled: wait, title: "Empty the workspace (nothing on disk changes)", run: startAgain }] : []),
+  ];
+  const count = se && !empty ? `${plural(counts.all, "model", "models")}, ${counts.todo} with no category` : null;
   return html`<div class="sort-page" id="sort-page" data-ready=${se ? "1" : null}>
-    <div class="sw-head">
-      <h1>Import</h1>
-      <div class="home-actions">
-        <button type="button" class="primary" id="import-sort" disabled=${busy} onClick=${() => pickAndAdd(true)}>${Icon.folder(15)} Sort a folder…</button>
-        <button type="button" class="ghost" id="import-add-folder" disabled=${busy} onClick=${() => pickAndAdd(false)}>Add a model folder…</button>
-        <button type="button" class="ghost" id="import-add-file" disabled=${busy} onClick=${() => pickAndAdd(false, true)}>Add a file…</button>
-        ${!empty ? html`<button type="button" class="ghost" id="sort-rescan" disabled=${busy} title="Pick up files added or removed since, keeping what you decided" onClick=${readAgain}>${Icon.refresh(14)} Read again</button>` : null}
-        ${counts.done ? html`<button type="button" class="ghost" id="sort-forget-done" disabled=${busy} title="Take the imported models off this list" onClick=${() => act("sort_clear", { imported: true }, () => `Cleared ${plural(counts.done, "imported model", "imported models")} from the list.`)}>Clear imported</button>` : null}
-        ${!empty ? html`<button type="button" class="ghost" id="import-clear" disabled=${busy} title="Empty the workspace (nothing on disk changes)" onClick=${startAgain}>Start again</button>` : null}
-      </div>
-    </div>
+    <${PageHead} title="Import" count=${count} menu=${{ id: "import-more", items: moreItems, title: "Add a model folder or a file, read the folders again, start again" }}>
+      <button type="button" class="primary" id="import-sort" disabled=${busy} onClick=${() => pickAndAdd(true)}>${Icon.folder(15)} Sort a folder…</button>
+    </${PageHead}>
     ${lib.read_only ? html`<p class="warn-note">${lib.read_only}</p>` : null}
     ${s.error ? html`<p class="form-error" role="alert">${s.error}</p>` : null}
     ${s.job ? html`<${JobBar} job=${s.job} />` : se?.busy ? html`<p class="muted">The workspace is busy reading folders or importing. <button type="button" class="linkish" onClick=${loadSession}>Read again</button></p>` : null}
@@ -685,23 +691,24 @@ export function ImportPage() {
     ${!se ? (s.error ? null : html`<p class="muted" id="sort-loading">Reading the workspace…</p>`) : empty ? html`<div class="empty sw-empty">
         <p>Sort a folder of models (on a NAS, a drive, or already inside the library): it's shown as it is, with the models the app finds in it all the way down. Select one or many and set their category; nothing moves until you press Import.</p>
         <p>You can also add model folders and files one by one, or drop them on this window. What you sort here is kept, so you can carry on another time.</p></div>` : html`
-      <div class="sw-bar">
-        <div class="seg" role="group" aria-label="View">${VIEWS.map(([k, label, icon]) => html`<button type="button" key=${k} data-view=${k} aria-pressed=${view === k ? "true" : "false"} title=${label} onClick=${() => setPref({ sortView: k })}>${Icon[icon](14)} <span class="sw-view-label">${label}</span></button>`)}</div>
-        <div class="seg sw-filters" role="group" aria-label="Show">${FILTERS.map(([k, label]) => html`<button type="button" key=${k} data-filter=${k} aria-pressed=${s.filter === k ? "true" : "false"} onClick=${() => sorter.set({ filter: k, limit: 400 })}>${label} <span class="sw-count">${counts[k]}</span></button>`)}</div>
-        <input type="search" class="sw-search" id="sort-search" data-search placeholder="Search" aria-label="Search" title="Search (/)" value=${s.q} onInput=${(e) => sorter.set({ q: e.target.value, limit: 400 })} />
-        ${view === "folders" ? html`<span class="sw-folds"><button type="button" class="ghost" onClick=${() => sorter.set({ open: Object.fromEntries(se.folders.map((f) => [f.path, true])) })}>Unfold all</button>
-          <button type="button" class="ghost" onClick=${() => sorter.set({ open: Object.fromEntries(se.folders.filter((f) => f.parent).map((f) => [f.path, false])) })}>Fold all</button></span>` : null}
+      <div class="toolbar sw-bar">
+        <input type="search" class="toolbar-search sw-search" id="sort-search" data-search placeholder="Search" aria-label="Search" title="Search (/)" value=${s.q} onInput=${(e) => sorter.set({ q: e.target.value, limit: 400 })} />
+        ${view === "folders" ? html`<span class="sw-folds"><button type="button" class="ghost" id="sort-unfold" onClick=${() => sorter.set({ open: Object.fromEntries(se.folders.map((f) => [f.path, true])) })}>Unfold all</button>
+          <button type="button" class="ghost" id="sort-fold" onClick=${() => sorter.set({ open: Object.fromEntries(se.folders.filter((f) => f.parent).map((f) => [f.path, false])) })}>Fold all</button></span>`
+          : view !== "category" ? html`<${SortMenu} id="sort-by" options=${SORT_BY} value=${sortBy} onChange=${setSortBy} />` : null}
+        <${ViewSwitch} views=${VIEWS} value=${view} onChange=${(k) => setPref({ sortView: k })} />
       </div>
+      <div class="seg sw-filters" role="group" aria-label="Show">${FILTERS.map(([k, label]) => html`<button type="button" key=${k} data-filter=${k} aria-pressed=${s.filter === k ? "true" : "false"} onClick=${() => sorter.set({ filter: k, limit: 400 })}>${label} <span class="sw-count">${counts[k]}</span></button>`)}</div>
+      <${SearchNote} q=${s.q.trim()} found=${`${plural(view === "folders" ? rows.filter((r) => r.type !== "folder").length : items.length, "match", "matches")}`} onClear=${() => sorter.set({ q: "", limit: 400 })} />
       <div class="sw-main">
         <div class="sw-view">
-          ${s.picked.length ? html`<${Actions} s=${s} sel=${sel} ix=${ix} overview=${overview} />` : html`<p class="muted sw-tip">Click to select, Ctrl-click to add one, Shift-click for a run, Ctrl+A for everything shown; a selected folder takes everything in it. Right-click for what you can do.</p>`}
           ${view === "folders" ? html`<${FoldersView} rows=${rows} s=${s} sel=${sel} pick=${pick} menu=${menu} overview=${overview} />`
             : view === "list" ? html`<${ListView} items=${items} s=${s} sel=${sel} pick=${pick} menu=${menu} overview=${overview} ix=${ix} sortBy=${sortBy} setSortBy=${setSortBy} />`
             : view === "grid" ? html`<${GridView} items=${items} s=${s} pick=${pick} menu=${menu} overview=${overview} />`
             : html`<${CategoryView} items=${items} s=${s} sel=${sel} pick=${pick} menu=${menu} overview=${overview} ix=${ix} />`}
           ${(view === "folders" ? !rows.length : !items.length) ? html`<p class="muted sw-none">${s.q ? "Nothing matches." : s.filter === "todo" ? "Everything here has a category." : "Nothing here."}</p>` : null}
         </div>
-        <${Details} s=${s} ix=${ix} overview=${overview} names=${names} />
+        <${Details} s=${s} sel=${sel} ix=${ix} overview=${overview} names=${names} counts=${counts} />
       </div>
       <div class="imp-go sw-go">
         <div class="seg" role="group" aria-label="Move or copy">

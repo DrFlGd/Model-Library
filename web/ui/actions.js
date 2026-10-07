@@ -267,6 +267,6 @@ export function ActionRow({ actions = MODEL_ACTIONS, targets, ctx: c = {}, idPre
         onClick=${() => a.run(targets, c)}>${a.icon ? Icon[a.icon](15, pressed) : null} ${label}</button>`;
     })}
     ${more.length ? html`<button type="button" class="ghost" id=${`${idPrefix}-more`} aria-haspopup="menu" title="More actions"
-      onClick=${(e) => openMenu(e.currentTarget, menuItems(more, targets, c))}>${Icon.more(15)} More</button>` : null}
+      onClick=${(e) => openMenu(e.currentTarget, menuItems(more, targets, c))}>${Icon.more(15)} More ▾</button>` : null}
   </div>`;
 }
