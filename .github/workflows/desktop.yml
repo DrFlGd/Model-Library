@@ -14,6 +14,8 @@ on:
       - "tools/**"
       - "tests/**"
       - ".github/workflows/desktop.yml"
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
