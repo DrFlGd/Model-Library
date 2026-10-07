@@ -65,6 +65,8 @@ The UI pass in `docs/PLAN.md` ("UI pass design"): step 1 (actions, 0.5.1) is don
 
 ## Unreleased
 
+## 0.5.1 (2026-10-07)
+
 UI pass, step 1 of 3: consistent actions (owner's request; design in docs/PLAN.md, "UI pass design"; notes in "UI pass notes"). Phase 6 is on hold until the UI pass is done.
 
 - **The same actions everywhere**: the details panel, the model page and the panel for several selected models have one row, Open, Edit details…, Move to category…, Star, Show in folder and More (Make a new preview, Copy folder path). Right-clicking a card, a list row, a Duplicates row, a file or a sidebar category shows the same actions as a menu (Shift+F10 or the menu key too). Import uses the same row and words (Set category…, Combine into one model, Split, Skip, Clear category).
