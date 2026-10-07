@@ -4,7 +4,7 @@ import { html, useState } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui, THEMES, setTheme } from "./state.js";
 import { ctx } from "./context.js";
-import { isDesktop, openLibrary, renameLibrary, showLibraryFolder, setVariantFolders, toast } from "./library.js";
+import { isDesktop, openLibrary, renameLibrary, showLibraryFolder, setVariantFolders, undoable } from "./library.js";
 
 function RenameForm({ lib }) {
   const [name, setName] = useState(lib.name || "");
@@ -13,8 +13,9 @@ function RenameForm({ lib }) {
     e.preventDefault();
     setError("");
     try {
+      const before = lib.name;
       await renameLibrary(name);
-      toast("Library renamed.");
+      undoable(`Renamed the library ${name.trim()}.`, async () => { await renameLibrary(before); setName(before); });
     } catch (err) {
       setError(err.message || String(err));
     }
@@ -32,26 +33,31 @@ function VariantFolders({ lib }) {
   const [text, setText] = useState("");
   const [error, setError] = useState("");
   const off = !!lib.read_only;
-  const save = async (next) => {
+  /** Save the names, with Undo in the message (`next` null: the defaults). */
+  const save = async (next, said) => {
     setError("");
-    try { await setVariantFolders(next); } catch (err) { setError(err.message || String(err)); }
+    const before = [...names];
+    try {
+      await setVariantFolders(next);
+      undoable(said, () => setVariantFolders(before));
+    } catch (err) { setError(err.message || String(err)); }
   };
   const add = async (e) => {
     e.preventDefault();
     const n = text.trim();
     if (!n) return;
     if (names.some((x) => x.toLowerCase() === n.toLowerCase())) { setError(`${n} is already in the list.`); return; }
-    await save([...names, n]);
+    await save([...names, n], `Added ${n} to the variant folders.`);
     setText("");
   };
   return html`<div class="field-block" id="settings-variants"><span class="field-label">Variant folders</span>
     <small class="muted">A folder with one of these names, or with one of them as whole words (such as "Resin 32mm"), is a variant of the model rather than a part. A model's page then shows a switch between its variants. Case, spaces and dashes don't matter.</small>
     <ul class="chip-list" id="variant-names">${names.map((n) => html`<li key=${n} class="chip-item"><span>${n}</span>
-      <button type="button" class="chip-x" aria-label=${`Remove ${n}`} title="Remove" disabled=${off} onClick=${() => save(names.filter((x) => x !== n))}>×</button></li>`)}</ul>
+      <button type="button" class="chip-x" aria-label=${`Remove ${n}`} title=${`Remove ${n}`} disabled=${off} onClick=${() => save(names.filter((x) => x !== n), `Removed ${n} from the variant folders.`)}>×</button></li>`)}</ul>
     <form class="inline-form" onSubmit=${add}>
       <input id="variant-add" type="text" maxlength="60" placeholder="Add a folder name" value=${text} onInput=${(e) => setText(e.target.value)} aria-label="New variant folder name" disabled=${off} />
       <button type="submit" class="ghost" id="variant-add-btn" disabled=${off || !text.trim()}>Add</button>
-      <button type="button" class="ghost" id="variant-reset" disabled=${off} onClick=${() => save(null)}>Reset to the defaults</button>
+      <button type="button" class="ghost" id="variant-reset" disabled=${off} onClick=${() => save(null, "Set the variant folders back to the defaults.")}>Reset to the defaults</button>
     </form>
     ${error ? html`<p class="form-error" role="alert">${error}</p>` : null}
   </div>`;
@@ -74,7 +80,7 @@ export function Settings() {
           <small class="muted">Everything about your models is kept in this folder, so you can move, copy or sync it and open it again here.</small>
         </div>
         <${VariantFolders} lib=${lib} />` : html`<p class="muted">No library is open.</p>`}
-      ${isDesktop() ? html`<div><button type="button" class="ghost" id="open-library" onClick=${() => openLibrary()}>Open or create another library…</button></div>` : null}
+      ${isDesktop() ? html`<div><button type="button" class="ghost" id="open-library" title="Open a library, or make a new one in an empty folder" onClick=${() => openLibrary()}>Open another library…</button></div>` : null}
       ${others.length ? html`<h3>Libraries opened before</h3>
         <ul class="ls-list" id="recent-libraries">${others.map((p) => html`<li key=${p}><span>${p}</span>
           <button type="button" class="ghost" onClick=${() => openLibrary(p)}>Open</button></li>`)}</ul>` : null}

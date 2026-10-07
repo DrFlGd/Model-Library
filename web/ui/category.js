@@ -113,7 +113,7 @@ let focusNext = null;
 const focus = (id) => { focusNext = id; };
 
 /** The library paths in a removed branch (what was there moves up). */
-const origs = (n) => [...(n.orig ? [n.orig] : []), ...n.children.flatMap(origs)];
+export const origs = (n) => [...(n.orig ? [n.orig] : []), ...n.children.flatMap(origs)];
 
 /** The subcategory tree of a category: add a subcategory at the top or inside any
  *  one, rename, move one in (under the one above it) or out a level, remove one.

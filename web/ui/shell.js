@@ -14,6 +14,7 @@ import { ImportPage, onDropped } from "./sort.js";
 import { DuplicatesPage } from "./dupes.js";
 import { ModelPage } from "./modelpage.js";
 import { loadOverview } from "./library.js";
+import { ContextMenu, onWindowKey } from "./actions.js";
 
 function Main() {
   const route = useStore(ui, (s) => s.route);
@@ -38,6 +39,8 @@ export function mountShell(context) {
   mount("main-root", Main);
   mount("statusbar", StatusBar);
   mount("dialog-root", Dialogs);
+  mount("menu-root", ContextMenu);
+  addEventListener("keydown", onWindowKey);
   loadOverview();
   context.platform.onDrop?.(onDropped);
 }

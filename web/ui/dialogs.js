@@ -1,32 +1,37 @@
 // Dialogs: making a new schema, and editing a model's details. Which one is open
 // is `ui.dialog` ({ type: "new-schema" } or { type: "edit-model", model, schema }).
-import { html, useState, useEffect } from "../lib/html.js";
+import { html, useState, useLayoutEffect, useRef } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui } from "./state.js";
 import { routeHash, schemaScope } from "./context.js";
 import { Icon } from "./icons.js";
-import { api, loadOverview, saveDetails, moveModels, toast } from "./library.js";
+import { api, loadOverview, saveDetails, moveModels, runChange, undoable } from "./library.js";
 import { CategoryPicker, SubcategoryTree, treeSpec, treeReady, firstBranch } from "./category.js";
-import { RenameNode, EditSchema, DeleteSchema, EditPicked, AddSubcategory } from "./categories.js";
+import { RenameNode, EditSchema, DeleteSchema, DeleteSubcategory, EditPicked, AddSubcategory } from "./categories.js";
 
 export const FIELD_TYPES = [["text", "Text"], ["number", "Number"], ["choice", "Choice"], ["yes-no", "Yes or no"], ["date", "Date"]];
 export const close = () => ui.set({ dialog: null });
 
-export function Dialog({ title, id, onSubmit, busy, error, submitLabel, children }) {
-  useEffect(() => {
+/** A dialog: Esc or Cancel closes it; `danger` makes the button red (it deletes).
+ *  Esc and the first box work as soon as it shows (a layout effect, not after a paint). */
+export function Dialog({ title, id, onSubmit, busy, error, submitLabel, danger = false, children }) {
+  const form = useRef(null);
+  useLayoutEffect(() => {
     const key = (e) => { if (e.key === "Escape") close(); };
     addEventListener("keydown", key);
+    const f = form.current;
+    if (f && !f.contains(document.activeElement)) (f.querySelector("input:not([type=hidden]):not([disabled]), select, textarea") || f).focus();
     return () => removeEventListener("keydown", key);
   }, []);
   return html`<div class="dialog-backdrop" onMouseDown=${(e) => { if (e.target === e.currentTarget) close(); }}>
-    <form class="dialog" id=${id} role="dialog" aria-modal="true" aria-label=${title} onSubmit=${(e) => { e.preventDefault(); onSubmit(); }}>
+    <form class="dialog" id=${id} ref=${form} tabindex="-1" role="dialog" aria-modal="true" aria-label=${title} onSubmit=${(e) => { e.preventDefault(); onSubmit(); }}>
       <div class="dialog-head"><h2>${title}</h2>
-        <button type="button" class="ghost" aria-label="Close" onClick=${close}>${Icon.close(15)}</button></div>
+        <button type="button" class="ghost" aria-label="Close" title="Close (Esc)" onClick=${close}>${Icon.close(15)}</button></div>
       ${children}
       ${error ? html`<p class="form-error" role="alert">${error}</p>` : null}
       <div class="dialog-actions">
         <button type="button" class="ghost" onClick=${close}>Cancel</button>
-        <button type="submit" class="primary" disabled=${busy}>${submitLabel}</button>
+        <button type="submit" class=${danger ? "primary danger" : "primary"} disabled=${busy}>${submitLabel}</button>
       </div>
     </form>
   </div>`;
@@ -54,7 +59,12 @@ function NewSchema() {
       await loadOverview();
       close();
       location.hash = routeHash(`browse:${schemaScope(s.id)}`);
-      toast(`Made the category ${s.name}, in the folder ${s.folder}.`);
+      undoable(`Made the category ${s.name}, in the folder ${s.folder}.`, async () => {
+        const now = ui.get().overview?.schemas?.find((x) => x.id === s.id);
+        if (now?.count) throw new Error(`${s.name} has models in it now: use Delete category… if you want it gone.`);
+        await runChange({ kind: "delete", schema: s.id, label: `Took back the new category ${s.name}` }, "Deleting the category");
+        if (ui.get().route.startsWith(`browse:schema:${s.id}`)) location.hash = routeHash("home");
+      });
     } catch (e) {
       setError(e.message || String(e));
     } finally {
@@ -110,9 +120,10 @@ export function FieldInput({ field, value, onChange }) {
   return html`<input id=${id} type=${type} value=${value ?? ""} onInput=${(e) => onChange(e.target.value)} />`;
 }
 
-function EditModel({ model, schema }) {
+/** What the details form starts from: the model's details as the form has them. */
+function formOf(model) {
   const d = model.details || {};
-  const [form, setForm] = useState({
+  return {
     name: model.name,
     authors: model.authors.join(", "),
     released: d.released || "",
@@ -121,8 +132,14 @@ function EditModel({ model, schema }) {
     tags: (model.tags || []).join(", "),
     notes: d.notes || "",
     cover: d.cover || "",
-  });
+  };
+}
+
+function EditModel({ model, schema, select }) {
+  const [form, setForm] = useState(() => formOf(model));
   const [fields, setFields] = useState({ ...(model.fields || {}) });
+  const nameBox = useRef(null);
+  useLayoutEffect(() => { nameBox.current?.focus(); if (select) nameBox.current?.select(); }, []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
@@ -132,10 +149,14 @@ function EditModel({ model, schema }) {
     setError("");
     try {
       const patch = { ...form, fields: {} };
-      for (const f of schema?.fields || []) patch.fields[f.key] = fields[f.key] ?? "";
-      await saveDetails(model, patch);
+      const before = { ...formOf(model), fields: {} };
+      for (const f of schema?.fields || []) {
+        patch.fields[f.key] = fields[f.key] ?? "";
+        before.fields[f.key] = model.fields?.[f.key] ?? "";
+      }
+      const v = await saveDetails(model, patch);
       close();
-      toast("Details saved to model.json.");
+      undoable(`Saved ${v.name}'s details.`, () => saveDetails(v, before));
     } catch (e) {
       setError(e.message || String(e));
     } finally {
@@ -145,7 +166,7 @@ function EditModel({ model, schema }) {
   return html`<${Dialog} title="Edit details" id="details-dialog" onSubmit=${submit} busy=${busy} error=${error} submitLabel="Save">
     <p class="muted">Saved in <span class="preview-path">${model.rel}/model.json</span>. Changing the name doesn't rename the folder.</p>
     <div class="form-two">
-      <label class="field-block"><span>Name</span><input id="edit-name" type="text" required maxlength="200" value=${form.name} onInput=${set("name")} /></label>
+      <label class="field-block"><span>Name</span><input id="edit-name" ref=${nameBox} type="text" required maxlength="200" value=${form.name} onInput=${set("name")} /></label>
       <label class="field-block"><span>Authors</span><input id="edit-authors" type="text" placeholder="Separate several with commas" value=${form.authors} onInput=${set("authors")} /></label>
       <label class="field-block"><span>Released</span><input id="edit-released" type="date" value=${form.released} onInput=${set("released")} /></label>
       <label class="field-block"><span>Licence</span><input id="edit-license" type="text" value=${form.license} onInput=${set("license")} /></label>
@@ -181,7 +202,21 @@ function MoveModels({ models }) {
         setError(r.errors.map((e) => e.error).join(" "));
       } else {
         close();
-        toast(`Moved ${r.moved.length === 1 ? models[0].name : `${r.moved.length} models`} to ${sc ? [sc.name, ...values].join(" › ") : "Unsorted"}.`);
+        // undo moves each back to where it was (step 2 of the UI pass journals it)
+        const from = new Map();
+        for (const mv of r.moved) {
+          const m = models.find((x) => x.id === mv.id);
+          const key = JSON.stringify([m.schema || null, m.schema ? m.path || [] : []]);
+          if (!from.has(key)) from.set(key, []);
+          from.get(key).push(mv.new_id);
+        }
+        undoable(`Moved ${r.moved.length === 1 ? models[0].name : `${r.moved.length} models`} to ${sc ? [sc.name, ...values].join(" › ") : "Unsorted"}.`, async () => {
+          for (const [key, ids] of from) {
+            const [s0, v0] = JSON.parse(key);
+            const back = await moveModels(ids, s0, v0);
+            if (back.errors.length) throw new Error(back.errors[0].error);
+          }
+        });
       }
     } catch (e) {
       setError(e.message || String(e));
@@ -189,7 +224,7 @@ function MoveModels({ models }) {
       setBusy(false);
     }
   };
-  return html`<${Dialog} title=${models.length === 1 ? `Move ${first.name}` : `Move ${models.length} models`} id="move-dialog" onSubmit=${submit} busy=${busy} error=${error} submitLabel="Move">
+  return html`<${Dialog} title=${models.length === 1 ? `Move ${first.name} to a category` : `Move ${models.length} models to a category`} id="move-dialog" onSubmit=${submit} busy=${busy} error=${error} submitLabel="Move">
     <p class="muted">${models.length === 1 ? "Its folder moves" : "Their folders move"} into the subcategory's folder and ${models.length === 1 ? "keeps its" : "keep their"} name. A new subcategory is added to the category.</p>
     <div class="field-block"><span class="field-label">Category</span>
       <${CategoryPicker} overview=${overview} schema=${schema} values=${values} idPrefix="move" onChange=${(s, v) => { setSchema(s); setValues(v); }} /></div>
@@ -206,7 +241,8 @@ export function Dialogs() {
   if (dialog.type === "rename-node") return html`<${RenameNode} schemaId=${dialog.schemaId} path=${dialog.path} />`;
   if (dialog.type === "edit-schema") return html`<${EditSchema} schemaId=${dialog.schemaId} />`;
   if (dialog.type === "delete-schema") return html`<${DeleteSchema} schemaId=${dialog.schemaId} />`;
+  if (dialog.type === "delete-subcategory") return html`<${DeleteSubcategory} schemaId=${dialog.schemaId} path=${dialog.path} />`;
   if (dialog.type === "edit-picked") return html`<${EditPicked} models=${dialog.models} />`;
-  if (dialog.type === "edit-model") return html`<${EditModel} model=${dialog.model} schema=${dialog.schema} key=${dialog.model.id} />`;
+  if (dialog.type === "edit-model") return html`<${EditModel} model=${dialog.model} schema=${dialog.schema} select=${!!dialog.select} key=${dialog.model.id} />`;
   return null;
 }

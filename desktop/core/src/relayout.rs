@@ -174,6 +174,13 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
             "schema_after": schema_after, "path_after": path_after,
         }));
     }
+    // the page can name the change better (deleting a subcategory is an edit of the category)
+    let label = change["label"]
+        .as_str()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .unwrap_or(label);
     Ok(json!({
         "kind": kind, "label": label, "schema": sid,
         "schema_before": old.to_json(),

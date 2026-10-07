@@ -14,10 +14,12 @@ export const ui = createStore({
   q: "",                   // search text in the browse view (words and typed filters)
   sort: "name",            // name | added | size
   layout: "grid",          // grid | list
-  selection: null,         // the selected model's id
-  picked: [],              // several models picked with Ctrl or Shift (ids)
+  selection: null,         // the model last clicked or moved to (its id): Shift selects from `anchor` to it
+  anchor: null,            // where a Shift-click or Shift+arrow run starts
+  picked: [],              // the selected models (ids); the details panel shows one, or what several share
   catalogRev: 0,           // bumps when models change (the browse view asks again)
   dialog: null,            // { type: "new-schema" | "edit-model" | "move-models", ... }
+  menu: null,              // a right-click or More menu: { x, y, items, from }
   open: {},                // sidebar tree rows unfolded: { "<schema>/<value>…": true }
   favs: [],
   jobs: [],                // [{ id, label, started, cancel }]
@@ -61,10 +63,10 @@ export function applyTheme() {
   document.documentElement.dataset.theme = resolvedTheme();
   window.dispatchEvent(new CustomEvent("ml-theme"));
 }
-/** Top-bar button: light -> dark -> night -> light. */
+/** The top bar's button goes through the same choices as Settings, in order. */
+export const nextTheme = (theme) => THEMES[(THEMES.findIndex(([v]) => v === theme) + 1) % THEMES.length][0];
 export function cycleTheme() {
-  const next = { light: "dark", dark: "night", night: "light" }[resolvedTheme()];
-  setTheme(next);
+  setTheme(nextTheme(ui.get().theme));
 }
 export function setTheme(theme) {
   setPref({ theme });

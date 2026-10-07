@@ -7,14 +7,73 @@ export const isDesktop = () => ctx.platform?.kind === "desktop";
 export const api = (cmd, args) => ctx.platform.api(cmd, args);
 export const apiBytes = (cmd, args) => ctx.platform.apiBytes(cmd, args);
 
-/** Show a short message at the bottom of the window. */
-export function toast(text, ms = 3500) {
+/** Show a short message at the bottom of the window. `opts`: how long (ms), or
+ *  { ms, action: { label, run } } for a button in the message (Undo). It stays
+ *  while the pointer is on it. */
+export function toast(text, opts = {}) {
+  const { ms = 3500, action = null } = typeof opts === "number" ? { ms: opts } : opts;
   const el = document.getElementById("toast");
   if (!el) return;
-  el.textContent = text;
+  const span = document.createElement("span");
+  span.textContent = text;
+  el.replaceChildren(span);
+  if (action) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "toast-action";
+    b.textContent = action.label;
+    b.onclick = () => { el.hidden = true; action.run(); };
+    el.append(b);
+  }
   el.hidden = false;
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => { el.hidden = true; }, ms);
+  const hide = (after) => { clearTimeout(toast.timer); toast.timer = setTimeout(() => { el.hidden = true; }, after); };
+  el.onmouseenter = () => clearTimeout(toast.timer);
+  el.onmouseleave = () => hide(2500);
+  hide(ms);
+}
+
+/** Changes made in this window that can be undone, newest last: { text, undo }. */
+const undos = [];
+
+/** Say a change was made, with Undo in the message; Ctrl+Z undoes it too.
+ *  `undo()` puts it back, and may return the message to show then. */
+export function undoable(text, undo, ms = 8000) {
+  const entry = { text, undo };
+  undos.push(entry);
+  if (undos.length > 20) undos.shift();
+  toast(text, { ms, action: { label: "Undo", run: () => runUndo(entry) } });
+}
+
+/** "Moved Benchy to Office. More…" → "moved Benchy to Office": the first clause, for "Undone: …". */
+const undoneText = (text) => {
+  const first = text.split(/[.:](?:\s|$)/)[0];
+  return /^[A-Z][a-z]/.test(first) ? first[0].toLowerCase() + first.slice(1) : first;
+};
+
+async function runUndo(entry) {
+  const i = undos.indexOf(entry);
+  if (i < 0) return toast("That's been undone already.");
+  undos.splice(i, 1);
+  try {
+    const said = await entry.undo();
+    toast(typeof said === "string" ? said : `Undone: ${undoneText(entry.text)}.`, 5000);
+  } catch (e) {
+    toast(`Couldn't undo it: ${e.message || e}`, 8000);
+  }
+}
+
+/** Ctrl+Z: undo the last change made in this window. */
+export function undoLast() {
+  const entry = undos[undos.length - 1];
+  if (!entry) return toast("Nothing to undo.");
+  return runUndo(entry);
+}
+
+/** Models that got a new id (saving gives a model.json; moving changes a path id):
+ *  the selection and stars follow them. `map`: { old id: new id }. */
+export function followIds(map) {
+  const to = (id) => map[id] || id;
+  ui.set((s) => ({ selection: s.selection && to(s.selection), anchor: s.anchor && to(s.anchor), picked: s.picked.map(to), favs: s.favs.map(to) }));
 }
 
 /** Read the app's info again and update what the interface shows. */
@@ -71,6 +130,8 @@ export async function rescan(full = true) {
     const r = await api("library_scan", { full });
     await loadOverview();
     toast(`${r.models} models, read in ${(r.ms / 1000).toFixed(1)} s.`);
+  } catch (e) {
+    toast(`Couldn't read the library: ${e.message || e}`, 8000);
   } finally {
     done();
   }
@@ -86,7 +147,8 @@ export async function openLibrary(path) {
     const info = await api("library_open", { path: target });
     await refreshLibrary();
     const prefs = await api("prefs_get").catch(() => ({}));
-    ui.set({ favs: prefs["ml-favs"] || [], selection: null, overview: null });
+    ui.set({ favs: prefs["ml-favs"] || [], selection: null, anchor: null, picked: [], overview: null });
+    undos.length = 0;
     await loadOverview();
     toast(`Opened ${info.name}.`);
     return info;
@@ -132,14 +194,16 @@ export function openModelFile(model, rel) {
 /** Star or unstar a model (starring gives it a model.json, so the star lasts). */
 export async function setStar(model, on) {
   const r = await api("model_star", { id: model.id, on });
-  ui.set((s) => ({ favs: r.favourites, selection: s.selection === model.id ? r.id : s.selection, catalogRev: s.catalogRev + 1 }));
+  followIds({ [model.id]: r.id });
+  ui.set({ favs: r.favourites });
+  await loadOverview();
   return r;
 }
 
 /** Save a model's details. Returns the model as the index has it now. */
 export async function saveDetails(model, patch) {
   const v = await api("model_update", { id: model.id, patch });
-  ui.set((s) => ({ selection: s.selection === model.id ? v.id : s.selection, favs: s.favs.map((f) => (f === model.id ? v.id : f)) }));
+  followIds({ [model.id]: v.id });
   await loadOverview();
   return v;
 }
@@ -165,8 +229,8 @@ export async function followJob(id, label, onProgress) {
 /** Move models into a category (schema id and path of subcategories), or to Unsorted (schema null). */
 export async function moveModels(ids, schema, values) {
   const r = await api("models_move", { ids, schema, values });
-  const remap = Object.fromEntries(r.moved.map((m) => [m.id, m.new_id]));
-  ui.set((s) => ({ favs: r.favourites, picked: [], selection: remap[s.selection] || s.selection }));
+  followIds(Object.fromEntries(r.moved.map((m) => [m.id, m.new_id])));
+  ui.set({ favs: r.favourites });
   await loadOverview();
   return r;
 }

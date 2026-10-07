@@ -1,14 +1,16 @@
 // Duplicates: models whose 3D, slicer and archive files are the same as another
 // model's, and files found in more than one model. Extra copies are set aside in
-// the library's _library/set-aside folder (undo on Home), and deleted from there
-// only when asked.
+// the library's _library/set-aside folder (Undo in the message, or on Home), and
+// deleted from there only when asked. Right-click a model for the same actions as
+// everywhere; Ctrl+A ticks every group and Esc unticks them.
 import { html, useState, useEffect } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui } from "./state.js";
 import { ctx, routeHash } from "./context.js";
-import { api, isDesktop, followJob, loadOverview, toast, undoChange } from "./library.js";
+import { api, isDesktop, followJob, loadOverview, toast, undoable, undoChange } from "./library.js";
 import { size } from "./details.js";
 import { Icon } from "./icons.js";
+import { MODEL_ACTIONS, menuItems, openMenu, usePageKeys, selectAllKey } from "./actions.js";
 
 const placeOf = (overview, m) => {
   if (!m.schema) return "Unsorted";
@@ -36,7 +38,8 @@ function Group({ g, keep, setKeep, include, setInclude, overview, readOnly, busy
         <b>${plural(g.models.length, "copy", "copies")}</b> of the same ${g.files === 1 ? "file" : `${g.files} files`} <span class="muted">· ${size(g.bytes)} each</span></label>
       <button type="button" class="ghost dupe-set-aside" disabled=${readOnly || busy} onClick=${() => setAside(extra.map((m) => m.id))}>Set aside ${extra.length === 1 ? "the other copy" : `the other ${extra.length}`}</button>
     </div>
-    <ul class="dupe-models">${g.models.map((m) => html`<li key=${m.id} class=${m.id === keep ? "keep" : ""}>
+    <ul class="dupe-models">${g.models.map((m) => html`<li key=${m.id} class=${m.id === keep ? "keep" : ""} data-model=${m.id}
+      onContextMenu=${(e) => { if (!e.target.closest("input")) openMenu(e, menuItems(MODEL_ACTIONS, [m], { page: "dupes" })); }}>
       <label class="dupe-keep" title="Keep this copy"><input type="radio" name=${`keep-${k}`} checked=${m.id === keep} onChange=${() => setKeep(k, m.id)} /> ${m.id === keep ? "Keep" : "Extra"}</label>
       <span class="dupe-what"><a href=${routeHash(`model:${m.id}`)}>${m.name}</a>
         <span class="muted dupe-rel">${m.rel}</span></span>
@@ -54,10 +57,14 @@ export function DuplicatesPage() {
   const [keep, setKeepMap] = useState({});
   const [skip, setSkip] = useState({});
   const [askDelete, setAskDelete] = useState(false);
-  const [lastAside, setLastAside] = useState(null);
   const [sharedLimit, setSharedLimit] = useState(50);
   const load = () => api("dupes_get", {}).then((d) => { setData(d); setError(null); }, (e) => setError(e.message || String(e)));
   useEffect(() => { if (lib) load(); }, [lib?.path]);
+  usePageKeys((e) => {
+    const groups = data?.groups || [];
+    if (selectAllKey(e) && groups.length) { e.preventDefault(); setSkip({}); }
+    else if (e.key === "Escape" && groups.length) setSkip(Object.fromEntries(groups.map((g) => [keyOf(g), true])));
+  });
   if (!lib) return html`<div class="pages"><h1>Duplicates</h1><p>Open a library first.</p></div>`;
   const readOnly = !!lib.read_only;
   const busy = !!job;
@@ -84,21 +91,18 @@ export function DuplicatesPage() {
       if (done.error) throw new Error(done.error);
       const r = done.result || {};
       if (r.failed?.length) throw new Error(`${plural(r.failed.length, "copy", "copies")} couldn't be moved (${r.failed[0].name}: ${r.failed[0].error}). Home has the change: finish it or put things back.`);
-      setLastAside({ journal: r.journal, count: r.moved });
-      toast(`Set aside ${plural(r.moved, "copy", "copies")}.`);
+      undoable(`Set aside ${plural(r.moved, "copy", "copies")}.`, async () => {
+        await undoChange(r.journal);
+        await load();
+        return "The copies are back where they were.";
+      });
     } catch (e) { toast(e.message || String(e), 8000); }
     finally { setJob(null); await loadOverview(); await load(); }
-  };
-  const undoAside = async () => {
-    try { await undoChange(lastAside.journal); toast("The copies are back where they were."); setLastAside(null); }
-    catch (e) { toast(e.message || String(e), 8000); }
-    finally { await load(); }
   };
   const emptyAside = async () => {
     try {
       const r = await api("dupes_empty", {});
       toast(`Deleted ${plural(r.count, "set-aside copy", "set-aside copies")} (${size(r.bytes)}).`, 5000);
-      setLastAside(null);
     } catch (e) { toast(e.message || String(e), 8000); }
     finally { setAskDelete(false); await load(); }
   };
@@ -116,16 +120,13 @@ export function DuplicatesPage() {
     <p class="muted">Models whose 3D, slicer and archive files are all the same as another model's, and files found in more than one model. Files are compared by what's in them, not by their names.</p>
     ${error ? html`<p class="warn-note" role="alert">${error}</p>` : null}
     <div class="home-actions">
-      <button type="button" class="primary" id="dupes-find" disabled=${busy} onClick=${find}>${Icon.search(15)} ${data?.found ? "Look again" : "Look for duplicates"}</button>
+      <button type="button" class="primary" id="dupes-find" disabled=${busy} onClick=${find}>${Icon.search(15)} Look for duplicates</button>
       ${job ? html`<span class="dupes-progress" id="dupes-progress" role="status">${progressText(job.progress)}</span>
         <button type="button" class="ghost" id="dupes-stop" onClick=${stop}>Stop</button>` : null}
     </div>
     ${data?.found ? html`<p id="dupes-summary">Looked on ${when(data.found)} through ${plural(data.models || 0, "model", "models")}: ${plural(groups.length, "model has", "models have")} copies, ${plural(data.shared_count || 0, "file is", "files are")} in more than one model${data.wasted ? html`, and about <b>${size(data.wasted)}</b> could be saved` : null}.</p>`
       : html`<p id="dupes-summary" class="muted">Not looked yet. Looking reads the start and end of files that have the same size, then the whole of those that still match, so the first look at a big library takes a while. What's learnt is kept in each model's model.json, so later looks are quick.</p>`}
     ${data?.unreadable?.length ? html`<p class="warn-note">${plural(data.unreadable.length, "file", "files")} couldn't be read, for example ${data.unreadable[0].rel}/${data.unreadable[0].file}.</p>` : null}
-
-    ${lastAside ? html`<div class="home-card" id="dupes-done"><p><span>Set aside ${plural(lastAside.count, "copy", "copies")}.</span>
-      <button type="button" class="ghost" id="dupes-undo" disabled=${busy || readOnly} onClick=${undoAside}>Undo</button></p></div>` : null}
 
     ${aside.count ? html`<div class="home-card" id="dupes-aside">
       <h2>Set aside</h2>
@@ -145,7 +146,7 @@ export function DuplicatesPage() {
         <h2>Models with copies (${groups.length})</h2>
         <button type="button" class="primary" id="dupes-set-aside" disabled=${readOnly || busy || !extras.length} onClick=${() => setAside(extras)}>Set aside ${plural(extras.length, "extra copy", "extra copies")}</button>
       </div>
-      <p class="muted">The copy to keep is chosen for you: one in a category before one in Unsorted, then the one with more files. Pick another if you like, or untick a model to leave it as it is.</p>
+      <p class="muted">The copy to keep is chosen for you: one in a category before one in Unsorted, then the one with more files. Choose another if you like, or untick a model to leave it as it is (Ctrl+A ticks them all, Esc unticks them).</p>
       <ul class="dupe-list">${groups.map((g) => html`<${Group} key=${keyOf(g)} g=${g} keep=${keepOf(g)} overview=${overview} readOnly=${readOnly} busy=${busy} setAside=${setAside}
         setKeep=${(k, id) => setKeepMap({ ...keep, [k]: id })} include=${!skip[keyOf(g)]} setInclude=${(k, on) => setSkip({ ...skip, [k]: !on })} />`)}</ul>
     </section>` : null}
@@ -157,7 +158,7 @@ export function DuplicatesPage() {
         <tbody>${shared.slice(0, sharedLimit).map((f) => html`<tr key=${f.sha256}>
           <td>${f.name}</td><td class="num">${size(f.size)}</td>
           <td>${f.in.map((m, i) => html`${i ? ", " : ""}<a href=${routeHash(`model:${m.id}`)} title=${`${m.rel}/${m.file}`}>${m.name}</a>`)}</td></tr>`)}</tbody></table>
-      ${shared.length > sharedLimit ? html`<button type="button" class="ghost" onClick=${() => setSharedLimit(sharedLimit + 100)}>Show more</button>` : null}
+      ${shared.length > sharedLimit ? html`<button type="button" class="ghost" onClick=${() => setSharedLimit(sharedLimit + 100)}>Show more (${shared.length - sharedLimit} left)</button>` : null}
     </section>` : null}
     ${data?.found && !groups.length && !shared.length ? html`<p class="muted" id="dupes-none">No duplicates.</p>` : null}
   </div>`;

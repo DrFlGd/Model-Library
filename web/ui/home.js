@@ -6,6 +6,7 @@ import { ui } from "./state.js";
 import { ctx, routeHash, schemaScope } from "./context.js";
 import { api, isDesktop, openLibrary, showLibraryFolder, rescan, followJob, loadOverview, toast, undoChange, finishChange } from "./library.js";
 import { sortFolder } from "./sort.js";
+import { Icon } from "./icons.js";
 
 const TREE = `_library/                  the app's own files
 Unsorted/                  models with no category yet
@@ -68,8 +69,9 @@ const NEXT = [
   ["Phase 2", "Importing models: files, folders and ZIPs, moved or copied into place, and moving models between categories"],
   ["Phase 3", "Viewing models: a 3D viewer, parts and variants, previews, pictures, readmes, PDFs and videos"],
   ["Phase 4", "Editing categories: a tree of subcategories, renamed, merged and moved with folders to match, and undo"],
-  ["Phase 5", "Large collections: sorting a whole folder tree as it is, finding duplicates, noticing changes made outside the app", true],
-  ["Phase 6", "Running on a server (Docker) with sign-in, to browse the library from another computer"],
+  ["Phase 5", "Large collections: sorting a whole folder tree as it is, finding duplicates, noticing changes made outside the app"],
+  ["UI pass", "The same actions, keys and undo on every page, then one page layout", true],
+  ["Phase 6", "Running on a server (Docker) with sign-in, to browse the library from another computer (on hold)"],
 ];
 
 export function Home() {
@@ -86,11 +88,11 @@ export function Home() {
     ${s.error ? html`<p class="warn-note" role="alert">${s.error}</p>` : null}
     ${lib?.read_only ? html`<p class="warn-note" role="alert">${lib.read_only}</p>` : null}
     ${isDesktop() ? html`<div class="home-actions">
-      <button type="button" class="ghost" onClick=${showLibraryFolder} disabled=${!lib}>Show in folder</button>
+      <button type="button" class="ghost" onClick=${showLibraryFolder} disabled=${!lib}>${Icon.folder(15)} Show in folder</button>
+      <button type="button" class="ghost" id="rescan" onClick=${() => rescan(true)} disabled=${!lib} title="Read every model folder again, in case something changed that the app missed">${Icon.refresh(15)} Read again</button>
+      ${lib && !lib.read_only ? html`<button type="button" class="ghost" id="make-previews" onClick=${makePreviews} title="Draw a preview for every model that has none yet">${Icon.image(15)} Make missing previews</button>` : null}
       <button type="button" class="ghost" onClick=${() => openLibrary()}>Open another library…</button>
-      <button type="button" class="ghost" id="rescan" onClick=${() => rescan(true)} disabled=${!lib}>Read the folders again</button>
-    </div>` : null}
-    ${lib && !lib.read_only ? html`<div class="home-actions"><button type="button" class="ghost" id="make-previews" onClick=${makePreviews}>Make previews for models without one</button></div>` : null}
+    </div>` : lib && !lib.read_only ? html`<div class="home-actions"><button type="button" class="ghost" id="make-previews" onClick=${makePreviews}>${Icon.image(15)} Make missing previews</button></div>` : null}
     ${ov ? html`<div class="home-card home-counts" id="home-counts">
       <h2>In this library</h2>
       <p><a href=${routeHash("browse:all")}><b>${ov.all}</b> ${ov.all === 1 ? "model" : "models"}</a>${ov.unsorted ? html`, <a href=${routeHash("browse:unsorted")}>${ov.unsorted} unsorted</a>` : null}.

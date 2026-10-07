@@ -185,7 +185,8 @@ Because every action already goes through one command table, the Docker build is
 | 3 | Viewing: part tree with groups and variants, files inside ZIPs, 3D viewer (STL, 3MF, OBJ), thumbnails, supplemental tabs, range requests | An armour set shows as one model with its parts, and a zipped model previews without unpacking |
 | 4 | Editing: schema editor, category rename and merge, bulk metadata, journaled re-layout with preview and undo | Renaming a faction moves its folders and can be undone |
 | 5 | Large collections: adopt-in-place for tidy trees, duplicate report across the library, file watcher | A whole NAS share of models is in the library |
-| 6 | Docker: server platform, auth, image | The same library browses from a browser on another machine |
+| UI pass (0.5.x) | Consistent actions, undo for every change, one page layout (see "UI pass design") | The same action has the same name, place, keys and undo on every page |
+| 6 | Docker: server platform, auth, image (on hold until the UI pass is done) | The same library browses from a browser on another machine |
 | Later | Metadata fetch from Printables, MMF and Thingiverse pages; collections; print status and notes; slicer integration; plugin ideas from Grid Workshop's "Future" list | |
 
 Following Grid Workshop's convention, each phase gets written into a plan doc in the repo before code, with a notes section afterwards.
@@ -438,3 +439,91 @@ Built 2026-10-06, as designed above, with these details:
 - **Watching** (`watch.rs`, the `notify` crate): the library folder is watched recursively; changes under `_library/` and hidden files are ignored. After 2 s with no more changes, the index is read again (from the cache, so only changed folders are read) and models holding a changed path are read again too (a file added deep in a part folder doesn't change the model folder's time). A model whose `model.json` names a different place than its folder gets `model::set_place`. The check waits for any running job. The page asks `library_changes` every 4 s for a change counter, and `library_changes {check: true}` when the window comes back to the front (at most every 30 s) and every 5 minutes; a change reloads the lists.
 - **Tests:** `sort.rs` (reading a tree, send, group, join, split, keep choices, files of a group), `dupes.rs` (copies found, keep order, hashes kept, a second look reads nothing, set aside, undo, delete), `watch.rs` (one report for a burst, `_library/` ignored), `api.rs` (sorting over two sittings, duplicates through the commands, folders changed outside the app), and page checks 15–19 (rewritten for the workspace), 22b (parts views) and 30–32.
 - Not done: undo of an older set-aside, choosing which files decide a duplicate, a model without a `model.json` keeping its id when moved by hand (it gets one from its new path).
+
+## UI pass design
+
+Written before the code (2026-10-07). Phase 6 is on hold. The owner's direction: "The UI still needs work… I think actions need to be consistent across the UI." The review of every page (about 120 buttons, links, tick boxes and keys) found the same action named, placed and undone differently from page to page: Move to category in five forms, Edit details in three, Show in folder in three and missing from three places, four kinds of undo, three view switchers and three sort controls, and four labels on Import for "make one model". The owner chose to do all three steps below, each released as 0.5.x with screenshots.
+
+**The rules every page keeps.**
+
+1. One name, one icon, one key per action, on every page (the word list below).
+2. Selecting works the same everywhere: click selects one, Ctrl or Cmd-click adds or removes one, Shift-click selects a run from the last one clicked, tick boxes show on hover and stay once anything is selected, Ctrl+A selects everything shown, Esc clears, arrow keys move (with Shift, extend). Selected things get the same amber highlight.
+3. One action row and the same right-click menu. The same buttons in the same order head the details panel and the model page: **Open, Edit details…, Move to category…, Star, Show in folder, More ▾**. A page's own actions follow, or go under More. Right-clicking a card, row, file or sidebar category shows the same actions as a menu. An action that doesn't apply is left out; one that can't be used now (a read-only library, nothing selected) stays visible, greyed, with the reason in its tooltip.
+4. One details panel (step 3): picture, name, authors, category, actions, files, alike in the library, on Import and on Duplicates.
+5. Every change can be undone the same way: the message that confirms it has an **Undo** button, and Ctrl+Z undoes the last change made in this window. Older changes are in Recent changes on Home.
+6. Ask only when it can't be undone: one in-app confirm with a red button that names what it deletes. A change that moves many folders lists the moves first.
+7. Long work looks the same: progress and **Stop** on the page that started it and in the status bar.
+8. The same controls for views, sorting and paging: one view switcher (icon, label, tooltip), one sort menu with the same words, one "Show more (N left)".
+9. Every icon-only button has a tooltip; a greyed button says why.
+
+**Words.**
+
+| Use | Instead of |
+| --- | --- |
+| Move to category… (Set category on Import, where nothing moves until Import) | Move…, Send to, the unlabelled icon |
+| Unsorted | Not sorted, Not sorted yet |
+| No category, Has category (Import's filters) | To sort, Sorted |
+| Clear category | Not sorted (the button) |
+| Combine into one model; its opposite is Split | Group into one model, Make it a model, Make one model, Make it one model, Ungroup |
+| Select, Clear selection | Pick, Pick nothing |
+| Star, Starred (the sidebar entry) | Favourites |
+| Authors | Author (Import's field) |
+| Stop (a running job) | Cancel (Cancel only closes a form) |
+| Read again (Duplicates keeps Look for duplicates) | Read the folders again, Check again, Look again |
+| Delete… (red, only for what can't come back) | mixed colours; Set aside stays for duplicate copies, Remove for taking something out of a list |
+| Show more (N left) | Show more, Show all N |
+| Name, Recently added, Largest first, Folder, Kind | Largest, By name, By folder, By kind |
+| List (a model's files) | All files |
+| Search | Find by name, Filter files |
+| Open another library… | Open or create another library… |
+
+**Keys** (ignored while typing in a box or while a dialog is open): Enter opens, E edits details, M moves to a category (Set category on Import), S stars, F2 edits details with the name ready to type, Ctrl+A selects all shown, Esc clears the selection (or closes a menu or dialog), arrows move and Shift+arrows extend, `/` goes to the page's search box, Ctrl+Z undoes the last change, Shift+F10 or the menu key opens the right-click menu for the selection.
+
+### Step 1: actions (0.5.1)
+
+- **One list of actions** (`web/ui/actions.js`). Each action is `{ id, label, icon, key, applies(targets), enabled(targets) → true or the reason, run(targets) }`. The library's model actions, in order: Open (not on the model page), Edit details… (several selected: the form for several models), Move to category…, Star (Remove star when all are starred), Show in folder (desktop, one model), then under More: Make a new preview, Copy folder path. An `ActionRow` draws them as buttons (icon and label, the same everywhere) and a `ContextMenu` as a menu; both read the same list, so they can't drift. The details panel, the model page, the several-selected panel and right-click on cards, list rows and Duplicates' model rows all use it.
+- **Import's actions** use the same row and order where they match (Edit details focuses the name box, Set category… focuses the category picker, Show in folder shows the source), then Import's own: Combine into one model, Split, Skip or Don't skip, Clear category, Use suggested categories. Right-click on a tree row, list row or card gives the same list.
+- **A Category menu** (moved forward from step 3, because Delete needs a home): one **Category ▾** button on every category page and right-click on a sidebar category, with Add subcategory…, Edit category… (now at every level; it opens on the whole category), Rename or move… (a subcategory), and Delete category… or Delete subcategory (red). Edit category no longer has its own Delete button, so unsaved edits aren't thrown away. An empty subcategory is deleted straight away with Undo in the message (it's added back); one with models in it opens a dialog listing the folders that move up a level, as a category change that can be undone.
+- **Selection.** The library keeps `picked` (the selected ids) and `selection` (the one last clicked, which the details panel shows and Shift-click runs from). Cards and rows get a tick box. Ctrl+A, Esc, arrows and Shift+arrows work in the grid and list. Import adds Ctrl+A, Esc anywhere on the page and arrow keys; Duplicates adds Ctrl+A and Esc on its group tick boxes. A selection is dropped when it isn't in the results shown (bug 1).
+- **Keys** through one handler in the shell; each page registers what its keys do.
+- **Messages with Undo.** `toast(text, { ms, action: { label, run } })` draws a button in the message, and `undoable(text, undo)` shows the message and puts the undo on a stack that Ctrl+Z takes from (newest first, about 20 kept, cleared when the library changes). In this step: star; edit details (the old values are saved back); category changes and setting copies aside (the change's journal is undone, as from Home); deleting an empty subcategory; variant names and the library name (set back); and every Import action, through a new core command `sort_undo` that puts back the workspace as it was before the last change (the core keeps the last 20 workspaces in memory; importing clears them, since files have moved). Reading a folder in, Clear imported and Start again can then be undone too, so Start again no longer asks. Move to category, Import, the full edit form for several models and Use as cover get undo in step 2.
+- **Bugs fixed:** the details panel showing a model from another place; Delete category drawn in yellow (now red); Delete inside Edit category losing unsaved edits; deleting an empty subcategory without undo; files with no viewer looking clickable (now greyed with a tooltip, and Open in its own app on the file's menu), and videos that play only in another app getting an Open button; author and tag filter chips that couldn't be taken off (click again to remove); the theme button not going back to Follow the system (it now goes System, Light, Dark, Night); Starred without a count (the overview counts starred models); Read again on Home not saying when it fails; messages covering Import's footer.
+
+### Step 2: undo and asking (0.5.2)
+
+- **Journals for every change**, as category changes have now, so each shows in Recent changes on Home and has Undo in its message:
+  - *Move to category*: a journal of kind `move` (a list of moves, as a category change has), applied and undone by `relayout`. A new subcategory made on the way is in the journal's categories before and after, so undo removes it again.
+  - *Import*: each model imported is a move from outside the library (`from` absolute) to its place, with the mode. Undo moves the files back where they came from (move) or deletes the copies (copy), and marks the workspace items as not imported.
+  - *Edit details*, for one or several models: a journal of kind `details` holding each model's `model.json` before; undo writes them back.
+  - *Use as cover*: the old cover is kept in the journal's folder and put back on undo.
+  - *Delete subcategory* with models in it (through Edit category): a category change already.
+- **Move to category shows its moves first**, with the same list of folders as category changes, and **Move** says how many models move.
+- **One red confirm** (`ConfirmDialog`) for what can't be undone: Delete set-aside copies uses it instead of the panel on the page, and the button names what it deletes.
+- **Stop on every long job**: the status bar says Stop, and reading or opening a large library can be stopped (the index keeps what it read and finishes next time).
+
+### Step 3: layout (0.5.3)
+
+- **One page header**: title and count on the left, the page's main button on the right, other page actions under More. Under it **one toolbar**: search, filters, sort, view.
+- **One details panel** for the library, Import and Duplicates: picture, name, authors, tags and category, changed right in the panel (saved when you leave the box, with Undo in the message), the action row, then the files. Several selected shows the count, the shared values and the same row. With nothing selected, the panel sums up the place shown: models, size, authors.
+- **Home** becomes the place to start: Recent changes, folders waiting to be sorted, recently added models, and one **Library ▾** menu for Show in folder, Read again, Make missing previews and Open another library…. "How the library is laid out" and "What's coming" move to Settings, under About.
+- **One view switcher** (icon and label) on the library, the model page and Import, and **one sort menu**; the library's list view gets column headers that sort when clicked, as on Import.
+- **"Searching for … ×"** above the results when a search carries into another place, so an empty category doesn't look broken.
+
+**Done when:** the same action has the same name, place, key, menu entry and undo on every page; every change except deleting for good can be undone from its message or Home; and the page tests check each of these on every page.
+
+## UI pass notes
+
+### Step 1 (0.5.1)
+
+Built as designed, with these differences and lessons:
+
+- `web/ui/actions.js` holds the model actions (`MODEL_ACTIONS`), `ActionRow` (buttons with ids `<prefix>-<action>`, plus `<prefix>-more`), the right-click menu (`openMenu(at, items)`, drawn once in `#menu-root`) and the keys (`onWindowKey` in the shell, `usePageKeys(fn)` for each page). Items in a menu are `{ id, label, icon, key, danger, disabled: reason, run }` or `{ sep: true }`.
+- On Import, Edit details puts the cursor in the details pane's name box and Set category… in the category picker, rather than opening dialogs: Import's pane already edits them. The message for Set category says nothing moves yet: "Set 3 models to go to Household. Nothing moves until you press Import."
+- An undone change says "Undone: " and the first clause of its message ("Undone: moved Benchy to Office").
+- `sort_undo` keeps the workspaces in memory only, so they're gone after a restart; importing and opening another library clear them. `sort_view` says which change can be undone (`undo`, a sequence number); an older one is refused.
+- Deleting a subcategory with models in it is a category change with a `label` ("Deleted the subcategory Ruins") so Recent changes names it.
+- Dialogs and page keys are set up in layout effects, not after the next paint: Esc pressed just as a dialog opened was missed, and the first box didn't have the cursor yet. A dialog puts the cursor in its first box (or on itself when it has none).
+- The Import page says "Reading the workspace…" until its workspace has loaded; before, it showed the empty workspace for a moment (and the tests could act on it).
+- Files with no viewer are greyed by a class and a tooltip, not `aria-disabled`, since they can still be right-clicked and opened in their own app.
+- Still as before until step 2: Move to category is undone by moving the models back (no journal yet), and the edit form for several models has no undo.
+- Tests: `ui_pass` in `desktop_page.py` (checks 33 to 39: the row, menu and More on every page, keys, the Starred count, no selection from another place, filter chips, the theme cycle, the sidebar's Category menu, greyed files and the file menu, Import's menu, keys and Ctrl+Z, and messages clear of Import's footer). 47 checks in all.

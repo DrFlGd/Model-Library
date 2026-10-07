@@ -61,6 +61,10 @@ pub struct App {
     sort: Mutex<Option<Session>>,
     /// while its folders are read or its models imported, it isn't changed otherwise
     sort_busy: Arc<AtomicBool>,
+    /// the workspace as it was before each of the last changes, newest last, for
+    /// undo: (number, workspace); kept in memory only
+    sort_undo: Mutex<Vec<(u64, Session)>>,
+    sort_seq: AtomicU64,
     /// previews drawn at once
     renders: tokio::sync::Semaphore,
     /// the library folder being watched for changes made outside the app
@@ -90,6 +94,9 @@ fn strings(v: &Value) -> Vec<String> {
 /// What `library()` says before any library was ever opened (the page then asks where).
 const NO_LIBRARY: &str = "No library is open yet.";
 
+/// How many earlier states of the sorting workspace are kept for undo.
+const SORT_UNDO: usize = 20;
+
 /// The preference key the page keeps favourites under; they're stored in the library.
 const FAVS_KEY: &str = "ml-favs";
 
@@ -112,6 +119,8 @@ impl App {
             busy: tokio::sync::Mutex::new(()),
             sort: Mutex::new(None),
             sort_busy: Arc::new(AtomicBool::new(false)),
+            sort_undo: Mutex::new(vec![]),
+            sort_seq: AtomicU64::new(0),
             renders: tokio::sync::Semaphore::new(2),
             watched: Mutex::new(None),
             watcher: Mutex::new(None),
@@ -605,6 +614,7 @@ impl App {
         let mut g = self.sort.lock().unwrap();
         if g.as_ref().is_none_or(|se| se.library != id) {
             *g = Some(Session::load(&path, &id));
+            self.sort_undo.lock().unwrap().clear();
         }
         let se = g.as_mut().unwrap();
         let r = f(se).map_err(e2s)?;
@@ -616,14 +626,52 @@ impl App {
 
     fn sort_view(&self) -> Result<Value, String> {
         let busy = self.sort_busy.load(Ordering::Relaxed);
-        self.with_sort(false, |se| {
+        let v = self.with_sort(false, |se| {
             let mut v = se.to_json();
             v["busy"] = json!(busy);
             Ok(v)
+        });
+        v.map(|mut v| {
+            // the change the page can undo next
+            v["undo"] = json!(self.sort_undo.lock().unwrap().last().map(|u| u.0));
+            v
         })
     }
 
-    /// Put a workspace a job made in place of the one kept.
+    /// Keep the workspace as it was before a change, for undo.
+    fn sort_keep(&self, before: Session) -> u64 {
+        let n = self.sort_seq.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut u = self.sort_undo.lock().unwrap();
+        u.push((n, before));
+        let extra = u.len().saturating_sub(SORT_UNDO);
+        u.drain(..extra);
+        n
+    }
+
+    /// A change to the workspace that can be undone (`sort_undo`).
+    fn sort_change<T>(&self, f: impl FnOnce(&mut Session) -> Result<T>) -> Result<T, String> {
+        let mut before = None;
+        let r = self.with_sort(true, |se| {
+            let copy = se.clone();
+            match f(se) {
+                Ok(r) => {
+                    before = Some(copy);
+                    Ok(r)
+                }
+                Err(e) => {
+                    *se = copy;
+                    Err(e)
+                }
+            }
+        })?;
+        if let Some(se) = before {
+            self.sort_keep(se);
+        }
+        Ok(r)
+    }
+
+    /// Put a workspace a job made in place of the one kept (the one before can be
+    /// put back with `sort_undo`).
     fn sort_replace(&self, se: Session) -> Result<()> {
         let lib = self.library().map_err(|e| anyhow!(e))?;
         let (id, path) = self.sort_file(&lib).map_err(|e| anyhow!(e))?;
@@ -631,7 +679,10 @@ impl App {
             anyhow::bail!("Another library was opened meanwhile.");
         }
         se.save(&path)?;
-        *self.sort.lock().unwrap() = Some(se);
+        let before = self.sort.lock().unwrap().replace(se);
+        if let Some(before) = before.filter(|b| b.library == id) {
+            self.sort_keep(before);
+        }
         Ok(())
     }
 
@@ -702,6 +753,35 @@ impl App {
                     Ok(json!({ "items": n }))
                 }))
             }
+            "sort_undo" => {
+                // put back the workspace as it was before its last change; `rev`:
+                // only if that change is still the last one
+                let prev = {
+                    let mut u = self.sort_undo.lock().unwrap();
+                    match (u.last(), args["rev"].as_u64()) {
+                        (None, _) => return Err("There's nothing to undo in the workspace.".into()),
+                        (Some((n, _)), Some(rev)) if *n != rev => {
+                            return Err(
+                                "That can't be undone any more: the workspace has changed since."
+                                    .into(),
+                            )
+                        }
+                        _ => u.pop().unwrap(),
+                    }
+                };
+                let r = self.with_sort(true, |se| {
+                    if se.library != prev.1.library {
+                        anyhow::bail!("Another library was opened meanwhile.");
+                    }
+                    *se = prev.1.clone();
+                    Ok(())
+                });
+                if let Err(e) = r {
+                    self.sort_undo.lock().unwrap().push(prev);
+                    return Err(e);
+                }
+                j(self.sort_view()?)
+            }
             "sort_send" => {
                 let schema = args["schema"]
                     .as_str()
@@ -720,7 +800,7 @@ impl App {
                     args["keep"] == json!(true),
                     args["keep_self"] != json!(false),
                 );
-                let n = self.with_sort(true, |se| {
+                let n = self.sort_change(|se| {
                     se.send(&ids, &folders, schema.as_deref(), &values, keep, keep_self)
                 })?;
                 let mut v = self.sort_view()?;
@@ -728,12 +808,12 @@ impl App {
                 j(v)
             }
             "sort_update" => {
-                self.with_sort(true, |se| se.update(&ids, &folders, &args["patch"]))?;
+                self.sort_change(|se| se.update(&ids, &folders, &args["patch"]))?;
                 j(self.sort_view()?)
             }
             "sort_group" | "sort_join" | "sort_split" => {
                 let ctx = self.sort_ctx().await?;
-                let id = self.with_sort(true, |se| match cmd {
+                let id = self.sort_change(|se| match cmd {
                     "sort_group" => se.group(
                         &ctx,
                         &ids,
@@ -750,7 +830,7 @@ impl App {
             }
             "sort_clear" => {
                 let imported = args["imported"] == json!(true);
-                self.with_sort(true, |se| {
+                self.sort_change(|se| {
                     se.clear(imported);
                     Ok(())
                 })?;
@@ -863,6 +943,8 @@ impl App {
                         Ok(())
                     })
                     .map_err(|e| anyhow!(e))?;
+                    // what was decided before can't be put back: the files have moved
+                    app.sort_undo.lock().unwrap().clear();
                     let failed = results.iter().filter(|r| r["error"].is_string()).count();
                     Ok(json!({ "results": results, "imported": results.len() - failed, "failed": failed + bad.len(), "mode": if mv { "move" } else { "copy" } }))
                 }))
@@ -955,6 +1037,12 @@ impl App {
                 .with_index(None, |ix, lib| {
                     let mut v = ix.overview();
                     v["loose"] = json!(import::loose_folders(lib, ix));
+                    let favs = strings(&lib.favourites());
+                    v["starred"] = json!(ix
+                        .models
+                        .iter()
+                        .filter(|m| favs.iter().any(|f| f == m.id()))
+                        .count());
                     v
                 })
                 .await?),
@@ -2224,9 +2312,33 @@ mod tests {
         )
         .await;
         assert_eq!(se["changed"], 1);
+        // a change is undone (only while it's the last one): the workspace is as before
+        let office = src.join("Office").display().to_string();
+        let se = call(
+            &app,
+            "sort_send",
+            json!({ "folders": [office], "schema": "home-items", "values": ["Desk"] }),
+        )
+        .await;
+        let rev = se["undo"].as_u64().unwrap();
+        assert!(app
+            .call("sort_undo", json!({ "rev": rev + 1 }))
+            .await
+            .is_err());
+        let se = call(&app, "sort_undo", json!({ "rev": rev })).await;
+        let placed = |se: &Value, name: &str| {
+            se["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|i| i["name"] == name && i["placed"] == true)
+        };
+        assert!(!placed(&se, "Lamp") && placed(&se, "Spoon rest"));
         let job = call(&app, "sort_commit", json!({ "mode": "move" })).await;
         let done = wait(&app, &job).await;
         assert_eq!(done["result"]["imported"], 1, "{done}");
+        // once imported, what was decided before can't be put back
+        assert!(app.call("sort_undo", json!({})).await.is_err());
         assert!(lib
             .join("Home items/Kitchen/Spoon rest/spoon.stl")
             .is_file());

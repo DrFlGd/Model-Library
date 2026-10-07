@@ -1,12 +1,12 @@
 // The selected model's details beside the browse view: its cover, name, authors,
 // category, details from model.json, the schema's fields, and its files (parts
-// keep their sub-folders). Editing opens the details dialog.
+// keep their sub-folders). Its actions are the same row as everywhere (actions.js).
 import { html, useState, useEffect } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui } from "./state.js";
 import { routeHash, schemaScope } from "./context.js";
-import { Icon } from "./icons.js";
-import { api, isDesktop, libraryUrl, setStar, showModelFolder, toast } from "./library.js";
+import { api, libraryUrl } from "./library.js";
+import { ActionRow } from "./actions.js";
 
 const KIND_LABEL = { model: ["3D file", "3D files"], slicer: ["slicer file", "slicer files"], image: ["picture", "pictures"], doc: ["document", "documents"], video: ["video", "videos"], archive: ["archive", "archives"], other: ["other", "other"] };
 
@@ -40,13 +40,9 @@ export function ModelDetails({ id }) {
   if (error) return html`<aside class="inspector" aria-label="Model details"><p class="warn-note" role="alert">${error}</p></aside>`;
   if (!m) return html`<aside class="inspector" aria-label="Model details"></aside>`;
   const schema = s.overview?.schemas?.find((x) => x.id === m.schema);
-  const fav = s.favs.includes(m.id);
   const d = m.details || {};
   const source = d.source?.url || (typeof d.source === "string" ? d.source : "");
   const fields = (schema?.fields || []).filter((f) => fieldText(f, m.fields?.[f.key]));
-  const star = async () => {
-    try { await setStar(m, !fav); } catch (e) { toast(`Couldn't star it: ${e.message || e}`, 6000); }
-  };
   const cover = m.files?.cover;
   return html`<aside class="inspector" aria-label="Model details" id="model-details">
     ${cover ? html`<span class="insp-thumb"><img src=${libraryUrl(`${m.rel}/${cover}`)} alt="" /></span>` : null}
@@ -56,14 +52,7 @@ export function ModelDetails({ id }) {
       <p class="insp-sub">${schema ? html`<a href=${routeHash(`browse:${schemaScope(schema.id)}`)}>${schema.name}</a>${m.path.map((v, i) => html` › <a href=${routeHash(`browse:${schemaScope(schema.id, m.path.slice(0, i + 1))}`)}>${v}</a>`)}`
         : html`<a href=${routeHash("browse:unsorted")}>Unsorted</a>`}</p>
     </div>
-    <div class="insp-actions">
-      <a class="button primary compact" id="details-open" href=${routeHash(`model:${m.id}`)}>${Icon.eye(15)} Open</a>
-      <button type="button" class="ghost" id="details-star" aria-pressed=${fav ? "true" : "false"} onClick=${star} disabled=${s.readOnly}>${Icon.star(15, fav)} ${fav ? "Starred" : "Star"}</button>
-      <button type="button" class="ghost" id="details-edit" onClick=${() => ui.set({ dialog: { type: "edit-model", model: m, schema } })} disabled=${s.readOnly}>${Icon.edit(15)} Edit details…</button>
-      <button type="button" class="ghost" id="details-move" title="Move to category" aria-label="Move to category" disabled=${s.readOnly}
-        onClick=${() => ui.set({ dialog: { type: "move-models", models: [m] } })}>${Icon.move(15)}</button>
-      ${isDesktop() ? html`<button type="button" class="ghost" title="Show in folder" aria-label="Show in folder" onClick=${() => showModelFolder(m)}>${Icon.folder(15)}</button>` : null}
-    </div>
+    <${ActionRow} targets=${[m]} ctx=${{ page: "browse" }} idPrefix="details" />
     <dl class="insp-dl" id="details-list">
       ${d.released ? html`<dt>Released</dt><dd>${d.released}</dd>` : null}
       ${source ? html`<dt>Source</dt><dd><a href=${source} target="_blank" rel="noopener">${source.replace(/^https?:\/\/(www\.)?/, "")}</a></dd>` : null}

@@ -31,6 +31,11 @@ aside, undone and deleted.
 Phase 1: making a schema, hand-made model folders listed under their categories,
 search with typed filters, a model's details and files, editing details into
 model.json, starring, and 10,000 generated models read and searched in time.
+UI pass, step 1: the same action row and right-click menu, the keys (arrows,
+Shift, Ctrl+A, Esc, E, M, S, Ctrl+Z), Undo in messages, the Category menu, a
+selection that doesn't follow into another place, filter chips that come off,
+the theme button's four choices, Starred's count, Import's menu, keys and undo,
+messages clear of Import's footer, and files with no viewer greyed.
 Writes <out>/library-info.json and <out>/library.zip for the cross-platform check.
 """
 import argparse
@@ -252,8 +257,25 @@ async def send_to(pg, schema="", place=None, new=None):
         await pg.select_option("#send-place", place)
     if new:
         await pg.fill("#send-new", new)
+    await clear_toast(pg)
     await pg.click("#send-go")
-    await pg.wait_for_function("() => /^Sent/.test(document.querySelector('.toast')?.textContent || '')")
+    await pg.wait_for_function("() => /to go to/.test(document.querySelector('.toast span')?.textContent || '')")
+
+
+async def clear_toast(pg):
+    await pg.evaluate("() => { const t = document.querySelector('.toast'); if (t) { t.textContent = ''; t.hidden = true; } }")
+
+
+async def toast_text(pg, pattern, timeout=30000):
+    """Wait for a message matching `pattern` (a JS regex source); its text."""
+    await pg.wait_for_function("p => new RegExp(p).test(document.querySelector('.toast span')?.textContent || '')", arg=pattern, timeout=timeout)
+    return await pg.inner_text(".toast span")
+
+
+async def category_menu(pg, action):
+    """Choose from the Category menu of the category page shown."""
+    await pg.click("#category-menu")
+    await pg.click(f'#context-menu [data-action="{action}"]')
 
 
 async def phase2(pg):
@@ -291,7 +313,7 @@ async def phase2(pg):
     # (Tyrant Prime's model.json says where it goes: it's sorted already)
     await pick_rows(pg, "benchy", "dragon")
     await send_to(pg, "")
-    await pg.wait_for_function("() => /Import 5 sorted/.test(document.querySelector('#import-go')?.textContent || '')")
+    await pg.wait_for_function("() => /Import 5 models/.test(document.querySelector('#import-go')?.textContent || '')")
     await pg.evaluate("() => { window.__forceCopy = true; }")  # as across drives: copy, check, delete
     title = await import_and_wait(pg)
     t = "Wargames/Warhammer 40k/Tyranid"
@@ -306,7 +328,7 @@ async def phase2(pg):
     await pg.screenshot(path=str(out / "10-imported.png"), full_page=True)
 
     # 16. adding one model folder by copy, after starting the workspace again
-    await pg.click("#import-clear")  # asks first (the test answers yes)
+    await pg.click("#import-clear")  # can be undone, so it doesn't ask
     await pg.wait_for_selector("#import-clear", state="detached")
     put(home / "Elsewhere/Gargoyle/gargoyle.stl")
     pick(home / "Elsewhere/Gargoyle")
@@ -337,7 +359,7 @@ async def phase2(pg):
     await pg.click(".card:has-text('dragon')")
     await pg.click(".card:has-text('Gargoyle')", modifiers=["Control"])
     await pg.wait_for_selector("#picked-panel")
-    await pg.click("#move-picked")
+    await pg.click("#picked-move")
     await pg.select_option("#move-schema", "wargames")
     await pg.select_option("#move-place", "Warhammer 40k\x1fNecrons")
     await pg.click("#move-dialog button[type=submit]")
@@ -352,7 +374,7 @@ async def phase2(pg):
     await pg.click("#rescan")
     await pg.wait_for_selector("#home-loose .sort-loose")
     await pg.click("#home-loose .sort-loose")
-    await pg.wait_for_selector("#sort-page")
+    await pg.wait_for_selector("#sort-page[data-ready]")
     await pg.wait_for_function("() => !document.querySelector('#import-progress')")
     await sort_rows(pg)
     await pick_rows(pg, "Lictor")
@@ -391,7 +413,7 @@ async def phase3(pg):
         z.writestr("Extras/shield.stl", cube(15))
         z.writestr("__MACOSX/Extras/._shield.stl", "x")
     await pg.goto(B + "#/import")
-    await pg.wait_for_selector("#sort-page")
+    await pg.wait_for_selector("#sort-page[data-ready]")
     pick(src)
     await pg.click("#import-add-folder")
     await pg.wait_for_function("() => !document.querySelector('#import-progress')")
@@ -522,7 +544,7 @@ async def phase4(pg):
     before = sorted(x.name for x in (t / "Tyranid").iterdir())
     # 25. renaming a subcategory moves its folders (with a preview first)
     await pg.goto(B + "#/browse/schema/wargames/Warhammer%2040k/Tyranid")
-    await pg.click("#rename-node")
+    await category_menu(pg, "rename-subcategory")
     await pg.fill("#rename-name", "Tyranids")
     await pg.wait_for_selector("#change-preview[data-moving]")
     preview = await pg.inner_text("#change-preview")
@@ -549,7 +571,7 @@ async def phase4(pg):
     # 27. merging: Necrons into Tyranid
     nec = sorted(x.name for x in (t / "Necrons").iterdir())
     await pg.goto(B + "#/browse/schema/wargames/Warhammer%2040k/Necrons")
-    await pg.click("#rename-node")
+    await category_menu(pg, "rename-subcategory")
     await pg.fill("#rename-name", "Tyranid")
     await pg.wait_for_selector("#rename-merge")
     await pg.wait_for_selector("#change-preview[data-moving]")
@@ -561,8 +583,9 @@ async def phase4(pg):
     # 28. editing the category's tree: a new branch three deep and another at the
     # top (nothing moves), then Space Marines moved out a level and a new top folder
     await pg.goto(B + "#/browse/schema/wargames")
-    await pg.click("#edit-schema")
+    await category_menu(pg, "edit-category")
     await pg.wait_for_selector("#es-tree")
+    no_delete = await pg.locator("#edit-schema-dialog .danger-text").count() == 0
     await pg.click('#es-tree .st-row[data-path="Terrain"] .st-add')
     await pg.keyboard.type("Buildings")
     await pg.click('#es-tree .st-row[data-path="Terrain/Buildings"] .st-add')
@@ -576,7 +599,7 @@ async def phase4(pg):
     sch = json.loads((library / "_library/schemas/wargames.json").read_text())
     deep = (library / "Wargames/Terrain/Buildings/Ruins").is_dir() and (library / "Wargames/Board games").is_dir() and t.is_dir()
     tops = [x["name"] for x in sch["subcategories"]]
-    await pg.click("#edit-schema")
+    await category_menu(pg, "edit-category")
     await pg.wait_for_selector("#es-tree")
     counted = await pg.inner_text('#es-tree .st-row[data-path="Warhammer 40k"] .st-count')
     await pg.click('#es-tree .st-row[data-path="Warhammer 40k/Space Marines"] .st-out')
@@ -589,39 +612,65 @@ async def phase4(pg):
         and (library / "Tabletop/Space Marines/Captain (Jo Smith)").is_dir() and (library / "Tabletop/Terrain/Buildings/Ruins").is_dir()
     sch = json.loads((library / "_library/schemas/wargames.json").read_text())
     check("the category's tree is edited: new branches of any depth, and a moved subcategory and new top folder move its models",
-          deep and tops == ["Board games", "Terrain", "Warhammer 40k"] and counted.strip().isdigit() and moved
+          deep and tops == ["Board games", "Terrain", "Warhammer 40k"] and counted.strip().isdigit() and moved and no_delete
           and [x["name"] for x in sch["subcategories"]] == ["Board games", "Space Marines", "Terrain", "Warhammer 40k"], (deep, tops, counted, moved, sch.get("subcategories")))
 
     # 28b. subcategories added on a category's pages, at any depth, kept with no models
     t = library / "Tabletop/Warhammer 40k"
     await pg.goto(B + "#/browse/schema/wargames/Warhammer%2040k")
     for name in ("Orks", "Aeldari"):
-        await pg.click("#add-subcategory")
+        await category_menu(pg, "add-subcategory")
         await pg.fill("#subcat-name", name)
         await pg.click("#subcat-dialog button[type=submit]")
         await pg.wait_for_selector("#subcat-dialog", state="detached")
     await pg.goto(B + "#/browse/schema/wargames/Terrain/Buildings/Ruins")
-    await pg.click("#add-subcategory")
+    await category_menu(pg, "add-subcategory")
     await pg.fill("#subcat-name", "Gothic")
     await pg.click("#subcat-dialog button[type=submit]")
     await pg.wait_for_selector("#subcat-dialog", state="detached")
     await pg.goto(B + "#/browse/schema/wargames/Warhammer%2040k/Orks")
-    await pg.wait_for_selector("#remove-subcategory")
+    await count(pg)
     ov = await pg.evaluate("async () => (await window.__modlib.platform.api('library_overview')).schemas[0].tree")
     w40k = [c["value"] for c in next(x for x in ov if x["value"] == "Warhammer 40k")["children"]]
     made = (t / "Orks").is_dir() and (t / "Aeldari").is_dir() and (library / "Tabletop/Terrain/Buildings/Ruins/Gothic").is_dir()
+    await pg.click("#category-menu")
+    await pg.wait_for_selector("#context-menu")
+    items = await pg.eval_on_selector_all("#context-menu .menu-label", "els => els.map(e => e.textContent)")
     await pg.screenshot(path=str(out / "18-subcategories.png"))
-    await pg.click("#remove-subcategory")
+    await pg.click('#context-menu [data-action="delete-subcategory"]')  # empty: at once, with Undo
     await pg.wait_for_function("() => !location.hash.includes('Orks')")
     gone = not (t / "Orks").exists()
-    check("subcategories are added at any depth, kept with no models, and removed", made and gone and "Orks" in w40k and "Aeldari" in w40k, (made, gone, w40k))
+    await toast_text(pg, "^Deleted the subcategory Orks")
+    await pg.click(".toast .toast-action")
+    await toast_text(pg, "^Undone")
+    back = (t / "Orks").is_dir()
+    check("subcategories are added at any depth, kept with no models, and deleted with Undo", made and gone and back and "Orks" in w40k and "Aeldari" in w40k
+          and items == ["Add subcategory…", "Edit category…", "Rename or move…", "Delete subcategory"], (made, gone, back, w40k, items))
+    # one with models in it: they move up a level, after a list of what moves
+    model_folder("Tabletop/Terrain/Buildings/Ruins/Tower", {"tower.stl": cube(6)})
+    await api(pg, "library_scan", {"full": False})
+    await pg.goto(B + "#/browse/schema/wargames/Terrain/Buildings/Ruins")
+    await pg.reload()
+    await pg.wait_for_selector(".card:has(.card-name:text-is('Tower'))", timeout=30000)
+    await pg.click("#category-menu")
+    await pg.click('#context-menu [data-action="delete-subcategory"]')
+    await pg.wait_for_selector("#delete-subcategory-dialog #change-preview[data-moving='1']", timeout=30000)
+    red = "danger" in (await pg.get_attribute("#delete-subcategory-dialog button[type=submit]", "class"))
+    await pg.click("#delete-subcategory-dialog button[type=submit]")
+    await pg.wait_for_selector("#delete-subcategory-dialog", state="detached", timeout=60000)
+    up = (library / "Tabletop/Terrain/Buildings/Tower/tower.stl").is_file() and not (library / "Tabletop/Terrain/Buildings/Ruins").exists()
+    await toast_text(pg, "^Deleted the subcategory Ruins")
+    await pg.keyboard.press("Control+z")
+    await toast_text(pg, "^Undone", 60000)
+    down = (library / "Tabletop/Terrain/Buildings/Ruins/Tower/tower.stl").is_file() and (library / "Tabletop/Terrain/Buildings/Ruins/Gothic").is_dir()
+    check("a subcategory with models is deleted after a list of what moves up, and Ctrl+Z puts it back", red and up and down, (red, up, down))
 
     # 29. several models' details at once
     await pg.goto(B + "#/browse/schema/wargames")
     await pg.wait_for_selector(".card:has(.card-name:text-is('Gargoyle'))")
     await pg.click(".card:has(.card-name:text-is('Gargoyle'))")
     await pg.click(".card:has(.card-name:text-is('dragon'))", modifiers=["Control"])
-    await pg.click("#edit-picked")
+    await pg.click("#picked-edit")
     await pg.fill("#bulk-tags-add", "painted, display")
     await pg.fill("#bulk-license", "CC-BY")
     await pg.click("#bulk-dialog button[type=submit]")
@@ -647,7 +696,7 @@ async def phase5(pg):
     put(share / "latch.stl", cube(15))
     await pg.goto(B + "#/import")
     await pg.reload()  # the new category in the pickers
-    await pg.wait_for_selector("#sort-page")
+    await pg.wait_for_selector("#sort-page[data-ready]")
     if await pg.locator("#import-clear").count():
         await pg.click("#import-clear")
         await pg.wait_for_selector("#import-clear", state="detached")
@@ -661,11 +710,11 @@ async def phase5(pg):
     await pg.uncheck("#send-keep-self")
     await pg.screenshot(path=str(out / "19-sort-folders.png"))
     await pg.click("#send-go")
-    await pg.wait_for_function("() => /^Sent 3 models/.test(document.querySelector('.toast')?.textContent || '')")
+    await toast_text(pg, "^Set 3 models to go to")
     names = sorted(await sort_rows(pg))
     await pick_rows(pg, "hinge", "latch")
     await pg.click("#sort-group")
-    await pg.wait_for_function("() => /^Grouped/.test(document.querySelector('.toast')?.textContent || '')")
+    await toast_text(pg, "^Combined into one model")
     # the new model's details (named after its folder) before renaming it
     await pg.wait_for_function("() => document.querySelector('#details-name')?.value === 'NAS share'")
     await pg.fill("#details-name", "Hinge and latch")
@@ -731,14 +780,15 @@ async def phase5(pg):
     summary = await pg.inner_text("#dupes-summary")
     await pg.screenshot(path=str(out / "22-duplicates.png"), full_page=True)
     hashed = json.loads((h / "Office/Lamp/model.json").read_text()).get("hashes", {})
+    await clear_toast(pg)
     await group.locator(".dupe-set-aside").click()
-    await pg.wait_for_selector("#dupes-done", timeout=30000)
+    await toast_text(pg, "^Set aside 1 copy")
     aside = library / "_library/set-aside/Unsorted/Bracket"
     set_aside = aside.is_dir() and not (library / "Unsorted/Bracket").exists()
     listed = (await api(pg, "models_query", {"scope": "unsorted", "q": "bracket"}))["total"]
     check("duplicates are found by their contents and an extra copy is set aside", keep == "Bracket copy" and "copies" in summary and set_aside and listed == 1
           and "sha256" in hashed.get("lamp.stl", {}), (keep, summary, set_aside, listed, hashed))
-    await pg.click("#dupes-undo")
+    await pg.click(".toast .toast-action")
     await pg.wait_for_function("() => /back where they were/.test(document.querySelector('.toast')?.textContent || '')", timeout=30000)
     back = (library / "Unsorted/Bracket/bracket.stl").is_file() and not aside.exists()
     await group.wait_for(timeout=30000)
@@ -753,6 +803,151 @@ async def phase5(pg):
     await pg.wait_for_selector("#recent-changes")
     recent = await pg.inner_text("#recent-changes")
     check("setting aside is undone, or the copies deleted after asking", back and gone and "Set aside 1 duplicate copy" in recent and "copies deleted" in recent, (back, gone, recent))
+
+
+async def labels_of(pg, sel):
+    return await pg.eval_on_selector_all(sel, "els => els.map(e => e.textContent.trim())")
+
+
+async def ui_pass(pg):
+    # 33. one action row, and the same actions on right-click
+    await pg.goto(B + "#/browse/unsorted")
+    await count(pg)
+    first = pg.locator(".results .card").first
+    await first.click()
+    await pg.wait_for_selector("#model-details .action-row")
+    row = await labels_of(pg, "#model-details .action-row button")
+    await first.click(button="right")
+    await pg.wait_for_selector("#context-menu")
+    menu = await labels_of(pg, "#context-menu .menu-label")
+    await pg.screenshot(path=str(out / "24-right-click.png"))
+    await pg.keyboard.press("Escape")
+    await pg.wait_for_selector("#context-menu", state="detached")
+    await pg.click("#details-more")
+    more = await labels_of(pg, "#context-menu .menu-label")
+    await pg.keyboard.press("Escape")
+    check("the details panel and the right-click menu have the same actions, in the same order",
+          row == ["Open", "Edit details…", "Move to category…", "Star", "Show in folder", "More"]
+          and menu == ["Open", "Edit details…", "Move to category…", "Star", "Show in folder", "Make a new preview", "Copy folder path"]
+          and more == ["Make a new preview", "Copy folder path"], (row, menu, more))
+
+    # 34. keys: arrows and Shift, Ctrl+A, Esc, E, M, S, Ctrl+Z
+    n = int((await count(pg)).split()[0])
+    await first.click()
+    a = await first.get_attribute("data-model")
+    await pg.keyboard.press("ArrowRight")
+    b = await pg.evaluate("() => [...document.querySelectorAll('.results [aria-selected=true]')].map(e => e.dataset.model)")
+    await pg.keyboard.press("Shift+ArrowLeft")
+    two = await pg.inner_text("#picked-panel h2")
+    await pg.keyboard.press("Control+a")
+    every = await pg.inner_text("#picked-panel h2")
+    await pg.keyboard.press("Escape")
+    cleared = await pg.locator(".results [aria-selected=true]").count()
+    await first.click()
+    await pg.keyboard.press("e")
+    await pg.wait_for_selector("#details-dialog")
+    typing_in = await pg.evaluate("() => document.activeElement?.id")
+    await pg.keyboard.press("Escape")
+    await pg.wait_for_selector("#details-dialog", state="detached")
+    await pg.keyboard.press("m")
+    await pg.wait_for_selector("#move-dialog")
+    await pg.keyboard.press("Escape")
+    await pg.wait_for_selector("#move-dialog", state="detached")
+    stars = await pg.inner_text('.sidebar a[href="#/browse/favs"] .nav-count')
+    await pg.keyboard.press("s")
+    said = await toast_text(pg, "^Starred")
+    await pg.wait_for_function("() => document.querySelector('.sidebar a[href=\"#/browse/favs\"] .nav-count')?.textContent === '2'")
+    await pg.keyboard.press("Control+z")
+    await toast_text(pg, "^Undone")
+    await pg.wait_for_function("() => document.querySelector('.sidebar a[href=\"#/browse/favs\"] .nav-count')?.textContent === '1'")
+    favs = json.loads((library / "_library/library.json").read_text()).get("favourites", [])
+    check("keys select, edit, move, star and undo, and Starred counts its models",
+          b and b[0] != a and len(b) == 1 and two == "2 models selected" and every == f"{n} models selected" and cleared == 0
+          and typing_in == "edit-name" and said.startswith("Starred") and stars == "1" and len(favs) == 1, (a, b, two, every, cleared, typing_in, said, stars, favs))
+
+    # 35. a model selected in one place isn't shown in another (bug: it was)
+    await first.click()
+    await pg.goto(B + "#/browse/schema/household/Office")
+    await count(pg)
+    leaked = await pg.locator("#model-details").count()
+    check("the details panel doesn't show a model from another place", leaked == 0, leaked)
+
+    # 36. filter chips come off again, the theme button has the four choices
+    await pg.goto(B + "#/browse/all")
+    await count(pg)
+    chip = pg.locator(".filters .chip-btn").first
+    f = await chip.get_attribute("data-filter")
+    await chip.click()
+    await pg.wait_for_function("f => document.querySelector('#search').value.includes(f)", arg=f)
+    await pg.click(f".filters .chip-btn[data-filter={json.dumps(f)}]")  # a JSON string is a CSS string
+    await pg.wait_for_function("() => document.querySelector('#search').value === ''")
+    themes = []
+    for _ in range(4):
+        await pg.click("#theme-toggle")
+        themes.append(await pg.get_attribute("#theme-toggle", "data-theme"))
+    check("filter chips come off again, and the theme button goes back to following the system", themes == ["light", "dark", "night", "system"], (f, themes))
+
+    # 37. the sidebar's Category menu; deleting a category is red and asks
+    await pg.click('.sidebar a[href="#/browse/schema/household"]', button="right")
+    items = await labels_of(pg, "#context-menu .menu-label")
+    await pg.click('#context-menu [data-action="delete-category"]')
+    await pg.wait_for_selector("#delete-schema-dialog")
+    red = "danger" in (await pg.get_attribute("#delete-schema-dialog button[type=submit]", "class"))
+    await pg.screenshot(path=str(out / "25-delete-category.png"))
+    await pg.click("#delete-schema-dialog .dialog-actions .ghost")
+    await pg.wait_for_selector("#delete-schema-dialog", state="detached")
+    check("a category's menu is on the sidebar too, and Delete category is red", items == ["Add subcategory…", "Edit category…", "Delete category…"] and red, (items, red))
+
+    # 38. files with no viewer are greyed, with a reason
+    put(library / "Unsorted/Knight Armour/settings.ini", "x")
+    await api(pg, "library_scan", {"full": False})
+    await pg.goto(B + "#/browse/unsorted")
+    await pg.dblclick(".card:has(.card-name:text-is('Knight Armour'))")
+    await pg.wait_for_selector("#part-tree [data-file='settings.ini']", timeout=30000)
+    greyed = "no-view" in (await pg.get_attribute("#part-tree [data-file='settings.ini']", "class"))
+    why = await pg.get_attribute("#part-tree [data-file='settings.ini']", "title") or ""
+    await pg.click("#part-tree [data-file='settings.ini']", button="right")
+    file_menu = await labels_of(pg, "#context-menu .menu-label")
+    await pg.keyboard.press("Escape")
+    mp_row = await labels_of(pg, "#model-page .action-row button")
+    check("files with no viewer are greyed and open in their own app; the model page has the same row", greyed and "no viewer" in why
+          and file_menu == ["Open in its own app", "Show in folder"] and mp_row == ["Edit details…", "Move to category…", "Star", "Show in folder", "More"], (greyed, why, file_menu, mp_row))
+
+    # 39. Import: right-click, Ctrl+A and Esc, Ctrl+Z, and messages clear of the footer
+    more = home / "More"
+    put(more / "Widget/widget.stl", cube(5))
+    put(more / "Gizmo/gizmo.stl", cube(6))
+    await pg.goto(B + "#/import")
+    await pg.wait_for_selector("#sort-page[data-ready]")
+    if await pg.locator("#import-clear").count():
+        await pg.click("#import-clear")
+        await pg.wait_for_selector("#import-clear", state="detached")
+    pick(more)
+    await pg.click("#import-sort")
+    await pg.wait_for_function("() => !document.querySelector('#import-progress')")
+    await sort_rows(pg)
+    row = '#sort-list tr[data-name="Widget"]'
+    await pg.click(row, button="right")
+    imenu = await labels_of(pg, "#context-menu .menu-label")
+    await pg.keyboard.press("Escape")
+    await pg.click(row + " .sw-name")
+    await pg.keyboard.press("Control+a")
+    both = await pg.inner_text("#sort-picked")
+    await pg.keyboard.press("Escape")
+    none = await pg.locator("#sort-actions").count()
+    await pick_rows(pg, "Widget")
+    await send_to(pg, "household")
+    placed = await pg.inner_text(row)
+    await pg.keyboard.press("Control+z")
+    await toast_text(pg, "^Undone")
+    await pg.wait_for_function("r => document.querySelector(r)?.textContent.includes('No category')", arg=row)
+    apart = await pg.evaluate("() => { const t = document.querySelector('.toast').getBoundingClientRect(); const f = document.querySelector('.sw-go').getBoundingClientRect(); return t.bottom <= f.top + 1 || t.top >= f.bottom - 1; }")
+    await pg.screenshot(path=str(out / "26-import-undo.png"))
+    check("Import has the same right-click menu, keys and Undo, and messages don't cover its footer",
+          imenu[:3] == ["Edit details", "Set category…", "Show in folder"] and "Skip" in imenu and both == "2 models selected" and none == 0
+          and "Household" in placed and apart, (imenu, both, none, placed, apart))
+    await pg.click("#import-clear")
+    await pg.wait_for_selector("#import-clear", state="detached")
 
 
 def big_library():
@@ -775,7 +970,7 @@ async def main():
             await ctx.add_init_script(path=str(SHIM))
             pg = await ctx.new_page()
             pg.on("pageerror", lambda e: errors.append(str(e)))
-            pg.on("dialog", lambda d: asyncio.ensure_future(d.accept()))  # "Start again" asks first
+            pg.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
             pg.on("console", lambda m: errors.append(f"{m.text} ({m.location.get('url', '')})") if m.type == "error" and "net::ERR_" not in m.text and "status of 400" not in m.text else None)  # a file that can't be drawn says so on the page
             await pg.goto(B)
             await pg.wait_for_selector("#first-run", timeout=30000)
@@ -800,13 +995,14 @@ async def main():
             await pg.wait_for_selector("#no-results")
             unsorted = await pg.inner_text(".browse-title h1")
             active = await pg.inner_text(".sidebar .nav-link.active .nav-label")
-            check("the menu's places open", labels == ["Home", "Import", "All models", "Unsorted", "Favourites", "Duplicates", "Settings"] and unsorted == "Unsorted" and active == "Unsorted", (labels, unsorted, active))
+            check("the menu's places open", labels == ["Home", "Import", "All models", "Unsorted", "Starred", "Duplicates", "Settings"] and unsorted == "Unsorted" and active == "Unsorted", (labels, unsorted, active))
 
             await phase1(pg)
             await phase2(pg)
             await phase3(pg)
             await phase4(pg)
             await phase5(pg)
+            await ui_pass(pg)
 
             # 3. renaming the library
             await pg.click('.sidebar a[href="#/settings"]')

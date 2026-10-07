@@ -1,18 +1,22 @@
 // Looking at a model's files (docs/PLAN.md, "Phase 3 design" and "Phase 5
 // design"), on the model page and in the sorting workspace's details pane: a
 // large viewer for its 3D files, pictures, documents and videos, and its files in
-// four views: Folders (the part tree, with the variant switch), All files (one
-// list), By type, and Grid (a preview of each 3D file and picture). ZIPs unfold
-// into their entries, which open straight from the archive.
+// four views: Folders (the part tree, with the variant switch), List (every file),
+// By type, and Grid (a preview of each 3D file and picture). ZIPs unfold into
+// their entries, which open straight from the archive. Right-click a library
+// model's file to open it in its own app, show it in its folder or use it as the
+// cover.
 //
 // `src` says whose files they are: { kind: "model", id, rel } for a model in the
 // library, { kind: "sort", id } for one in the sorting workspace.
 import { html, useState, useEffect, useRef } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui, resolvedTheme, setPref } from "./state.js";
+import { ctx } from "./context.js";
 import { Icon } from "./icons.js";
 import { api, apiBytes, isDesktop, libraryUrl, openModelFile, toast, loadOverview } from "./library.js";
 import { size } from "./details.js";
+import { openMenu, typing } from "./actions.js";
 
 export const MESH = /\.(stl|obj|3mf)$/i;
 const MD = /\.(md|markdown|txt)$/i;
@@ -122,15 +126,47 @@ function TreeNode({ node, src, open, current, depth, names }) {
     ${node.files.map((f) => html`<${FileRow} key=${f.rel} f=${f} name=${f.name} src=${src} open=${open} current=${current} />`)}`;
 }
 
-/** One file in a list: opens it (a ZIP unfolds into its entries). */
+/** Whether a file can be opened in its own app from here (a library model's, on the desktop). */
+const ownApp = (src) => src.kind === "model" && isDesktop();
+const NO_VIEW = "This app has no viewer for this kind of file";
+
+/** A file's right-click menu: open it in its own app, show it in its folder, use it as the cover. */
+function fileMenu(e, src, f, open) {
+  const t = target(f);
+  const lib = ui.get().library;
+  const dir = f.rel.includes("/") ? f.rel.slice(0, f.rel.lastIndexOf("/")) : "";
+  const items = [
+    ...(t ? [{ id: "view", label: "Show here", icon: "eye", run: () => open(t) }] : []),
+    ...(ownApp(src) ? [
+      { id: "open-own", label: "Open in its own app", icon: "external", run: () => openModelFile({ rel: src.rel }, f.rel) },
+      { id: "folder", label: "Show in folder", icon: "folder", run: () => ctx.platform.library.openPath([lib.path, src.rel, dir].filter(Boolean).join("/")) },
+    ] : []),
+    ...(src.kind === "model" && f.kind === "image" ? [{ id: "cover", label: "Use as cover", icon: "image", disabled: lib?.read_only ? "The library is read-only." : false, run: () => useAsCover(src.id, f.rel) }] : []),
+  ];
+  openMenu(e, items);
+}
+
+async function useAsCover(id, file) {
+  try {
+    await api("model_cover", { id, file });
+    await loadOverview();
+    toast("Saved as the model's cover.");
+  } catch (e) { toast(`Couldn't set the cover: ${e.message || e}`, 6000); }
+}
+
+/** One file in a list: opens it (a ZIP unfolds into its entries). A file with no
+ *  viewer here is greyed; double-click opens it in its own app. */
 function FileRow({ f, name, folder, src, open, current }) {
   const [zipOpen, setZipOpen] = useState(false);
   const t = target(f);
   const zip = /\.zip$/i.test(f.rel);
   const on = current?.file === f.rel && !current?.entry;
+  const none = !t && !zip;
   return html`<li class="tree-file">
-    <button type="button" class=${`tree-btn${on ? " on" : ""}`} data-file=${f.rel} aria-expanded=${zip ? (zipOpen ? "true" : "false") : null}
-      onClick=${() => (zip ? setZipOpen(!zipOpen) : t ? open(t) : null)}>
+    <button type="button" class=${`tree-btn${on ? " on" : ""}${none ? " no-view" : ""}`} data-file=${f.rel} aria-expanded=${zip ? (zipOpen ? "true" : "false") : null}
+      title=${none ? `${NO_VIEW}${ownApp(src) ? ": double-click to open it in its own app" : ""}` : null}
+      onClick=${() => (zip ? setZipOpen(!zipOpen) : t ? open(t) : null)} onDblClick=${none && ownApp(src) ? () => openModelFile({ rel: src.rel }, f.rel) : null}
+      onContextMenu=${(e) => fileMenu(e, src, f, open)}>
       <span class="tree-icon">${kindIcon(f.kind)}</span>
       <span class="tree-name">${name}${folder ? html`<span class="tree-folder muted">${folder}</span>` : null}</span>
       <span class="muted tree-size">${size(f.size)}</span></button>
@@ -155,9 +191,9 @@ function AllFiles({ files, src, open, current }) {
   rows.sort(cmp);
   return html`<div class="all-files" id="all-files">
     <div class="parts-tools">
-      <input type="search" class="parts-filter" placeholder="Filter files" aria-label="Filter files" value=${q} onInput=${(e) => setQ(e.target.value)} />
-      <select aria-label="Sort files" class="parts-sort" value=${by} onChange=${(e) => setBy(e.target.value)}>
-        <option value="folder">By folder</option><option value="name">By name</option><option value="size">Largest first</option><option value="kind">By kind</option>
+      <input type="search" class="parts-filter" placeholder="Search files" aria-label="Search files" value=${q} onInput=${(e) => setQ(e.target.value)} />
+      <select aria-label="Sort files" title="Sort" class="parts-sort" value=${by} onChange=${(e) => setBy(e.target.value)}>
+        <option value="folder">Folder</option><option value="name">Name</option><option value="size">Largest first</option><option value="kind">Kind</option>
       </select>
     </div>
     <ul class="tree flat">${rows.map(({ f, folder, name }) => html`<${FileRow} key=${f.rel} f=${f} name=${name} folder=${folder} src=${src} open=${open} current=${current} />`)}</ul>
@@ -222,10 +258,10 @@ export function LazyPreview({ cacheKey, ask, fallback, alt = "" }) {
 
 /** A tile for each 3D file and picture (and the rest as icons). */
 function FileGrid({ files, src, open, current }) {
-  const [all, setAll] = useState(false);
+  const [limit, setLimit] = useState(120);
   const order = (f) => (MESH.test(f.rel) || f.kind === "image" ? 0 : 1);
   const list = [...files].sort((a, b) => order(a) - order(b) || a.rel.localeCompare(b.rel));
-  const shown = all ? list : list.slice(0, 120);
+  const shown = list.slice(0, limit);
   return html`<div class="file-grid-wrap" id="file-grid"><div class="file-grid">${shown.map((f) => {
     const [, name] = splitRel(f.rel);
     const t = target(f);
@@ -235,13 +271,14 @@ function FileGrid({ files, src, open, current }) {
       : MESH.test(f.rel)
         ? html`<${LazyPreview} cacheKey=${`${src.kind}:${src.id}:${f.rel}:${f.size}`} ask=${() => api("file_preview", { ...srcArgs(src), file: f.rel })} fallback=${html`<span class="tile-icon">${kindIcon(f.kind, 28)}</span>`} />`
         : html`<span class="tile-icon">${kindIcon(f.kind, 28)}</span>`;
-    return html`<button type="button" key=${f.rel} class=${`file-tile${on ? " on" : ""}`} data-file=${f.rel} title=${f.rel} disabled=${!t} onClick=${() => t && open(t)}>
+    return html`<button type="button" key=${f.rel} class=${`file-tile${on ? " on" : ""}${t ? "" : " no-view"}`} data-file=${f.rel} title=${t ? f.rel : `${f.rel}: ${NO_VIEW.toLowerCase()}`}
+      onClick=${() => t && open(t)} onDblClick=${!t && ownApp(src) ? () => openModelFile({ rel: src.rel }, f.rel) : null} onContextMenu=${(e) => fileMenu(e, src, f, open)}>
       <span class="tile-pic">${pic}</span><span class="tile-name">${name}</span></button>`;
   })}</div>
-  ${list.length > shown.length ? html`<button type="button" class="ghost" onClick=${() => setAll(true)}>Show all ${list.length}</button>` : null}</div>`;
+  ${list.length > shown.length ? html`<button type="button" class="ghost" onClick=${() => setLimit(limit + 240)}>Show more (${list.length - shown.length} left)</button>` : null}</div>`;
 }
 
-const VIEWS = [["folders", "Folders"], ["all", "All files"], ["type", "By type"], ["grid", "Grid"]];
+const VIEWS = [["folders", "Folders"], ["all", "List"], ["type", "By type"], ["grid", "Grid"]];
 
 /** A model's files in the view chosen last (Folders, All files, By type, Grid). */
 export function PartsViews({ src, files, names, open, current, treeKey }) {
@@ -301,9 +338,9 @@ function Stage3D({ src, model, current, onInfo }) {
       <span class="stage-what" id="viewer-file">${current ? (current.entry ? `${current.file} › ${current.entry}` : current.file) : ""}</span>
       ${info ? html`<span class="muted" id="viewer-size">${info.x.toFixed(1)} × ${info.y.toFixed(1)} × ${info.z.toFixed(1)} mm · ${info.triangles.toLocaleString()} triangles</span>` : null}
       <span class="stage-tools">
-        ${["iso", "top", "front"].map((v) => html`<button type="button" class="ghost" key=${v} onClick=${() => viewer.current?.view(v)}>${v === "iso" ? "3/4" : v[0].toUpperCase() + v.slice(1)}</button>`)}
-        <button type="button" class="ghost" aria-pressed=${edges ? "true" : "false"} onClick=${() => { setEdges(!edges); viewer.current?.setEdges(!edges); }}>Edges</button>
-        ${model ? html`<button type="button" class="ghost" id="view-cover" disabled=${!info} onClick=${cover}>Use as cover</button>` : null}
+        ${["iso", "top", "front"].map((v) => html`<button type="button" class="ghost" key=${v} title=${{ iso: "Look from above at an angle", top: "Look from the top", front: "Look from the front" }[v]} onClick=${() => viewer.current?.view(v)}>${v === "iso" ? "3/4" : v[0].toUpperCase() + v.slice(1)}</button>`)}
+        <button type="button" class="ghost" aria-pressed=${edges ? "true" : "false"} title="Show the edges of the triangles" onClick=${() => { setEdges(!edges); viewer.current?.setEdges(!edges); }}>Edges</button>
+        ${model ? html`<button type="button" class="ghost" id="view-cover" disabled=${!info || !!ui.get().library?.read_only} title="Save this view as the model's cover picture" onClick=${cover}>Use as cover</button>` : null}
       </span>
     </div>
   </div>`;
@@ -326,6 +363,17 @@ function Pictures({ src, model, pictures, current, setCurrent }) {
     const i = pictures.findIndex((p) => p.file === pic.file && p.entry === pic.entry);
     setCurrent(pictures[(i + d + pictures.length) % pictures.length]);
   };
+  // ← and → go through the pictures (when not typing, and nothing else has the key)
+  useEffect(() => {
+    if (pictures.length < 2) return;
+    const key = (e) => {
+      if (e.defaultPrevented || typing(e) || ui.get().dialog || ui.get().menu || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.target.closest?.(".tree, .parts-views, select")) return;
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); step(e.key === "ArrowLeft" ? -1 : 1); }
+    };
+    addEventListener("keydown", key);
+    return () => removeEventListener("keydown", key);
+  });
   const cover = async () => {
     try {
       await api("model_cover", { id: model.id, file: pic.file });
@@ -339,8 +387,9 @@ function Pictures({ src, model, pictures, current, setCurrent }) {
     <div class="stage-bar">
       <span class="stage-what">${pic.entry ? `${pic.file} › ${pic.entry}` : pic.file}</span>
       <span class="stage-tools">
-        ${pictures.length > 1 ? html`<button type="button" class="ghost" onClick=${() => step(-1)} aria-label="Previous">‹</button><button type="button" class="ghost" onClick=${() => step(1)} aria-label="Next">›</button>` : null}
-        ${model ? html`<button type="button" class="ghost" id="picture-cover" disabled=${!!pic.entry || model.details?.cover === pic.file} onClick=${cover}>Use as cover</button>` : null}
+        ${pictures.length > 1 ? html`<button type="button" class="ghost" onClick=${() => step(-1)} aria-label="Previous picture" title="Previous picture (←)">‹</button><button type="button" class="ghost" onClick=${() => step(1)} aria-label="Next picture" title="Next picture (→)">›</button>` : null}
+        ${model ? html`<button type="button" class="ghost" id="picture-cover" disabled=${!!pic.entry || model.details?.cover === pic.file || !!ui.get().library?.read_only}
+          title=${pic.entry ? "A picture inside an archive can't be the cover" : model.details?.cover === pic.file ? "This is the cover already" : "Use this picture as the model's cover"} onClick=${cover}>Use as cover</button>` : null}
       </span>
     </div>
     <div class="thumb-strip">${pictures.filter((p) => !p.entry).slice(0, 60).map((p) => html`<button type="button" key=${p.file} data-file=${p.file} class=${`strip-btn${p.file === pic.file && !pic.entry ? " on" : ""}`} onClick=${() => setCurrent(p)}>
@@ -377,16 +426,17 @@ function Documents({ src, model, docs, current, setCurrent }) {
         : html`<div class="stage-note muted">This kind of document opens in its own app.</div>`}
     </div>
     <div class="stage-bar"><span class="stage-what">${doc.file}</span>
-      ${isDesktop() && lib && model ? html`<span class="stage-tools"><button type="button" class="ghost" onClick=${() => openModelFile(model, doc.file)}>Open in default app</button></span>` : null}</div>
+      ${isDesktop() && lib && model ? html`<span class="stage-tools"><button type="button" class="ghost" onClick=${() => openModelFile(model, doc.file)}>${Icon.external(14)} Open in its own app</button></span>` : null}</div>
   </div>`;
 }
 
-function Videos({ src, videos, current, setCurrent }) {
+function Videos({ src, model, videos, current, setCurrent }) {
   const v = current || videos[0];
   if (!v) return html`<div class="stage-note muted">No videos.</div>`;
   return html`<div class="stage-videos">
     ${VIDEO_OK.test(v.file) ? html`<video class="stage-video" controls preload="metadata" src=${fileUrl(src, v.file)} key=${v.file}></video>`
-      : html`<div class="stage-note muted">${v.file} plays in its own app.</div>`}
+      : html`<div class="stage-note muted">${v.file} plays in its own app.
+        ${model && ownApp(src) ? html` <button type="button" class="ghost" id="video-open" onClick=${() => openModelFile(model, v.file)}>${Icon.external(14)} Open in its own app</button>` : null}</div>`}
     <div class="doc-list">${videos.map((x) => html`<button type="button" key=${x.file} class=${`ghost${x.file === v.file ? " on" : ""}`} onClick=${() => setCurrent(x)}>${x.file}</button>`)}</div>
   </div>`;
 }
@@ -417,7 +467,7 @@ export function FilesView({ src, files: allFiles, main, model, names, compact, s
       ${shown === "3d" ? html`<${Stage3D} src=${src} model=${model} current=${cur["3d"] && inVariant(cur["3d"].file, chosen, names) ? cur["3d"] : first3d} />` : null}
       ${shown === "pictures" ? html`<${Pictures} src=${src} model=${model} pictures=${pictures} current=${cur.pictures} setCurrent=${(p) => setCur({ ...cur, pictures: p })} />` : null}
       ${shown === "docs" ? html`<${Documents} src=${src} model=${model} docs=${docs} current=${cur.docs} setCurrent=${(d) => setCur({ ...cur, docs: d })} />` : null}
-      ${shown === "videos" ? html`<${Videos} src=${src} videos=${videos} current=${cur.videos} setCurrent=${(v) => setCur({ ...cur, videos: v })} />` : null}
+      ${shown === "videos" ? html`<${Videos} src=${src} model=${model} videos=${videos} current=${cur.videos} setCurrent=${(v) => setCur({ ...cur, videos: v })} />` : null}
     </section>
     <aside class="mp-side">
       ${variants.length ? html`<div class="field-block"><span class="field-label">Variant</span>
