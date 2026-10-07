@@ -227,7 +227,7 @@ def put(path, body="solid x"):
 
 async def import_and_wait(pg):
     if await pg.locator("#import-results").count():  # the last import's results
-        await pg.click("#import-results .linkish")
+        await pg.click("#import-results-close")
         await pg.wait_for_selector("#import-results", state="detached")
     await pg.wait_for_function("() => { const b = document.querySelector('#import-go'); return b && !b.disabled; }")
     await pg.click("#import-go")
@@ -795,14 +795,16 @@ async def phase5(pg):
     await group.locator(".dupe-set-aside").click()
     await pg.wait_for_selector("#dupes-aside")
     await pg.click("#dupes-empty")
-    await pg.screenshot(path=str(out / "23-duplicates-delete.png"), full_page=True)
-    await pg.click("#dupes-empty-yes")
+    await pg.wait_for_selector("#confirm-dialog")
+    red = "danger" in (await pg.get_attribute("#confirm-dialog button[type=submit]", "class"))
+    await pg.screenshot(path=str(out / "23-duplicates-delete.png"))
+    await pg.click("#confirm-dialog button[type=submit]")
     await pg.wait_for_selector("#dupes-aside", state="detached")
     gone = not (library / "_library/set-aside").exists() and (library / "Unsorted/Bracket copy/bracket.stl").is_file()
     await pg.goto(B + "#/")
     await pg.wait_for_selector("#recent-changes")
     recent = await pg.inner_text("#recent-changes")
-    check("setting aside is undone, or the copies deleted after asking", back and gone and "Set aside 1 duplicate copy" in recent and "copies deleted" in recent, (back, gone, recent))
+    check("setting aside is undone, or the copies deleted after asking (red)", back and gone and red and "Set aside 1 duplicate copy" in recent and "copies deleted" in recent, (back, gone, red, recent))
 
 
 async def labels_of(pg, sel):
@@ -950,6 +952,96 @@ async def ui_pass(pg):
     await pg.wait_for_selector("#import-clear", state="detached")
 
 
+async def ui_pass2(pg):
+    """UI pass step 2: every change is recorded and can be undone; one red confirm."""
+    # 40. Move to category lists the folders that move first, and is undone from its message
+    await pg.goto(B + "#/browse/unsorted")
+    await pg.click(".card:has(.card-name:text-is('Dropped In'))")
+    await pg.keyboard.press("m")
+    await pg.wait_for_selector("#move-dialog")
+    await pg.select_option("#move-schema", "household")
+    await pg.fill("#move-new", "Shelf")
+    await pg.wait_for_function("() => document.querySelector('#change-preview')?.textContent.includes('Shelf/Dropped In')")
+    preview = await pg.inner_text("#change-preview")
+    button = await pg.inner_text("#move-dialog button[type=submit]")
+    await clear_toast(pg)
+    await pg.screenshot(path=str(out / "27-move-preview.png"))
+    await clear_toast(pg)
+    await pg.click("#move-dialog button[type=submit]")
+    await pg.wait_for_selector("#move-dialog", state="detached", timeout=60000)
+    said = await toast_text(pg, "^Moved Dropped In to")
+    moved = (library / "Household/Shelf/Dropped In").is_dir()
+    await pg.click(".toast .toast-action")
+    await toast_text(pg, "^Undone", 60000)
+    back = (library / "Unsorted/Dropped In").is_dir() and not (library / "Household/Shelf").exists()
+    check("Move to category shows the folders that move, and Undo in its message puts them back", "1 model folder moves" in preview and button == "Move 1 model"
+          and said.startswith("Moved Dropped In to Household › Shelf") and moved and back, (preview, button, said, moved, back))
+
+    # 41. Edit details is undone with Ctrl+Z
+    await pg.goto(B + "#/browse/unsorted")
+    await pg.click(".card:has(.card-name:text-is('Hand Made'))")
+    await pg.keyboard.press("e")
+    await pg.wait_for_selector("#details-dialog")
+    await pg.fill("#edit-name", "Hand Made Two")
+    await pg.click("#details-dialog button[type=submit]")
+    await pg.wait_for_selector("#details-dialog", state="detached")
+    await toast_text(pg, "^Saved Hand Made Two")
+    side = library / "Unsorted/Hand Made/model.json"
+    named = json.loads(side.read_text())["name"]
+    await pg.keyboard.press("Control+z")
+    await toast_text(pg, "^Undone", 60000)
+    await pg.wait_for_selector(".card:has(.card-name:text-is('Hand Made'))")
+    check("Edit details is undone with Ctrl+Z", named == "Hand Made Two" and json.loads(side.read_text())["name"] == "Hand Made", named)
+
+    # 42. an import is undone from its results: the files go back, and the workspace has them again
+    src = home / "Undo me"
+    put(src / "Gadget/gadget.stl", cube(7))
+    await pg.goto(B + "#/import")
+    await pg.wait_for_selector("#sort-page[data-ready]")
+    if await pg.locator("#import-clear").count():
+        await pg.click("#import-clear")
+        await pg.wait_for_selector("#import-clear", state="detached")
+    pick(src)
+    await pg.click("#import-sort")
+    await pg.wait_for_selector('#sort-tree .sw-item[data-name="Gadget"], #sort-list tr[data-name="Gadget"]', timeout=30000)
+    await sort_rows(pg)
+    await pick_rows(pg, "Gadget")
+    await send_to(pg, "household", "Bits and bobs")
+    await import_and_wait(pg)
+    inside = (library / "Household/Bits and bobs/Gadget/gadget.stl").is_file() and not (src / "Gadget").exists()
+    await pg.screenshot(path=str(out / "28-import-results.png"))
+    await clear_toast(pg)
+    await pg.click("#import-undo")
+    await toast_text(pg, "^Undone", 60000)
+    await pg.wait_for_selector("#import-results", state="detached")
+    back = (src / "Gadget/gadget.stl").is_file() and not (src / "Gadget/model.json").exists() and not (library / "Household/Bits and bobs/Gadget").exists()
+    await sort_rows(pg)
+    row = await pg.inner_text('#sort-list tr[data-name="Gadget"]')
+    check("an import is undone from its results: the files go back and the workspace has them again", inside and back and "Bits and bobs" in row, (inside, back, row))
+    await pg.click("#import-clear")
+
+    # 43. Home: an older change to details can be undone while newer ones leave its model alone
+    q = await api(pg, "models_query", {"scope": "unsorted"})
+    by = {m["name"]: m["id"] for m in q["items"]}
+    await api(pg, "model_update", {"id": by["Benchy"], "patch": {"tags": "boat"}, "journal": True})
+    await api(pg, "model_update", {"id": by["Knight Armour"], "patch": {"tags": "armour"}, "journal": True})
+    await pg.goto(B + "#/")
+    await pg.wait_for_selector("#recent-changes .undo-change")
+    rows = await pg.eval_on_selector_all("#recent-changes li", "els => els.map(e => [e.querySelector('span').textContent, !!e.querySelector('.undo-change:not([disabled])')])")
+    older = next((ok for label, ok in rows if label.startswith("Edited Benchy's details")), None)
+    await clear_toast(pg)
+    await pg.screenshot(path=str(out / "29-recent-changes.png"))
+    await pg.click("#recent-changes li:has-text(\"Edited Benchy's details\") .undo-change")
+    await toast_text(pg, "^Undone", 60000)
+    tags = json.loads((library / "Unsorted/Benchy/model.json").read_text()).get("tags", [])
+    check("Home undoes an older change to details while newer changes leave that model alone", older is True and "boat" not in tags, (rows[:4], tags))
+
+    # 44. Read again is a job with Stop in the status bar
+    await pg.click("#rescan")
+    said = await toast_text(pg, "models, read in|^Stopped")
+    check("Read again runs as a job and says what it read", "read in" in said, said)
+
+
 def big_library():
     """10,000 generated models: read, read again from the cache, searched."""
     big = home / "Big"
@@ -1003,6 +1095,7 @@ async def main():
             await phase4(pg)
             await phase5(pg)
             await ui_pass(pg)
+            await ui_pass2(pg)
 
             # 3. renaming the library
             await pg.click('.sidebar a[href="#/settings"]')

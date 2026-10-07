@@ -36,12 +36,14 @@ export function toast(text, opts = {}) {
 const undos = [];
 
 /** Say a change was made, with Undo in the message; Ctrl+Z undoes it too.
- *  `undo()` puts it back, and may return the message to show then. */
+ *  `undo()` puts it back, and may return the message to show then. Returns a
+ *  function that undoes it (for an Undo button on the page). */
 export function undoable(text, undo, ms = 8000) {
   const entry = { text, undo };
   undos.push(entry);
   if (undos.length > 20) undos.shift();
   toast(text, { ms, action: { label: "Undo", run: () => runUndo(entry) } });
+  return () => runUndo(entry);
 }
 
 /** "Moved Benchy to Office. More…" → "moved Benchy to Office": the first clause, for "Undone: …". */
@@ -125,6 +127,20 @@ export function watchLibrary() {
 
 /** Read every model folder again (`full`: ignore what's cached on this computer). */
 export async function rescan(full = true) {
+  if (full) {
+    // a job with Stop in the status bar; stopped, the library stays as read before
+    try {
+      const { job } = await api("library_scan", { full, job: true });
+      const done = await followJob(job, "Reading the library again");
+      if (done.error) throw new Error(done.error);
+      const r = done.result || {};
+      await loadOverview();
+      toast(r.stopped ? "Stopped. The library shows what was read before." : `${r.models} models, read in ${(r.ms / 1000).toFixed(1)} s.`);
+    } catch (e) {
+      toast(`Couldn't read the library: ${e.message || e}`, 8000);
+    }
+    return;
+  }
   const done = addJob("Reading the library again");
   try {
     const r = await api("library_scan", { full });
@@ -200,12 +216,23 @@ export async function setStar(model, on) {
   return r;
 }
 
-/** Save a model's details. Returns the model as the index has it now. */
+/** Save a model's details, recorded so the message can undo it. Returns the
+ *  model as the index has it now (`journal`: the change, for Undo). */
 export async function saveDetails(model, patch) {
-  const v = await api("model_update", { id: model.id, patch });
+  const v = await api("model_update", { id: model.id, patch, journal: true });
   followIds({ [model.id]: v.id });
   await loadOverview();
   return v;
+}
+
+/** Say a recorded change was made (a move, an edit, an import), with Undo in the
+ *  message; `after()` runs once it's undone (the page reads things again). */
+export function recorded(text, journal, after) {
+  if (!journal) return toast(text);
+  undoable(text, async () => {
+    const r = await undoChange(journal);
+    await after?.(r);
+  });
 }
 
 /** Wait for a background job (importing), showing it in the status bar.
@@ -224,15 +251,6 @@ export async function followJob(id, label, onProgress) {
   } finally {
     done();
   }
-}
-
-/** Move models into a category (schema id and path of subcategories), or to Unsorted (schema null). */
-export async function moveModels(ids, schema, values) {
-  const r = await api("models_move", { ids, schema, values });
-  followIds(Object.fromEntries(r.moved.map((m) => [m.id, m.new_id])));
-  ui.set({ favs: r.favourites });
-  await loadOverview();
-  return r;
 }
 
 /** What a category change would move: { label, models, moving, clashes, sample }. */

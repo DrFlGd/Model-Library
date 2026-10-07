@@ -35,7 +35,9 @@ async function makePreviews() {
 
 const STATES = { done: "", undone: "undone", running: "interrupted", undoing: "interrupted while undoing", stopped: "stopped partway", emptied: "copies deleted" };
 
-/** Category changes recorded in the library: undo the newest; finish or put back an interrupted one. */
+/** Changes recorded in the library (categories, moves, imports, details): undo one
+ *  (changes that move folders newest first; details while nothing newer touched the
+ *  same models); finish or put back an interrupted one. */
 function RecentChanges({ lib, rev }) {
   const [list, setList] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -45,8 +47,7 @@ function RecentChanges({ lib, rev }) {
     setBusy(true);
     try { await fn(id); toast(what); } catch (e) { toast(e.message || String(e), 8000); } finally { setBusy(false); }
   };
-  const live = list.filter((j) => j.state !== "undone");
-  const newest = live[0];
+  const first = list.find((j) => j.undo === true);
   const broken = list.find((j) => ["running", "undoing", "stopped"].includes(j.state));
   const when = (t) => (t || "").replace("T", " ").slice(0, 16);
   return html`<div class="home-card home-counts" id="recent-changes">
@@ -59,7 +60,8 @@ function RecentChanges({ lib, rev }) {
         : html`<div class="home-actions"><button type="button" class="primary" id="finish-change" disabled=${busy} onClick=${() => act(finishChange, broken.id, "Finished.")}>Finish it</button>
           <button type="button" class="ghost" id="putback-change" disabled=${busy} onClick=${() => act(undoChange, broken.id, "Put things back as they were.")}>Put things back</button></div>`}</div>` : null}
     <ul class="ls-list">${list.slice(0, 6).map((j) => html`<li key=${j.id} class=${j.state === "undone" ? "muted" : ""}><span>${j.label} <span class="muted">· ${when(j.created)} · ${j.models} ${j.models === 1 ? "model" : "models"}${STATES[j.state] ? ` · ${STATES[j.state]}` : ""}</span></span>
-      ${j === newest && j.state === "done" && !lib.read_only ? html`<button type="button" class="ghost" id="undo-change" disabled=${busy} onClick=${() => act(undoChange, j.id, "Undone: the folders are back where they were.")}>Undo</button>` : null}</li>`)}</ul>
+      ${j.state === "done" && !lib.read_only ? html`<button type="button" class="ghost undo-change" id=${j === first ? "undo-change" : null} data-id=${j.id} disabled=${busy || j.undo !== true}
+        title=${j.undo === true ? `Undo: ${j.label}` : j.undo || ""} onClick=${() => act(undoChange, j.id, `Undone: ${j.label.charAt(0).toLowerCase()}${j.label.slice(1)}.`)}>Undo</button>` : null}</li>`)}</ul>
   </div>`;
 }
 

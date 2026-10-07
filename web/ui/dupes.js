@@ -10,6 +10,7 @@ import { ctx, routeHash } from "./context.js";
 import { api, isDesktop, followJob, loadOverview, toast, undoable, undoChange } from "./library.js";
 import { size } from "./details.js";
 import { Icon } from "./icons.js";
+import { confirmDialog } from "./dialogs.js";
 import { MODEL_ACTIONS, menuItems, openMenu, usePageKeys, selectAllKey } from "./actions.js";
 
 const placeOf = (overview, m) => {
@@ -56,7 +57,6 @@ export function DuplicatesPage() {
   const [job, setJob] = useState(null); // { id, progress }
   const [keep, setKeepMap] = useState({});
   const [skip, setSkip] = useState({});
-  const [askDelete, setAskDelete] = useState(false);
   const [sharedLimit, setSharedLimit] = useState(50);
   const load = () => api("dupes_get", {}).then((d) => { setData(d); setError(null); }, (e) => setError(e.message || String(e)));
   useEffect(() => { if (lib) load(); }, [lib?.path]);
@@ -99,13 +99,17 @@ export function DuplicatesPage() {
     } catch (e) { toast(e.message || String(e), 8000); }
     finally { setJob(null); await loadOverview(); await load(); }
   };
-  const emptyAside = async () => {
-    try {
-      const r = await api("dupes_empty", {});
-      toast(`Deleted ${plural(r.count, "set-aside copy", "set-aside copies")} (${size(r.bytes)}).`, 5000);
-    } catch (e) { toast(e.message || String(e), 8000); }
-    finally { setAskDelete(false); await load(); }
-  };
+  const emptyAside = () => confirmDialog({
+    title: "Delete set-aside copies",
+    text: `${plural(aside.count, "copy", "copies")} (${size(aside.bytes)}) in ${aside.rel} will be deleted for good.`,
+    button: `Delete ${plural(aside.count, "copy", "copies")}`,
+    run: async () => {
+      try {
+        const r = await api("dupes_empty", {});
+        toast(`Deleted ${plural(r.count, "set-aside copy", "set-aside copies")} (${size(r.bytes)}).`, 5000);
+      } finally { await load(); }
+    },
+  });
 
   const groups = data?.groups || [];
   const shared = data?.shared || [];
@@ -130,15 +134,11 @@ export function DuplicatesPage() {
 
     ${aside.count ? html`<div class="home-card" id="dupes-aside">
       <h2>Set aside</h2>
-      <p>${plural(aside.count, "copy is", "copies are")} in <b>${aside.rel}</b> (${size(aside.bytes)}), out of the library's lists. The newest set-aside can be undone on Home.</p>
+      <p>${plural(aside.count, "copy is", "copies are")} in <b>${aside.rel}</b> (${size(aside.bytes)}), out of the library's lists. Setting them aside can be undone from Recent changes on Home.</p>
       <div class="home-actions">
         ${isDesktop() ? html`<button type="button" class="ghost" onClick=${revealAside}>${Icon.folder(15)} Show in folder</button>` : null}
-        ${!askDelete ? html`<button type="button" class="ghost danger-text" id="dupes-empty" disabled=${busy || readOnly} onClick=${() => setAskDelete(true)}>Delete set-aside copies…</button>` : null}
+        <button type="button" class="ghost danger-text" id="dupes-empty" disabled=${busy || readOnly} onClick=${emptyAside}>${Icon.trash(15)} Delete set-aside copies…</button>
       </div>
-      ${askDelete ? html`<div class="warn-note" role="alert" id="dupes-empty-ask">
-        <p>Delete ${plural(aside.count, "copy", "copies")} (${size(aside.bytes)}) for good? This can't be undone.</p>
-        <div class="home-actions"><button type="button" class="primary danger" id="dupes-empty-yes" onClick=${emptyAside}>Delete them</button>
-          <button type="button" class="ghost" id="dupes-empty-no" onClick=${() => setAskDelete(false)}>Keep them</button></div></div>` : null}
     </div>` : null}
 
     ${groups.length ? html`<section class="dupes-section" id="dupes-groups">

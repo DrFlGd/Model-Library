@@ -7,12 +7,12 @@
 // category. Every change here can be undone (the core keeps the workspace as it
 // was). The workspace is kept on this computer, so sorting can go on over
 // several sittings.
-import { html, useState, useEffect, useMemo } from "../lib/html.js";
+import { html, useState, useEffect, useLayoutEffect, useMemo } from "../lib/html.js";
 import { createStore, useStore } from "../lib/store.js";
 import { ui, setPref } from "./state.js";
 import { ctx, routeHash } from "./context.js";
 import { Icon } from "./icons.js";
-import { api, followJob, isDesktop, loadOverview, toast, undoable } from "./library.js";
+import { api, followJob, isDesktop, loadOverview, toast, undoable, undoChange } from "./library.js";
 import { openMenu, usePageKeys, letter, selectAllKey } from "./actions.js";
 import { CategoryPicker } from "./category.js";
 import { size } from "./details.js";
@@ -510,7 +510,8 @@ function Details({ s, ix, overview, names }) {
  *  again (its files arriving); a new value from the workspace replaces it. */
 function Box({ id, cls, label, title, placeholder, value, off, onSave }) {
   const [v, setV] = useState(value || "");
-  useEffect(() => { setV(value || ""); }, [value]);
+  // before the next paint: after it, text typed as the box appeared was put back
+  useLayoutEffect(() => { setV(value || ""); }, [value]);
   return html`<input type="text" class=${cls} id=${id} aria-label=${label} title=${title} placeholder=${placeholder} value=${v} disabled=${off}
     onInput=${(e) => setV(e.target.value)} onChange=${(e) => onSave(e.target.value.trim())} />`;
 }
@@ -526,13 +527,25 @@ function Warning({ w, item }) {
   return null;
 }
 
+/** Undo an import: the files go back where they came from (copies are deleted while
+ *  the originals are still there), and the workspace has them again. */
+async function undoImport(r) {
+  try {
+    await undoChange(r.journal);
+  } finally {
+    sorter.set({ results: null });
+    await loadSession();
+  }
+  return r.mode === "copy" ? "Undone: the copies are gone from the library; the originals are where they were." : "Undone: the models are back where they came from.";
+}
+
 function Results({ r }) {
   const ok = (r.results || []).filter((x) => !x.error);
   const bad = (r.results || []).filter((x) => x.error);
   return html`<section class="imp-results" id="import-results">
     <h2>${plural(ok.length, "model", "models")} ${r.mode === "copy" ? "copied" : "moved"} in${r.failed ? `, ${r.failed} not` : ""}</h2>
     ${bad.length ? html`<ul class="ls-list">${bad.map((x) => html`<li key=${x.source} class="bad"><span>${x.name}</span><span class="form-error">${x.error}</span></li>`)}</ul>` : null}
-    <p><a href=${routeHash("browse:all")}>See all models</a> · <button type="button" class="linkish" onClick=${() => sorter.set({ results: null })}>Close</button></p>
+    <p><a href=${routeHash("browse:all")}>See all models</a>${r.undo ? html` · <button type="button" class="linkish" id="import-undo" title="Put the files back where they came from" onClick=${r.undo}>Undo</button>` : null} · <button type="button" class="linkish" id="import-results-close" onClick=${() => sorter.set({ results: null })}>Close</button></p>
   </section>`;
 }
 
@@ -642,7 +655,12 @@ export function ImportPage() {
   };
   const importSorted = async () => {
     const done = await runJob("sort_commit", { mode: s.mode, force_copy: !!window.__forceCopy }, s.mode === "copy" ? "Copying models in" : "Moving models in");
-    if (done?.result) sorter.set({ results: done.result });
+    const r = done?.result;
+    if (r) {
+      // Undo (in the message, on the results and Ctrl+Z) puts the files back where they came from
+      const undo = r.journal ? undoable(`${plural(r.imported, "model", "models")} ${r.mode === "copy" ? "copied" : "moved"} in.`, () => undoImport(r)) : null;
+      sorter.set({ results: { ...r, undo } });
+    }
     await loadOverview();
   };
   const startAgain = () => act("sort_clear", {}, () => "Started again: the workspace is empty. Nothing on disk changed.")

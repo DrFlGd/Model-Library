@@ -4,7 +4,7 @@
 // as everywhere (docs/PLAN.md, "UI pass design"): click, Ctrl or Cmd-click,
 // Shift-click, tick boxes, Ctrl+A, Esc and the arrow keys; right-click gives the
 // same actions as the details panel.
-import { html, useState, useEffect, useRef } from "../lib/html.js";
+import { html, useState, useEffect, useLayoutEffect, useRef } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui, setPref } from "./state.js";
 import { routeHash, schemaScope } from "./context.js";
@@ -126,7 +126,7 @@ export function Browser() {
   const [result, setResult] = useState(null);
   const [limit, setLimit] = useState(PAGE);
   const seq = useRef(0);
-  useEffect(() => { setText(s.q); }, [s.q]);
+  useLayoutEffect(() => { setText(s.q); }, [s.q]); // before paint, so nothing typed meanwhile is put back
   useEffect(() => { setLimit(PAGE); }, [scope, s.q, s.sort]);
   useEffect(() => {
     if (!s.library) return;

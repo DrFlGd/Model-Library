@@ -10,7 +10,7 @@ import { useStore } from "../lib/store.js";
 import { ui } from "./state.js";
 import { routeHash, schemaScope } from "./context.js";
 import { Icon } from "./icons.js";
-import { api, planChange, runChange, undoChange, loadOverview, toast, undoable } from "./library.js";
+import { api, planChange, runChange, undoChange, loadOverview, toast, undoable, recorded, followIds } from "./library.js";
 import { Dialog, close, FieldInput, FIELD_TYPES } from "./dialogs.js";
 import { SubcategoryTree, editorTree, treeSpec, treeReady, treeList, nodeAt, origs } from "./category.js";
 import { writable } from "./actions.js";
@@ -74,7 +74,7 @@ async function deleteSubcategory(sc, path, leaf) {
 }
 
 /** What a change would move, from the core, refreshed as the form changes. */
-function ChangePreview({ change, onPlan }) {
+export function ChangePreview({ change, onPlan }) {
   const [plan, setPlan] = useState(null);
   const [error, setError] = useState("");
   const key = JSON.stringify(change);
@@ -295,10 +295,11 @@ export function EditPicked({ models }) {
     try {
       const f = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== "" && v != null));
       const r = await api("models_update", { ids: models.map((m) => m.id), patch: { ...form, fields: f } });
+      followIds(r.ids || {});
       await loadOverview();
       if (r.errors.length) { setError(r.errors.map((e) => e.error).join(" ")); return; }
       close();
-      toast(`Saved ${r.saved} ${r.saved === 1 ? "model" : "models"}.`);
+      recorded(`Saved ${r.saved} ${r.saved === 1 ? "model's" : "models'"} details.`, r.journal);
     } catch (e) {
       setError(e.message || String(e));
     } finally {

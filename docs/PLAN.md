@@ -527,3 +527,20 @@ Built as designed, with these differences and lessons:
 - Files with no viewer are greyed by a class and a tooltip, not `aria-disabled`, since they can still be right-clicked and opened in their own app.
 - Still as before until step 2: Move to category is undone by moving the models back (no journal yet), and the edit form for several models has no undo.
 - Tests: `ui_pass` in `desktop_page.py` (checks 33 to 39: the row, menu and More on every page, keys, the Starred count, no selection from another place, filter chips, the theme cycle, the sidebar's Category menu, greyed files and the file menu, Import's menu, keys and Ctrl+Z, and messages clear of Import's footer). 47 checks in all.
+
+### Step 2 (0.5.2)
+
+Built as designed, with these differences and lessons:
+
+- **Three new journal kinds** in `_library/journal/`, next to `category`, `schema`, `delete` and `set-aside`:
+  - `move` (Move to category): planned by `relayout::plan_move` and applied like a category change. Each move has `keep_id`, so ids, stars and details stay with the models. `added` lists the subcategories made on the way; undo removes them again only when nothing else is in them by then. Moving models to where they are already is refused ("It's there already: choose another place.").
+  - `import`: written by `sort_commit` after the files have moved, with `mode` and, for each model, where it came from (`source`, absolute), its files, its workspace item and what its `model.json` and preview were before. Undo moves the files back with the same SHA-256 checks as importing. For a copy, it deletes the copies, but only when the originals are still there; otherwise it moves them back instead. The workspace items are then marked as not imported (`Session::unmark`) and the workspace's own undo list is cleared.
+  - `details` (Edit details for one or several models, Use as cover): each model's `model.json` before and after. A model without a `model.json` gets one first (the same defaults the first save writes), so its id doesn't change between the change and its undo. A replaced cover picture is kept in the journal's folder (`_library/journal/<id>/`), which is pruned with the journal.
+- **Which change can be undone:** changes that move folders are still undone newest first. A details change only waits for newer changes to the same model folders, so Home shows Undo on every row and greys the ones that are waiting, with the reason as the tooltip ("Undo the newer change first: …"). `journals` returns `undo: true` or that reason.
+- Saving a model's details for the first time gives it a `model.json` and so a new id; the commands return the new ids (`id`, or `ids` as old → new for several) and the page follows them, as it does for stars.
+- Move to category shows its preview (the same `ChangePreview` as category changes) and its button says how many models move. The old core command `models_move` is still there (and in the core tests) but the page no longer uses it.
+- Import's results say what can be undone and have an Undo button as well as the message.
+- **Read again** is a job with Stop. Stopping keeps the index as it was before, rather than half of the new one, and the message says so. Opening a library for the first time (the first read) can't be stopped yet.
+- Boxes that copy a value into their own state (Import's name, authors and tags, the search box, the files view's tab and picked file) do it in a layout effect. Preact runs plain effects up to a frame after drawing, so text typed in that moment was put back (the cause of the page test's rare "Hinge and latch" timeout).
+- Delete set-aside copies… asks in the one red `ConfirmDialog` (`confirmDialog({ title, text, button, run })`), which says it can't be undone.
+- Tests: `ui_pass2` in `desktop_page.py` (checks 40 to 44: Move's preview and Undo, Edit details undone with Ctrl+Z, Import undone from its results, an older details change undone from Home after a newer one, and Read again's message), and `moves_imports_and_details_are_journalled_and_undone` in the core. 52 page checks in all.

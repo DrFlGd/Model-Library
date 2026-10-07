@@ -1208,6 +1208,18 @@ impl Session {
         }
     }
 
+    /// Imported models put back where they came from (the import was undone): not
+    /// imported any more. Returns how many are in the workspace.
+    pub fn unmark(&mut self, ids: &[String]) -> usize {
+        let mut n = 0;
+        for it in self.items.iter_mut().filter(|i| ids.contains(&i.id)) {
+            it.done = None;
+            it.error = None;
+            n += 1;
+        }
+        n
+    }
+
     /// Forget imported models (they're in the library now), or everything.
     pub fn clear(&mut self, imported_only: bool) {
         if imported_only {

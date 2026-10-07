@@ -100,6 +100,19 @@ const SORT_UNDO: usize = 20;
 /// The preference key the page keeps favourites under; they're stored in the library.
 const FAVS_KEY: &str = "ml-favs";
 
+/// What a model's first model.json starts from: what its folder and the index say.
+fn first_sidecar(m: &crate::index::Model) -> Value {
+    json!({ "name": m.v["name"], "schema": m.v["schema"], "path": if m.v["schema"].is_null() { Value::Null } else { m.v["path"].clone() },
+        "authors": m.v["authors"].as_array().filter(|a| !a.is_empty()).map(|a| a.iter().map(|n| json!({ "name": n })).collect::<Vec<_>>()) })
+}
+
+/// A model's details as they are before a journalled edit: its model.json, made
+/// first if it has none (so its id, and star, stay the same after an undo).
+fn details_before(dir: &Path, m: &crate::index::Model) -> Result<Value> {
+    model::update(dir, &json!({}), &first_sidecar(m))?;
+    Ok(model::read_sidecar(dir))
+}
+
 fn e2s(e: anyhow::Error) -> String {
     format!("{e:#}")
 }
@@ -461,10 +474,19 @@ impl App {
                 on_bytes: &on_bytes,
             };
             let schema = it["schema"].as_str().and_then(|s| schemas.get(s));
+            // what the folder had before, so undoing the import can put it back as it was
+            let src = PathBuf::from(it["source"].as_str().unwrap_or(""));
+            let loose = it["files"].as_array().is_some_and(|f| !f.is_empty());
+            let side = src.join(model::SIDECAR);
+            let before = json!({
+                "sidecar_before": if !loose && side.is_file() { model::read_sidecar(&src) } else { Value::Null },
+                "thumb_before": !loose && thumb::has(&src),
+            });
             match import::commit_one(lib, it, dest, schema, mv, force_copy, ids, &p) {
                 Ok(mut v) => {
                     v["source"] = it["source"].clone();
                     v["name"] = json!(name);
+                    v["before"] = before;
                     results.push(v);
                 }
                 Err(e) => {
@@ -935,7 +957,42 @@ impl App {
                     let sids: Vec<String> = go.iter().map(|g| g.0.clone()).collect();
                     let items: Vec<Value> = go.iter().map(|g| g.1.clone()).collect();
                     let dests: Vec<PathBuf> = go.into_iter().map(|g| g.2).collect();
-                    let results = app.run_import(&jid, &cancel, &lib, &items, &dests, &schemas, &used, mv, force_copy);
+                    // subcategories the import makes (undoing it takes them away again)
+                    let mut added: Vec<Value> = vec![];
+                    for (it, dest) in items.iter().zip(&dests) {
+                        let Some(s) = it["schema"].as_str().and_then(|s| schemas.get(s)) else { continue };
+                        let path = import::place_of(&lib, Some(s), dest);
+                        let tree = schema::subcategories(&schema::as_tree(&lib, s));
+                        if let Some(k) = (1..=path.len()).find(|&k| !schema::in_tree(&tree, &path[..k])) {
+                            let a = json!({ "schema": s.id, "path": path[..k] });
+                            if !added.contains(&a) {
+                                added.push(a);
+                            }
+                        }
+                    }
+                    let mut results = app.run_import(&jid, &cancel, &lib, &items, &dests, &schemas, &used, mv, force_copy);
+                    let mut moves = vec![];
+                    for ((r, it), sid) in results.iter_mut().zip(&items).zip(&sids) {
+                        let before = r.as_object_mut().and_then(|o| o.shift_remove("before"));
+                        if r["error"].is_string() {
+                            continue;
+                        }
+                        let before = before.unwrap_or_default();
+                        moves.push(json!({ "name": r["name"], "id": r["id"], "to": r["rel"], "source": it["source"], "files": it["files"],
+                            "sort": sid, "sidecar_before": before["sidecar_before"], "thumb_before": before["thumb_before"] }));
+                    }
+                    let journal = if moves.is_empty() {
+                        Value::Null
+                    } else {
+                        let what = match moves.as_slice() {
+                            [one] => one["name"].as_str().unwrap_or("a model").to_string(),
+                            all => format!("{} models", all.len()),
+                        };
+                        let id = relayout::new_id(&lib)?;
+                        relayout::record(&lib, &id, &json!({ "kind": "import", "mode": if mv { "move" } else { "copy" },
+                            "label": format!("Imported {what}{}", if mv { "" } else { " (copies)" }), "added": added, "moves": moves }))?;
+                        json!(id)
+                    };
                     let marks: Vec<(String, Value)> = sids.into_iter().zip(results.iter().cloned()).collect();
                     drop(_guard);
                     app.with_sort(true, |se| {
@@ -946,7 +1003,7 @@ impl App {
                     // what was decided before can't be put back: the files have moved
                     app.sort_undo.lock().unwrap().clear();
                     let failed = results.iter().filter(|r| r["error"].is_string()).count();
-                    Ok(json!({ "results": results, "imported": results.len() - failed, "failed": failed + bad.len(), "mode": if mv { "move" } else { "copy" } }))
+                    Ok(json!({ "results": results, "imported": results.len() - failed, "failed": failed + bad.len(), "mode": if mv { "move" } else { "copy" }, "journal": journal }))
                 }))
             }
             other => Err(format!("unknown command {other}")),
@@ -1031,7 +1088,23 @@ impl App {
             }
             "library_scan" => {
                 let full = args["full"].as_bool() == Some(true);
-                j(self.with_index(Some(full), |ix, _| json!({ "models": ix.models.len(), "read": ix.read, "ms": ix.ms as u64 })).await?)
+                if args["job"].as_bool() != Some(true) {
+                    return j(self.with_index(Some(full), |ix, _| json!({ "models": ix.models.len(), "read": ix.read, "ms": ix.ms as u64 })).await?);
+                }
+                // Read again from Home: a job that can be stopped (the library stays as read before)
+                let lib = self.library()?;
+                let cache = self.index_cache(&lib);
+                j(self.spawn_job_with("Reading the library again", false, move |app, jid, cancel| {
+                    let report = |i: usize, n: usize| app.job_progress(&jid, json!({ "item": i, "items": n, "name": "" }));
+                    match Index::build_with(&lib, cache.as_deref(), full, &cancel, &report) {
+                        Some(ix) => {
+                            let r = json!({ "models": ix.models.len(), "read": ix.read, "ms": ix.ms as u64 });
+                            *app.index.blocking_lock() = Some(ix);
+                            Ok(r)
+                        }
+                        None => Ok(json!({ "stopped": true })),
+                    }
+                }))
             }
             "library_overview" => j(self
                 .with_index(None, |ix, lib| {
@@ -1148,7 +1221,12 @@ impl App {
                 j(json!({ "html": crate::docs::to_html(file, &bytes) }))
             }
             "model_cover" => {
+                // journalled: undo puts the old cover back (a picture it replaced is kept)
                 let (dir, v) = self.model_dir(&args).await?;
+                let lib = self.library()?;
+                lib.writable().map_err(e2s)?;
+                let jid = relayout::new_id(&lib).map_err(e2s)?;
+                let mut files = vec![];
                 let cover = match args["snapshot"].as_str() {
                     Some(data) => {
                         use base64::Engine;
@@ -1159,16 +1237,26 @@ impl App {
                         if !png.starts_with(b"\x89PNG") {
                             return Err("not a PNG".into());
                         }
-                        self.library()?.writable().map_err(e2s)?;
-                        crate::config::write_atomic(&dir.join("_media/cover.png"), &png)
-                            .map_err(e2s)?;
+                        let file = dir.join("_media/cover.png");
+                        let kept = if file.is_file() {
+                            let k = relayout::kept_dir(&lib, &jid);
+                            std::fs::create_dir_all(&k).map_err(|e| e.to_string())?;
+                            std::fs::copy(&file, k.join("0.png")).map_err(|e| e.to_string())?;
+                            json!("0.png")
+                        } else {
+                            Value::Null
+                        };
+                        files.push(json!({ "rel": lib.relative(&file), "kept": kept }));
+                        crate::config::write_atomic(&file, &png).map_err(e2s)?;
                         json!("_media/cover.png")
                     }
                     None => args["file"].clone(),
                 };
+                let name = v["name"].as_str().unwrap_or("");
                 Box::pin(self.call(
                     "model_update",
-                    json!({ "id": v["id"], "patch": { "cover": cover } }),
+                    json!({ "id": v["id"], "patch": { "cover": cover }, "journal": jid, "files": files,
+                        "label": if args["snapshot"].is_string() { format!("Used the 3D view as {name}'s cover") } else { format!("Changed {name}'s cover") } }),
                 ))
                 .await
             }
@@ -1326,19 +1414,39 @@ impl App {
                 j(v)
             }
             "model_update" => {
+                // `journal`: true (or an id made for it) records the edit, so it can be
+                // undone (`label` names it; `files`: ones it replaced, kept in the
+                // journal's folder)
                 let id = arg(&args, "id").map_err(e2s)?.to_string();
                 let patch = args["patch"].clone();
+                let journal = match &args["journal"] {
+                    Value::String(j) => Some(j.clone()),
+                    Value::Bool(true) => Some(String::new()),
+                    _ => None,
+                };
                 let cache = self.index_cache(&self.library()?);
                 let r = self
                     .with_index(None, |ix, lib| -> Result<Value> {
                         lib.writable()?;
                         let m = ix.get(&id).ok_or_else(|| anyhow!("That model isn't in the library any more."))?;
                         let dir = lib.resolve(m.rel())?;
+                        let rel = m.rel().to_string();
+                        let before = match &journal {
+                            Some(_) => Some(details_before(&dir, m)?),
+                            None => None,
+                        };
                         // a first model.json starts from what the folder says
-                        let defaults = json!({ "name": m.v["name"], "schema": m.v["schema"], "path": if m.v["schema"].is_null() { Value::Null } else { m.v["path"].clone() },
-                            "authors": m.v["authors"].as_array().filter(|a| !a.is_empty()).map(|a| a.iter().map(|n| json!({ "name": n })).collect::<Vec<_>>()) });
-                        model::update(&dir, &patch, &defaults)?;
-                        let v = ix.refresh(lib, &id).ok_or_else(|| anyhow!("couldn't read the model again"))?;
+                        model::update(&dir, &patch, &first_sidecar(m))?;
+                        let mut v = ix.refresh(lib, &id).ok_or_else(|| anyhow!("couldn't read the model again"))?;
+                        if let (Some(jid), Some(before)) = (journal, before) {
+                            let jid = if jid.is_empty() { relayout::new_id(lib)? } else { jid };
+                            let name = v["name"].as_str().unwrap_or("").to_string();
+                            let label = args["label"].as_str().map(String::from).unwrap_or_else(|| format!("Edited {name}'s details"));
+                            relayout::record(lib, &jid, &json!({ "kind": "details", "label": label,
+                                "models": [{ "id": v["id"], "name": name, "rel": rel, "before": before, "after": model::read_sidecar(&dir) }],
+                                "files": args["files"].as_array().cloned().unwrap_or_default() }))?;
+                            v["journal"] = json!(jid);
+                        }
                         if let Some(c) = &cache {
                             ix.save(c)?;
                         }
@@ -1404,13 +1512,7 @@ impl App {
                     },
                 ))
             }
-            "journals" => {
-                let lib = self.library()?;
-                j(json!(relayout::list(&lib)
-                    .iter()
-                    .map(relayout::brief)
-                    .collect::<Vec<_>>()))
-            }
+            "journals" => j(json!(relayout::briefs(&self.library()?))),
             "journal_undo" | "journal_finish" => {
                 let lib = self.library()?;
                 lib.writable().map_err(e2s)?;
@@ -1426,11 +1528,20 @@ impl App {
                         let report = |i: usize, n: usize, name: &str| {
                             app.job_progress(&jid, json!({ "item": i, "items": n, "name": name }))
                         };
-                        if undo {
-                            relayout::undo(&lib, &id, &cancel, &report)
-                        } else {
-                            relayout::apply(&lib, &id, &cancel, &report)
+                        if !undo {
+                            return relayout::apply(&lib, &id, &cancel, &report);
                         }
+                        let r = relayout::undo(&lib, &id, &cancel, &report)?;
+                        // imported models put back where they came from: not imported in the workspace
+                        let back = strings(&r["sort"]);
+                        if !back.is_empty() {
+                            let n = app.with_sort(true, |se| Ok(se.unmark(&back))).unwrap_or(0);
+                            app.sort_undo.lock().unwrap().clear();
+                            let mut r = r;
+                            r["unmarked"] = json!(n);
+                            return Ok(r);
+                        }
+                        Ok(r)
                     },
                 ))
             }
@@ -1456,7 +1567,9 @@ impl App {
                             }
                         };
                         let (add, remove) = (list("tags_add"), list("tags_remove"));
-                        let (mut saved, mut errors) = (0, vec![]);
+                        let (mut saved, mut errors, mut changed) = (0, vec![], vec![]);
+                        // a model given its first model.json gets a lasting id
+                        let mut renamed = serde_json::Map::new();
                         for id in &ids {
                             let Some(m) = ix.get(id) else {
                                 errors.push(json!({ "id": id, "error": "That model isn't in the library any more." }));
@@ -1482,12 +1595,18 @@ impl App {
                             if let Some(f) = edit["fields"].as_object().filter(|f| !f.is_empty()) {
                                 patch["fields"] = Value::Object(f.clone());
                             }
-                            let defaults = json!({ "name": m.v["name"], "schema": m.v["schema"], "path": if m.v["schema"].is_null() { Value::Null } else { m.v["path"].clone() },
-                                "authors": m.v["authors"].as_array().filter(|a| !a.is_empty()).map(|a| a.iter().map(|n| json!({ "name": n })).collect::<Vec<_>>()) });
-                            match model::update(&dir, &patch, &defaults) {
-                                Ok(_) => {
+                            let (rel, name) = (m.rel().to_string(), m.v["name"].clone());
+                            let r = details_before(&dir, m).and_then(|before| {
+                                model::update(&dir, &patch, &first_sidecar(m))?;
+                                Ok(before)
+                            });
+                            match r {
+                                Ok(before) => {
                                     saved += 1;
+                                    let after = model::read_sidecar(&dir);
                                     ix.refresh(lib, id);
+                                    renamed.insert(id.clone(), after["id"].clone());
+                                    changed.push(json!({ "id": after["id"], "name": name, "rel": rel, "before": before, "after": after }));
                                 }
                                 Err(e) => errors.push(json!({ "id": id, "error": e2s(e) })),
                             }
@@ -1495,7 +1614,18 @@ impl App {
                         if let Some(c) = &cache {
                             ix.save(c)?;
                         }
-                        Ok(json!({ "saved": saved, "errors": errors }))
+                        let journal = if changed.is_empty() {
+                            Value::Null
+                        } else {
+                            let jid = relayout::new_id(lib)?;
+                            let label = match changed.as_slice() {
+                                [one] => format!("Edited {}'s details", one["name"].as_str().unwrap_or("")),
+                                all => format!("Edited {} models' details", all.len()),
+                            };
+                            relayout::record(lib, &jid, &json!({ "kind": "details", "label": label, "models": changed }))?;
+                            json!(jid)
+                        };
+                        Ok(json!({ "saved": saved, "errors": errors, "journal": journal, "ids": renamed }))
                     })
                     .await?
                     .map_err(e2s)?;
@@ -2359,6 +2489,254 @@ mod tests {
             .any(|i| i["name"] == "Lamp" && i["placed"] == false));
         let se = call(&app2, "sort_clear", json!({ "imported": true })).await;
         assert_eq!(se["items"].as_array().unwrap().len(), 1);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[tokio::test]
+    async fn moves_imports_and_details_are_journalled_and_undone() {
+        let (app, home) = app("journals");
+        let lib = home.join("Lib");
+        call(
+            &app,
+            "library_open",
+            json!({ "path": lib.display().to_string() }),
+        )
+        .await;
+        call(
+            &app,
+            "schema_create",
+            json!({ "schema": { "name": "Home items" } }),
+        )
+        .await;
+        for p in ["Unsorted/Lamp/lamp.stl", "Unsorted/Hook/hook.stl"] {
+            std::fs::create_dir_all(lib.join(p).parent().unwrap()).unwrap();
+            std::fs::write(lib.join(p), "solid x").unwrap();
+        }
+        call(&app, "library_scan", json!({ "full": true })).await;
+        let id_of = |q: Value, name: &str| {
+            q["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|m| m["name"] == name)
+                .unwrap()["id"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let q = call(&app, "models_query", json!({})).await;
+        let (lamp, hook) = (id_of(q.clone(), "Lamp"), id_of(q, "Hook"));
+        let tree = |app: Arc<App>| async move {
+            let ov = call(&app, "library_overview", json!({})).await;
+            ov["schemas"][0]["tree"].to_string()
+        };
+        // Move to category: planned (with the folders that move), run, journalled
+        let change = json!({ "kind": "move", "ids": [lamp], "schema": "home-items", "values": ["Office", "Desk"] });
+        let plan = call(&app, "relayout_plan", json!({ "change": change })).await;
+        assert_eq!(
+            (plan["moving"].clone(), plan["label"].clone()),
+            (json!(1), json!("Moved Lamp to Home items › Office › Desk")),
+            "{plan}"
+        );
+        let done = wait(
+            &app,
+            &call(&app, "relayout_apply", json!({ "change": change })).await,
+        )
+        .await;
+        let moved = done["result"]["journal"].as_str().unwrap().to_string();
+        assert!(
+            lib.join("Home items/Office/Desk/Lamp/lamp.stl").is_file(),
+            "{done}"
+        );
+        assert!(tree(app.clone()).await.contains("Desk"));
+        // the model kept its id
+        let q = call(&app, "models_query", json!({ "q": "lamp" })).await;
+        assert_eq!(q["items"][0]["id"], json!(lamp));
+        // Edit details: journalled; it doesn't stop the move being undone (another model)
+        let v = call(
+            &app,
+            "model_update",
+            json!({ "id": hook, "patch": { "name": "Coat hook" }, "journal": true }),
+        )
+        .await;
+        let edited = v["journal"].as_str().unwrap().to_string();
+        let hook = v["id"].as_str().unwrap().to_string(); // its model.json gives it a lasting id
+        let js = call(&app, "journals", json!({})).await;
+        assert_eq!(js[0]["kind"], "details");
+        assert_eq!(
+            (js[0]["undo"].clone(), js[1]["undo"].clone()),
+            (json!(true), json!(true)),
+            "{js}"
+        );
+        // editing the lamp's details does
+        let v = call(
+            &app,
+            "model_update",
+            json!({ "id": lamp, "patch": { "tags": "light" }, "journal": true }),
+        )
+        .await;
+        let tagged = v["journal"].as_str().unwrap().to_string();
+        let js = call(&app, "journals", json!({})).await;
+        assert!(
+            js[2]["undo"]
+                .as_str()
+                .unwrap()
+                .starts_with("Undo the newer change first"),
+            "{js}"
+        );
+        let d = wait(
+            &app,
+            &call(&app, "journal_undo", json!({ "id": moved })).await,
+        )
+        .await;
+        assert!(
+            d["error"]
+                .as_str()
+                .unwrap()
+                .starts_with("Undo the newer change first"),
+            "{d}"
+        );
+        wait(
+            &app,
+            &call(&app, "journal_undo", json!({ "id": tagged })).await,
+        )
+        .await;
+        let done = wait(
+            &app,
+            &call(&app, "journal_undo", json!({ "id": moved })).await,
+        )
+        .await;
+        assert_eq!(done["result"]["state"], "undone", "{done}");
+        assert!(
+            lib.join("Unsorted/Lamp/lamp.stl").is_file() && !lib.join("Home items/Office").exists()
+        );
+        assert!(
+            !tree(app.clone()).await.contains("Office"),
+            "the subcategory made on the way goes"
+        );
+        let q = call(&app, "models_query", json!({ "q": "lamp" })).await;
+        assert_eq!(q["items"][0]["id"], json!(lamp));
+        let done = wait(
+            &app,
+            &call(&app, "journal_undo", json!({ "id": edited })).await,
+        )
+        .await;
+        assert_eq!(done["result"]["state"], "undone", "{done}");
+        assert_eq!(
+            model::read_sidecar(&lib.join("Unsorted/Hook"))["name"],
+            "Hook"
+        );
+        // Use as cover: the picture it replaced comes back
+        use base64::Engine;
+        let png = |c: &[u8]| {
+            format!(
+                "data:image/png;base64,{}",
+                base64::engine::general_purpose::STANDARD
+                    .encode([b"\x89PNG\r\n\x1a\n".as_slice(), c].concat())
+            )
+        };
+        call(
+            &app,
+            "model_cover",
+            json!({ "id": hook, "snapshot": png(b"one") }),
+        )
+        .await;
+        let v = call(
+            &app,
+            "model_cover",
+            json!({ "id": hook, "snapshot": png(b"two") }),
+        )
+        .await;
+        let cover = lib.join("Unsorted/Hook/_media/cover.png");
+        assert!(std::fs::read(&cover).unwrap().ends_with(b"two"));
+        wait(
+            &app,
+            &call(&app, "journal_undo", json!({ "id": v["journal"] })).await,
+        )
+        .await;
+        assert!(std::fs::read(&cover).unwrap().ends_with(b"one"));
+        // Import: undone, the folder goes back as it was and the workspace has it again
+        let src = home.join("Share");
+        std::fs::create_dir_all(src.join("Bench")).unwrap();
+        std::fs::write(src.join("Bench/bench.stl"), "solid b").unwrap();
+        wait(
+            &app,
+            &call(
+                &app,
+                "sort_add",
+                json!({ "paths": [src.display().to_string()] }),
+            )
+            .await,
+        )
+        .await;
+        let se = call(&app, "sort_get", json!({})).await;
+        let bench = se["items"][0]["id"].clone();
+        let se = call(
+            &app,
+            "sort_send",
+            json!({ "ids": [bench], "schema": "home-items", "values": ["Garage"] }),
+        )
+        .await;
+        assert_eq!(se["changed"], 1, "{se}");
+        let done = wait(
+            &app,
+            &call(&app, "sort_commit", json!({ "mode": "move" })).await,
+        )
+        .await;
+        let imported = done["result"]["journal"].as_str().unwrap().to_string();
+        assert!(
+            lib.join("Home items/Garage/Bench/bench.stl").is_file() && !src.join("Bench").exists()
+        );
+        let done = wait(
+            &app,
+            &call(&app, "journal_undo", json!({ "id": imported })).await,
+        )
+        .await;
+        assert_eq!(
+            (
+                done["result"]["state"].clone(),
+                done["result"]["unmarked"].clone()
+            ),
+            (json!("undone"), json!(1)),
+            "{done}"
+        );
+        assert!(
+            src.join("Bench/bench.stl").is_file()
+                && !src.join("Bench/model.json").exists()
+                && !src.join("Bench/_thumbs").exists()
+        );
+        assert!(
+            !lib.join("Home items/Garage").exists() && !tree(app.clone()).await.contains("Garage")
+        );
+        let se = call(&app, "sort_get", json!({})).await;
+        assert!(
+            se["items"][0]["done"].is_null() && se["items"][0]["placed"] == true,
+            "{se}"
+        );
+        // copied in, then undone: the copy goes and the original stays
+        let done = wait(
+            &app,
+            &call(&app, "sort_commit", json!({ "mode": "copy" })).await,
+        )
+        .await;
+        let copied = done["result"]["journal"].as_str().unwrap().to_string();
+        assert!(
+            lib.join("Home items/Garage/Bench/bench.stl").is_file()
+                && src.join("Bench/bench.stl").is_file()
+        );
+        wait(
+            &app,
+            &call(&app, "journal_undo", json!({ "id": copied })).await,
+        )
+        .await;
+        assert!(!lib.join("Home items/Garage").exists() && src.join("Bench/bench.stl").is_file());
+        // Read again as a job
+        let done = wait(
+            &app,
+            &call(&app, "library_scan", json!({ "full": true, "job": true })).await,
+        )
+        .await;
+        assert_eq!(done["result"]["models"], 2, "{done}");
         let _ = std::fs::remove_dir_all(&home);
     }
 

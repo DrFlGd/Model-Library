@@ -9,12 +9,12 @@
 //
 // `src` says whose files they are: { kind: "model", id, rel } for a model in the
 // library, { kind: "sort", id } for one in the sorting workspace.
-import { html, useState, useEffect, useRef } from "../lib/html.js";
+import { html, useState, useEffect, useLayoutEffect, useRef } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui, resolvedTheme, setPref } from "./state.js";
 import { ctx } from "./context.js";
 import { Icon } from "./icons.js";
-import { api, apiBytes, isDesktop, libraryUrl, openModelFile, toast, loadOverview } from "./library.js";
+import { api, apiBytes, isDesktop, libraryUrl, openModelFile, toast, loadOverview, recorded, followIds } from "./library.js";
 import { size } from "./details.js";
 import { openMenu, typing } from "./actions.js";
 
@@ -146,13 +146,17 @@ function fileMenu(e, src, f, open) {
   openMenu(e, items);
 }
 
-async function useAsCover(id, file) {
+/** Set a model's cover (a picture of its own, or `snapshot`: the 3D view), with Undo. */
+async function setCover(id, args, said) {
   try {
-    await api("model_cover", { id, file });
+    const v = await api("model_cover", { id, ...args });
+    followIds({ [id]: v.id });
     await loadOverview();
-    toast("Saved as the model's cover.");
+    recorded(said, v.journal);
   } catch (e) { toast(`Couldn't set the cover: ${e.message || e}`, 6000); }
 }
+
+const useAsCover = (id, file) => setCover(id, { file }, "Saved as the model's cover.");
 
 /** One file in a list: opens it (a ZIP unfolds into its entries). A file with no
  *  viewer here is greyed; double-click opens it in its own app. */
@@ -321,13 +325,7 @@ function Stage3D({ src, model, current, onInfo }) {
     }, (e) => { if (live) { viewer.current?.clear(); setState((s) => ({ ...s, busy: false, info: null, error: e.message || String(e) })); } });
     return () => { live = false; };
   }, [state.ready, src.id, current?.file, current?.entry]);
-  const cover = async () => {
-    try {
-      await api("model_cover", { id: model.id, snapshot: viewer.current.snapshot() });
-      await loadOverview();
-      toast("Saved this view as the model's cover.");
-    } catch (e) { toast(`Couldn't save the cover: ${e.message || e}`, 6000); }
-  };
+  const cover = () => setCover(model.id, { snapshot: viewer.current.snapshot() }, "Saved this view as the model's cover.");
   const info = state.info;
   return html`<div class="stage-3d">
     <div class="stage-canvas"><canvas ref=${canvas} id="viewer-canvas"></canvas>
@@ -374,13 +372,7 @@ function Pictures({ src, model, pictures, current, setCurrent }) {
     addEventListener("keydown", key);
     return () => removeEventListener("keydown", key);
   });
-  const cover = async () => {
-    try {
-      await api("model_cover", { id: model.id, file: pic.file });
-      await loadOverview();
-      toast("Saved as the model's cover.");
-    } catch (e) { toast(`Couldn't set the cover: ${e.message || e}`, 6000); }
-  };
+  const cover = () => useAsCover(model.id, pic.file);
   if (!pic) return html`<div class="stage-note muted">No pictures.</div>`;
   return html`<div class="stage-pictures">
     <div class="stage-picture">${url ? html`<img src=${url} alt=${pic.entry || pic.file} id="picture-big" />` : null}</div>
@@ -449,7 +441,8 @@ export function FilesView({ src, files: allFiles, main, model, names, compact, s
   const [tab, setTab] = useState(null);
   const [variant, setVariant] = useState(undefined);
   const [cur, setCur] = useState({});
-  useEffect(() => { setTab(null); setVariant(undefined); setCur({}); }, [src.kind, src.id]);
+  // before paint, so a file picked as the view appears isn't put back
+  useLayoutEffect(() => { setTab(null); setVariant(undefined); setCur({}); }, [src.kind, src.id]);
   const variants = variantsIn(allFiles, names);
   const chosen = variant === undefined || (variant && !variants.includes(variant)) ? variants[0] || null : variant;
   const files = allFiles.filter((f) => inVariant(f.rel, chosen, names));

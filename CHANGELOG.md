@@ -47,8 +47,8 @@ The sandbox has a network allowlist and is reset between sessions.
 
 ### Known limitations now
 
-- ZIPs are read in place (listed, and their 3D files and pictures shown) but never unpacked; 7z and RAR are kept as archives and not opened. Only the newest category change can be undone; a model folder can't be renamed from the app except through a category's model-folder template.
-- Duplicates are judged by 3D, slicer and archive files only (pictures and documents can differ). The Duplicates page shows the last search; it isn't run by itself. Only the newest set-aside can be undone (like category changes).
+- ZIPs are read in place (listed, and their 3D files and pictures shown) but never unpacked; 7z and RAR are kept as archives and not opened. Changes that move folders (category changes, moves, imports, setting aside) are undone newest first; a model folder can't be renamed from the app except through a category's model-folder template.
+- Duplicates are judged by 3D, slicer and archive files only (pictures and documents can differ). The Duplicates page shows the last search; it isn't run by itself.
 - Changes made outside the app are noticed by a watcher on the library folder (2 s after they settle) and by a check when the window comes back to the front and every 5 minutes. A model folder moved by hand keeps its id only if it has a `model.json`; one without gets a new id from its new path.
 - The index lives in memory and is cached per computer (`<data dir>/index/<library id>.json`); 10,000 models take about 1 s to read the first time and under a second after.
 - Previews are drawn by the core's own renderer (`thumb.rs`, flat shaded, no textures or colours from 3MF). Models whose 3D file can't be read get no preview and are tried again by every *Make previews*. G-code and other slicer files aren't shown in 3D.
@@ -59,11 +59,19 @@ The sandbox has a network allowlist and is reset between sessions.
 
 ### Next (roadmap)
 
-The UI pass in `docs/PLAN.md` ("UI pass design"): step 1 (actions, 0.5.1) is done; step 2 (undo for Move, Import and Edit details through journals, one red confirm, Stop on every job, 0.5.2) and step 3 (one page header, one details panel, Home rework, 0.5.3) are next. Phase 6 (Docker with sign-in) is on hold until the UI pass is done.
+The UI pass in `docs/PLAN.md` ("UI pass design"): step 1 (actions, 0.5.1) and step 2 (undo and asking, 0.5.2) are done; step 3 (one page header, one details panel, Home rework, 0.5.3) is next. Phase 6 (Docker with sign-in) is on hold until the UI pass is done.
 
 ---
 
 ## Unreleased
+
+UI pass, step 2 of 3: undo and asking (design in docs/PLAN.md, "UI pass design"; notes in "UI pass notes").
+
+- **Every change can be undone, from its message or from Recent changes on Home**: Move to category, Import (the files go back where they came from, or the copies are deleted), Edit details for one or several models, and Use as cover now write a journal in `_library/journal/`, as category changes do. Changes that move folders are undone newest first; an edit to details can be undone on its own unless a newer change touched the same model. Home shows Undo on every row and says why one has to wait.
+- **Move to category shows what moves first**, with the same list of folders as category changes, and the button says how many models move.
+- **One red confirm** for what can't be undone: Delete set-aside copies… asks in a dialog that names what it deletes.
+- **Read again can be stopped** from the status bar; the library then stays as it was read before.
+- Fixed: the Import page could be used for a moment before its workspace had loaded (it now says "Reading the workspace…"); a name typed on Import just as a model's details appeared could be put back (the cause of a rare page-test timeout).
 
 ## 0.5.1 (2026-10-07)
 

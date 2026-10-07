@@ -10,6 +10,7 @@ use crate::schema::{self, Schema};
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::UNIX_EPOCH;
 
 pub const UNSORTED: &str = "Unsorted";
@@ -303,6 +304,19 @@ impl Index {
     /// Read the library. With `cache` (a path in the app's data folder), models whose
     /// folder and model.json haven't changed come from it, and the result is saved there.
     pub fn build(lib: &Library, cache: Option<&Path>, full: bool) -> Index {
+        Self::build_with(lib, cache, full, &AtomicBool::new(false), &|_, _| {})
+            .expect("not stopped")
+    }
+
+    /// As `build`, reporting `on_item(read, of)` as it reads models; None when
+    /// `stop` is set (the index as it was stays, and the cache isn't touched).
+    pub fn build_with(
+        lib: &Library,
+        cache: Option<&Path>,
+        full: bool,
+        stop: &AtomicBool,
+        on_item: &dyn Fn(usize, usize),
+    ) -> Option<Index> {
         let t = std::time::Instant::now();
         let schemas = schema::list(lib);
         let mut cached: HashMap<String, Model> = HashMap::new();
@@ -329,7 +343,15 @@ impl Index {
         }
         let mut read = 0;
         let mut models = vec![];
-        for (dir, si, cats) in find_models(lib, &schemas) {
+        let found = find_models(lib, &schemas);
+        let n = found.len();
+        for (i, (dir, si, cats)) in found.into_iter().enumerate() {
+            if i % 50 == 0 {
+                if stop.load(Ordering::Relaxed) {
+                    return None;
+                }
+                on_item(i, n);
+            }
             let schema = si.map(|i| &schemas[i]);
             let rel = lib.relative(&dir).unwrap_or_default();
             let fresh = cached.remove(&rel).filter(|m| {
@@ -361,7 +383,7 @@ impl Index {
             }
         }
         ix.ms = t.elapsed().as_millis();
-        ix
+        Some(ix)
     }
 
     fn reindex(&mut self) {

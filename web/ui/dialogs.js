@@ -5,9 +5,9 @@ import { useStore } from "../lib/store.js";
 import { ui } from "./state.js";
 import { routeHash, schemaScope } from "./context.js";
 import { Icon } from "./icons.js";
-import { api, loadOverview, saveDetails, moveModels, runChange, undoable } from "./library.js";
+import { api, loadOverview, saveDetails, runChange, undoable, recorded } from "./library.js";
 import { CategoryPicker, SubcategoryTree, treeSpec, treeReady, firstBranch } from "./category.js";
-import { RenameNode, EditSchema, DeleteSchema, DeleteSubcategory, EditPicked, AddSubcategory } from "./categories.js";
+import { RenameNode, EditSchema, DeleteSchema, DeleteSubcategory, EditPicked, AddSubcategory, ChangePreview } from "./categories.js";
 
 export const FIELD_TYPES = [["text", "Text"], ["number", "Number"], ["choice", "Choice"], ["yes-no", "Yes or no"], ["date", "Date"]];
 export const close = () => ui.set({ dialog: null });
@@ -149,14 +149,10 @@ function EditModel({ model, schema, select }) {
     setError("");
     try {
       const patch = { ...form, fields: {} };
-      const before = { ...formOf(model), fields: {} };
-      for (const f of schema?.fields || []) {
-        patch.fields[f.key] = fields[f.key] ?? "";
-        before.fields[f.key] = model.fields?.[f.key] ?? "";
-      }
+      for (const f of schema?.fields || []) patch.fields[f.key] = fields[f.key] ?? "";
       const v = await saveDetails(model, patch);
       close();
-      undoable(`Saved ${v.name}'s details.`, () => saveDetails(v, before));
+      recorded(`Saved ${v.name}'s details.`, v.journal);
     } catch (e) {
       setError(e.message || String(e));
     } finally {
@@ -182,55 +178,69 @@ function EditModel({ model, schema, select }) {
   <//>`;
 }
 
-/** Move one or several models to a category (or Unsorted). Their folders keep their names. */
+/** Move one or several models to a category (or Unsorted). Their folders keep their
+ *  names; the folders that move are listed first, and the move can be undone. */
 function MoveModels({ models }) {
   const overview = useStore(ui, (s) => s.overview);
   const first = models[0];
   const same = models.every((m) => m.schema === first.schema);
   const [schema, setSchema] = useState(same ? first.schema : null);
   const [values, setValues] = useState(same ? [...(first.path || [])] : []);
+  const [plan, setPlan] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const sc = overview?.schemas?.find((s) => s.id === schema);
   const where = sc ? [sc.folder, ...values].join(" / ") : "Unsorted";
+  const change = { kind: "move", ids: models.map((m) => m.id), schema: schema || null, values };
+  const n = plan?.moving || 0;
   const submit = async () => {
     setBusy(true);
     setError("");
     try {
-      const r = await moveModels(models.map((m) => m.id), schema, values);
-      if (r.errors.length) {
-        setError(r.errors.map((e) => e.error).join(" "));
-      } else {
-        close();
-        // undo moves each back to where it was (step 2 of the UI pass journals it)
-        const from = new Map();
-        for (const mv of r.moved) {
-          const m = models.find((x) => x.id === mv.id);
-          const key = JSON.stringify([m.schema || null, m.schema ? m.path || [] : []]);
-          if (!from.has(key)) from.set(key, []);
-          from.get(key).push(mv.new_id);
-        }
-        undoable(`Moved ${r.moved.length === 1 ? models[0].name : `${r.moved.length} models`} to ${sc ? [sc.name, ...values].join(" › ") : "Unsorted"}.`, async () => {
-          for (const [key, ids] of from) {
-            const [s0, v0] = JSON.parse(key);
-            const back = await moveModels(ids, s0, v0);
-            if (back.errors.length) throw new Error(back.errors[0].error);
-          }
-        });
-      }
+      const r = await runChange(change, models.length === 1 ? `Moving ${first.name}` : `Moving ${models.length} models`);
+      close();
+      recorded(`${plan?.label || "Moved"}.`, r.journal);
     } catch (e) {
       setError(e.message || String(e));
     } finally {
       setBusy(false);
     }
   };
-  return html`<${Dialog} title=${models.length === 1 ? `Move ${first.name} to a category` : `Move ${models.length} models to a category`} id="move-dialog" onSubmit=${submit} busy=${busy} error=${error} submitLabel="Move">
+  return html`<${Dialog} title=${models.length === 1 ? `Move ${first.name} to a category` : `Move ${models.length} models to a category`} id="move-dialog" onSubmit=${submit} busy=${busy || !n} error=${error}
+      submitLabel=${n ? `Move ${n} ${n === 1 ? "model" : "models"}` : "Move"}>
     <p class="muted">${models.length === 1 ? "Its folder moves" : "Their folders move"} into the subcategory's folder and ${models.length === 1 ? "keeps its" : "keep their"} name. A new subcategory is added to the category.</p>
     <div class="field-block"><span class="field-label">Category</span>
       <${CategoryPicker} overview=${overview} schema=${schema} values=${values} idPrefix="move" onChange=${(s, v) => { setSchema(s); setValues(v); }} /></div>
     <div class="field-block"><span class="field-label">Goes to</span><code class="preview-path" id="move-preview">${where} / …</code></div>
+    <${ChangePreview} change=${change} onPlan=${setPlan} />
   <//>`;
 }
+
+/** Ask before something that can't be undone (docs/PLAN.md, "UI pass design", rule 6):
+ *  one red button that names what it does. Open it with `confirmDialog`. */
+function ConfirmDialog({ title, text, button, run }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await run();
+      close();
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return html`<${Dialog} title=${title} id="confirm-dialog" onSubmit=${submit} busy=${busy} error=${error} submitLabel=${button} danger=${true}>
+    <p>${text}</p>
+    <p class="muted">This can't be undone.</p>
+  <//>`;
+}
+
+/** `{ title, text, button, run }`: `run()` is what happens after the red button. */
+export const confirmDialog = (opts) => ui.set({ dialog: { type: "confirm", ...opts } });
 
 export function Dialogs() {
   const dialog = useStore(ui, (s) => s.dialog);
@@ -243,6 +253,7 @@ export function Dialogs() {
   if (dialog.type === "delete-schema") return html`<${DeleteSchema} schemaId=${dialog.schemaId} />`;
   if (dialog.type === "delete-subcategory") return html`<${DeleteSubcategory} schemaId=${dialog.schemaId} path=${dialog.path} />`;
   if (dialog.type === "edit-picked") return html`<${EditPicked} models=${dialog.models} />`;
+  if (dialog.type === "confirm") return html`<${ConfirmDialog} ...${dialog} />`;
   if (dialog.type === "edit-model") return html`<${EditModel} model=${dialog.model} schema=${dialog.schema} select=${!!dialog.select} key=${dialog.model.id} />`;
   return null;
 }
