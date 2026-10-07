@@ -65,6 +65,8 @@ The UI pass in `docs/PLAN.md` ("UI pass design"): step 1 (actions, 0.5.1) and st
 
 ## Unreleased
 
+## 0.5.2 (2026-10-07)
+
 UI pass, step 2 of 3: undo and asking (design in docs/PLAN.md, "UI pass design"; notes in "UI pass notes").
 
 - **Every change can be undone, from its message or from Recent changes on Home**: Move to category, Import (the files go back where they came from, or the copies are deleted), Edit details for one or several models, and Use as cover now write a journal in `_library/journal/`, as category changes do. Changes that move folders are undone newest first; an edit to details can be undone on its own unless a newer change touched the same model. Home shows Undo on every row and says why one has to wait.
