@@ -558,3 +558,48 @@ Built as designed, with these differences and lessons:
 - **The search note** names the place and how many were found there, and offers Search all models when the place isn't All models. The note and the place summary use only the answer for the place shown: while the next place's answer comes, the last one stays on screen, and the note briefly said "found in All models" over Household's empty list.
 - Settings' section headings were the same size as the page title; they're smaller now.
 - Tests: `ui_pass3` in `desktop_page.py` (checks 45 to 50: one header on every page, the view switcher, the sort menu and the list's headers, the search note in another place, editing in the panel with Undo, the place summary and what several share, Home and Settings › About, and the same panel on Duplicates and Import). 58 page checks in all.
+
+## Import follow-ups design (0.5.4)
+
+The owner's asks after the UI pass (2026-10-07): when sorting a folder the app decides which folder level is the model, and it should be possible to choose that level before setting a category; dropping files from outside should ask whether to add them as a model to the category shown or sort them; and file types should be easy to tell apart on Import (a ZIP from an STL from a 3MF from a folder).
+
+### Choosing the folder level that is the model
+
+The workspace could already make one folder a model (`join`) and split one (`split`), but only as "Combine into one model" on a selected folder, which didn't read as choosing the level. Now:
+
+- **Make this folder one model** on any folder in the Folders view (panel button, right-click), at any depth: everything in it becomes its parts.
+- **Make every folder at this level a model (N)**: every folder at the same depth of the folder being sorted becomes one model (for collections laid out as maker › release › model, where the app picked the parts one level too deep). Folders at that level that are models already stay as they are; one that's grouped with files outside it is left and the message says so.
+- **Make each folder a model** when several folders are selected (Ctrl- or Shift-click), beside Combine into one model.
+- **The model's folder in its panel**: a model shows the folders above it as a path ("Downloads › Armour Set › Helmet"); clicking a folder above it makes that folder the model instead.
+- **Split into models** (was Split) for a model that should be a folder of models; the folders inside it are then read on their own.
+- Each is one change in the workspace, with Undo in the message and on Ctrl+Z, as before. The core's `sort_join` takes `folders` (several) and `level`.
+
+### Dropping files and folders on the window
+
+Dropping from outside (Explorer, a file manager) opens a menu where they were dropped, headed with what was dropped:
+
+- **Add to <the category shown> as a model** (several dropped: **as N models**, and **as one model**). Shown on a category or subcategory page; anywhere else it adds to Unsorted. It moves them in, like Import's default; Undo in the message puts them back where they came from.
+- **Copy to <place> instead**: the originals stay.
+- **Sort it on Import…** when a folder was dropped: it's added to the Import page with its contents read, to choose the models and their categories there.
+- On the Import page itself: **Add as a model** and **Sort what's in it**.
+- While something is dragged over the window, it says where a drop goes.
+
+Underneath it's the workspace: the dropped things are added as models, sent to the place and imported (so the import journal, its checks and its undo are the same as Import's). A read-only library greys the add items with the reason.
+
+### File types at a glance
+
+One mark per file type everywhere a file is listed (Import's rows, a model's files, the details panel): a coloured tag with the type's name, the same colour every time. STL, 3MF, OBJ and STEP each have their own colour, slicer files (Lychee, Chitubox, G-code…) share one, archives (ZIP, 7z, RAR) one, pictures, documents and videos one each. On Import:
+
+- a folder that holds models has a folder mark; a folder that is one model has the model mark, and the tags of the types inside it ("STL 12", "ZIP");
+- a model made of loose files shows its files' tags; a loose file shows its own.
+
+The core's file summary gains `exts`: how many 3D, slicer and archive files of each type a model has.
+
+## Import follow-ups notes (0.5.4)
+
+Built as designed, with these details:
+
+- **Model level:** `Session::level_of` (folders shown at the same depth under the same added folder) and `join_many` (joins each, skips the ones grouped with outside files, fails only when none could) in `sort.rs`; `sort_join` takes `folder`, `folders` or `folder` + `level`, and answers `ids` and `left`. On the page: Make this folder one model, Make every folder at this level a model (N, the folders named in its tooltip), Make each folder a model (several selected), Split into models, and the **Model folder** path in a model's panel (`#sort-level`, each folder above it a button).
+- **Dropping:** `web/ui/drop.js`. The desktop platform's `onDrop(cb, over)` listens to Tauri's `tauri://drag-enter`, `drag-leave` and `drag-drop` (the drop's position comes in physical pixels and is divided by `devicePixelRatio`). The menu is the shared one, which now takes `{ head }` and a `sub` line on an item. Adding goes `sort_add` (each one a model) → `sort_group` (as one model) → `sort_send` → `sort_commit` with `forget: true`, which takes those models and their roots off Import's list once they're in, so a drop leaves the workspace as it was. `sort_paths` says whether each dropped path is a folder. A path inside a folder already on Import isn't added twice: the message says to give it a category there.
+- **File types:** `web/ui/filetypes.js` (`TypeTag`, `TypeTags`, `fileType`). The tag replaces the kind icon in every file list (a model's folders, list and by-type views, ZIP entries, the grid's tiles, the details panel's files) and marks loose files on Import; a model's row shows the tags of what it holds from the summary's new `exts`. Archives were shown with the folder icon before; they have their own now, and folders are amber.
+- Tests: `import_follow_ups` in `desktop_page.py` (checks 51 to 55) with drops sent through the test shim's `__shimEmit`, and `makes_every_folder_at_a_level_a_model` in the core. 63 page checks in all.

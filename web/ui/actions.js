@@ -18,11 +18,11 @@ export const writable = () => (ui.get().library?.read_only ? "The library is rea
 
 // ---------------------------------------------------------------- the menu
 
-/** Open a menu: at a mouse event's point, or under an element (a More button).
- *  `items`: [{ id, label, icon, key, run, disabled (false or the reason), danger }
- *  or { sep: true }]. */
+/** Open a menu: at a mouse event's point (or { clientX, clientY }), or under an
+ *  element (a More button). `items`: [{ id, label, sub (a second line), icon, key,
+ *  run, disabled (false or the reason), danger }, { sep: true } or { head: text }]. */
 export function openMenu(at, items) {
-  if (!items.some((it) => !it.sep)) return;
+  if (!items.some((it) => !it.sep && !it.head)) return;
   let x, y, from = document.activeElement;
   if (at instanceof Element) {
     const r = at.getBoundingClientRect();
@@ -92,10 +92,11 @@ export function ContextMenu() {
   return html`<div class="menu" role="menu" id="context-menu" ref=${ref} onKeyDown=${onKey}
       style=${pos ? `left:${pos.x}px;top:${pos.y}px` : `left:${menu.x}px;top:${menu.y}px;visibility:hidden`}>
     ${menu.items.map((it, i) => it.sep ? html`<div class="menu-sep" role="separator" key=${`sep${i}`}></div>`
+      : it.head ? html`<div class="menu-head" key=${`head${i}`}>${it.head}</div>`
       : html`<button type="button" role="menuitem" key=${it.id || i} data-action=${it.id} class=${`menu-item${it.danger ? " danger-text" : ""}`}
           disabled=${!!it.disabled} title=${typeof it.disabled === "string" ? it.disabled : it.title || null}
           onClick=${() => { closeMenu(); it.run(); }}>
-          <span class="menu-icon">${it.icon && Icon[it.icon] ? Icon[it.icon](14, it.filled) : null}</span><span class="menu-label">${it.label}</span>${it.key ? html`<kbd>${it.key}</kbd>` : null}</button>`)}
+          <span class="menu-icon">${it.icon && Icon[it.icon] ? Icon[it.icon](14, it.filled) : null}</span><span class="menu-label">${it.label}${it.sub ? html`<small class="menu-sub">${it.sub}</small>` : null}</span>${it.key ? html`<kbd>${it.key}</kbd>` : null}</button>`)}
   </div>`;
 }
 

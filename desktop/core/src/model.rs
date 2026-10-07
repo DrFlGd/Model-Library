@@ -74,10 +74,12 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<(String, u64)>) {
     }
 }
 
-/// Counts of files by kind, total size, and the cover picture: the sidecar's
+/// Counts of files by kind, total size, how many 3D, slicer and archive files
+/// of each type (`exts`: "stl", "zip"…), and the cover picture: the sidecar's
 /// `cover`, else the first image in `_media/`, else the first in the folder.
 pub fn summarise(files: &[(String, u64)], sidecar: &Value) -> Value {
     let mut kinds = Map::new();
+    let mut exts = Map::new();
     let mut bytes = 0u64;
     for (rel, size) in files {
         bytes += size;
@@ -86,6 +88,13 @@ pub fn summarise(files: &[(String, u64)], sidecar: &Value) -> Value {
             k.into(),
             json!(kinds.get(k).and_then(Value::as_u64).unwrap_or(0) + 1),
         );
+        if matches!(k, "model" | "slicer" | "archive") {
+            if let Some((_, e)) = rel.rsplit_once('.') {
+                let e = e.to_ascii_lowercase();
+                let n = exts.get(&e).and_then(Value::as_u64).unwrap_or(0) + 1;
+                exts.insert(e, json!(n));
+            }
+        }
     }
     let images = || {
         files
@@ -99,7 +108,7 @@ pub fn summarise(files: &[(String, u64)], sidecar: &Value) -> Value {
         .map(String::from)
         .or_else(|| images().find(|r| r.starts_with("_media/")).cloned())
         .or_else(|| images().next().cloned());
-    json!({ "kinds": kinds, "bytes": bytes, "count": files.len(), "cover": cover })
+    json!({ "kinds": kinds, "exts": exts, "bytes": bytes, "count": files.len(), "cover": cover })
 }
 
 /// The sidecar, or {} when the folder has none (or it isn't valid JSON).
@@ -291,6 +300,7 @@ mod tests {
         );
         let s = summarise(&files, &json!({}));
         assert_eq!(s["kinds"], json!({ "model": 2, "image": 2 }));
+        assert_eq!(s["exts"], json!({ "stl": 2 }));
         assert_eq!(s["bytes"], 17);
         assert_eq!(s["cover"], "_media/z.jpg");
         assert_eq!(

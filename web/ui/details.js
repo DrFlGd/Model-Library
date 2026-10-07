@@ -12,9 +12,10 @@ import { api, libraryUrl, saveDetails, recorded, toast } from "./library.js";
 import { ActionRow } from "./actions.js";
 import { EditBox } from "./layout.js";
 import { Icon } from "./icons.js";
+import { TypeTag } from "./filetypes.js";
 
 const KIND_LABEL = { model: ["3D file", "3D files"], slicer: ["slicer file", "slicer files"], image: ["picture", "pictures"], doc: ["document", "documents"], video: ["video", "videos"], archive: ["archive", "archives"], other: ["other", "other"] };
-const KIND_ICON = { model: "box", slicer: "stack", image: "image", doc: "file", video: "image", archive: "folder", other: "file" };
+const KIND_ICON = { model: "box", slicer: "stack", image: "image", doc: "file", video: "image", archive: "archive", other: "file" };
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 export function size(bytes) {
@@ -109,7 +110,7 @@ export function ModelDetails({ id, empty = null, ctx = { page: "browse" } }) {
     <div class="insp-section">
       <h3>Files <span class="muted">${m.files.count} · ${size(m.files.bytes)}</span></h3>
       <div class="insp-kinds">${Object.entries(m.files.kinds || {}).map(([k, n]) => html`<span class="chip" key=${k}>${n} ${(KIND_LABEL[k] || [k, k])[n === 1 ? 0 : 1]}</span>`)}</div>
-      <ul class="insp-files" id="details-files">${(m.files_list || []).map((f) => html`<li key=${f.rel}><span>${f.rel}</span><span class="muted">${size(f.size)}</span></li>`)}</ul>
+      <ul class="insp-files" id="details-files">${(m.files_list || []).map((f) => html`<li key=${f.rel}><span class="insp-file"><${TypeTag} name=${f.rel} /> <span class="insp-file-name">${f.rel}</span></span><span class="muted">${size(f.size)}</span></li>`)}</ul>
     </div>
     ${!m.sidecar ? html`<p class="muted insp-later">No model.json yet: the name and author come from the folder name. Changing a detail or starring the model writes one.</p>` : null}
   </aside>`;

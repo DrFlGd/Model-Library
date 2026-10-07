@@ -18,6 +18,7 @@ import { api, apiBytes, isDesktop, libraryUrl, openModelFile, toast, loadOvervie
 import { ViewSwitch, SortMenu } from "./layout.js";
 import { size } from "./details.js";
 import { openMenu, typing } from "./actions.js";
+import { TypeTag } from "./filetypes.js";
 
 export const MESH = /\.(stl|obj|3mf)$/i;
 const MD = /\.(md|markdown|txt)$/i;
@@ -76,7 +77,7 @@ function tree(files) {
   return root;
 }
 
-export const KIND_ICON = { model: "box", slicer: "stack", image: "image", doc: "file", video: "image", archive: "folder", other: "file" };
+export const KIND_ICON = { model: "box", slicer: "stack", image: "image", doc: "file", video: "image", archive: "archive", other: "file" };
 const kindIcon = (kind, s = 13) => (Icon[KIND_ICON[kind]] || Icon.file)(s);
 const TYPES = [["model", "3D models"], ["slicer", "Slicer projects"], ["image", "Pictures"], ["doc", "Documents"], ["video", "Videos"], ["archive", "Archives"], ["other", "Other files"]];
 
@@ -108,7 +109,7 @@ function ZipEntries({ src, f, open, current }) {
     const on = current?.file === f.rel && current?.entry === e.name;
     return html`<li key=${e.name} class="tree-file in-zip">
       <button type="button" class=${`tree-btn${on ? " on" : ""}`} disabled=${!t} data-entry=${e.name} onClick=${() => t && open(t)}>
-        <span class="tree-icon">${kindIcon(e.kind)}</span><span class="tree-name">${e.name}</span><span class="muted tree-size">${size(e.size)}</span></button></li>`;
+        <span class="tree-icon tree-type"><${TypeTag} name=${e.name} /></span><span class="tree-name">${e.name}</span><span class="muted tree-size">${size(e.size)}</span></button></li>`;
   });
 }
 
@@ -172,7 +173,7 @@ function FileRow({ f, name, folder, src, open, current }) {
       title=${none ? `${NO_VIEW}${ownApp(src) ? ": double-click to open it in its own app" : ""}` : null}
       onClick=${() => (zip ? setZipOpen(!zipOpen) : t ? open(t) : null)} onDblClick=${none && ownApp(src) ? () => openModelFile({ rel: src.rel }, f.rel) : null}
       onContextMenu=${(e) => fileMenu(e, src, f, open)}>
-      <span class="tree-icon">${kindIcon(f.kind)}</span>
+      <span class="tree-icon tree-type"><${TypeTag} name=${f.rel} /></span>
       <span class="tree-name">${name}${folder ? html`<span class="tree-folder muted">${folder}</span>` : null}</span>
       <span class="muted tree-size">${size(f.size)}</span></button>
     ${zip && zipOpen ? html`<ul class="tree"><${ZipEntries} src=${src} f=${f} open=${open} current=${current} /></ul>` : null}
@@ -276,7 +277,7 @@ function FileGrid({ files, src, open, current }) {
         : html`<span class="tile-icon">${kindIcon(f.kind, 28)}</span>`;
     return html`<button type="button" key=${f.rel} class=${`file-tile${on ? " on" : ""}${t ? "" : " no-view"}`} data-file=${f.rel} title=${t ? f.rel : `${f.rel}: ${NO_VIEW.toLowerCase()}`}
       onClick=${() => t && open(t)} onDblClick=${!t && ownApp(src) ? () => openModelFile({ rel: src.rel }, f.rel) : null} onContextMenu=${(e) => fileMenu(e, src, f, open)}>
-      <span class="tile-pic">${pic}</span><span class="tile-name">${name}</span></button>`;
+      <span class="tile-pic">${pic}<span class="tile-type"><${TypeTag} name=${f.rel} /></span></span><span class="tile-name">${name}</span></button>`;
   })}</div>
   ${list.length > shown.length ? html`<button type="button" class="ghost" onClick=${() => setLimit(limit + 240)}>Show more (${list.length - shown.length} left)</button>` : null}</div>`;
 }

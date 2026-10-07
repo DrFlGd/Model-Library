@@ -18,6 +18,7 @@ import { CategoryPicker } from "./category.js";
 import { size } from "./details.js";
 import { FilesView, LazyPreview } from "./parts.js";
 import { PageHead, ViewSwitch, SortMenu, SearchNote, EditBox } from "./layout.js";
+import { TypeTag, TypeTags } from "./filetypes.js";
 
 /** The workspace as the core keeps it, and what's selected here. */
 export const sorter = createStore({
@@ -234,7 +235,7 @@ function FolderRow({ r, s, sel, pick, menu }) {
       style=${`--depth:${r.depth}`} aria-selected=${on || covered ? "true" : "false"} onClick=${(e) => pick(r.key, how(e))} onContextMenu=${(e) => menu(e, r.key)}>
     <${Tick} k=${r.key} on=${on} covered=${covered} label=${f.name} pick=${pick} />
     <button type="button" class="sw-fold" aria-expanded=${r.open ? "true" : "false"} aria-label=${`${r.open ? "Fold" : "Unfold"} ${f.name}`} onClick=${toggle}>${r.open ? "▾" : "▸"}</button>
-    <span class="sw-icon">${Icon.folder(14)}</span>
+    <span class="sw-icon sw-mark-folder" title="Folder">${Icon.folder(14)}</span>
     <span class="sw-name">${f.name}</span>
     <span class="sw-meta muted">${r.count ? plural(r.count, "model", "models") : ""}${r.count && r.left ? " · " : ""}${r.left ? plural(r.left, "loose file", "loose files") : ""}</span>
   </li>`;
@@ -249,8 +250,8 @@ function ItemRow({ item, depth = 0, s, sel, pick, menu, overview, where }) {
       style=${`--depth:${depth}`} aria-selected=${on || covered ? "true" : "false"} onClick=${(e) => pick(k, how(e))} onContextMenu=${(e) => menu(e, k)}>
     <${Tick} k=${k} on=${on} covered=${covered} label=${item.name} pick=${pick} />
     <span class="sw-fold-gap"></span>
-    <span class="sw-icon">${item.kind === "group" ? Icon.layers(14) : Icon.box(14)}</span>
-    <span class="sw-name">${item.name}${item.author ? html` <span class="muted">(${item.author})</span>` : null}${where ? html`<span class="sw-where muted">${where}</span>` : null}</span>
+    <span class="sw-icon sw-mark-model" title=${item.kind === "group" ? "Combined model" : item.kind === "folder" ? "Model folder" : "Model"}>${item.kind === "group" ? Icon.layers(14) : Icon.box(14)}</span>
+    <span class="sw-name">${item.name}${item.author ? html` <span class="muted">(${item.author})</span>` : null} <${TypeTags} exts=${item.summary?.exts} />${where ? html`<span class="sw-where muted">${where}</span>` : null}</span>
     <span class="sw-meta muted">${plural(sm.count || 0, "file", "files")} · ${size(sm.bytes || 0)}</span>
     <${Place} item=${item} overview=${overview} />
   </li>`;
@@ -264,7 +265,7 @@ function LeftRow({ l, depth, s, sel, pick, menu }) {
       style=${`--depth:${depth}`} aria-selected=${on || covered ? "true" : "false"} onClick=${(e) => pick(k, how(e))} onContextMenu=${(e) => menu(e, k)} title="Not part of any model">
     <${Tick} k=${k} on=${on} covered=${covered} label=${l.name} pick=${pick} />
     <span class="sw-fold-gap"></span>
-    <span class="sw-icon">${Icon.file(14)}</span>
+    <span class="sw-icon sw-mark-file"><${TypeTag} name=${l.name} /></span>
     <span class="sw-name">${l.name}</span>
     <span class="sw-meta muted">${size(l.size)}</span>
   </li>`;
@@ -295,7 +296,7 @@ function ListView({ items, s, sel, pick, menu, overview, ix, sortBy, setSortBy }
       const on = s.picked.includes(k);
       return html`<tr key=${k} data-key=${k} data-name=${i.name} class=${`${on ? "picked" : ""}${s.focus === k ? " focused" : ""}`} aria-selected=${on ? "true" : "false"} onClick=${(e) => pick(k, how(e))} onContextMenu=${(e) => menu(e, k)}>
         <td><${Tick} k=${k} on=${on} covered=${false} label=${i.name} pick=${pick} /></td>
-        <td class="sw-name">${i.name}${i.author ? html` <span class="muted">(${i.author})</span>` : null}</td>
+        <td class="sw-name">${i.name}${i.author ? html` <span class="muted">(${i.author})</span>` : null} <${TypeTags} exts=${i.summary?.exts} /></td>
         <td class="muted">${folderOf(i, ix)}</td>
         <td class="num">${i.summary?.count || 0}</td>
         <td class="num">${size(i.summary?.bytes || 0)}</td>
@@ -322,6 +323,7 @@ function GridView({ items, s, pick, menu, overview }) {
       <div class="thumb sw-thumb"><${LazyPreview} cacheKey=${`sort:${i.id}:${i.summary?.bytes}`} ask=${() => api("sort_preview", { id: i.id })} fallback=${html`<span class="tile-icon">${Icon.box(34)}</span>`} alt=${i.name} /></div>
       <div class="card-name">${i.name}</div>
       <div class="card-sub">${i.author || html`<span>${plural(i.summary?.count || 0, "file", "files")}</span>`}</div>
+      <div class="sw-card-types"><${TypeTags} exts=${i.summary?.exts} /></div>
       <div class="sw-card-place"><${Place} item=${i} overview=${overview} /></div>
     </div>`;
   })}</div>
@@ -373,6 +375,23 @@ function folderOfSelection(sel, ix) {
   return i.kind === "folder" ? i.path : i.parent || dirName(i.sources?.[0] || i.path || "");
 }
 
+const depthOf = (p) => p.split(/[\\/]/).filter(Boolean).length;
+
+/** The folders shown at the same depth as `path` in the folder it was added with. */
+function levelOf(se, ix, path) {
+  const root = ix.rootOf(path);
+  const d = depthOf(path);
+  return se.folders.filter((f) => ix.rootOf(f.path) === root && depthOf(f.path) === d).map((f) => f.path);
+}
+
+/** Make a folder one model (everything in it becomes its parts) and select it. */
+async function joinFolder(folder) {
+  const r = await act("sort_join", { folder: folder.path }, () => `Made ${folder.name} one model.`);
+  if (r?.id) sorter.set({ picked: [`i:${r.id}`], focus: `i:${r.id}`, anchor: `i:${r.id}` });
+}
+
+const joinedText = (r) => `Made ${plural(r.ids.length, "folder", "folders")} into models${r.left?.length ? `; not ${r.left.join(", ")}, which ${r.left.length === 1 ? "is" : "are"} grouped with files outside ${r.left.length === 1 ? "it" : "them"}` : ""}.`;
+
 /** What can be done to what's selected: the actions panel's buttons and the
  *  right-click menu. Shared ones first (Edit details, Set category, Show in
  *  folder), as everywhere, then the workspace's own. */
@@ -391,20 +410,32 @@ function importActions(s, sel, ix, overview) {
   if (n) list.push({ id: "set-category", label: "Set category…", icon: "move", key: "M", run: () => focusBox("#send-schema") });
   if (where) list.push({ id: "folder", label: "Show in folder", icon: "folder", run: () => ctx.platform.library.openPath(where) });
   const own = [];
+  // which folder is the model: this one, every one at its level, or each of several
+  if (oneFolder) {
+    own.push({ id: "sort-join", label: "Make this folder one model", icon: "box", title: "Everything in it becomes the model's parts", run: () => joinFolder(oneFolder) });
+    const level = levelOf(s.session, ix, oneFolder.path);
+    if (level.length > 1) {
+      own.push({ id: "sort-join-level", label: `Make every folder at this level a model (${level.length})`, icon: "box",
+        title: `${level.slice(0, 12).map(baseName).join(", ")}${level.length > 12 ? "…" : ""}`, run: async () => {
+          const r = await act("sort_join", { folder: oneFolder.path, level: true }, joinedText);
+          if (r) sorter.set({ picked: [], anchor: null });
+        } });
+    }
+  }
+  if (sel.folders.length >= 2 && !sel.ids.length && !sel.files.length) {
+    own.push({ id: "sort-join-each", label: "Make each folder a model", icon: "box", run: async () => {
+      const r = await act("sort_join", { folders: sel.folders }, joinedText);
+      if (r) sorter.set({ picked: [], anchor: null });
+    } });
+  }
   if (sel.count >= 2 || (sel.files.length === 1 && sel.count === 1)) {
     own.push({ id: "sort-group", label: "Combine into one model", icon: "layers", run: async () => {
       const r = await act("sort_group", { ids: sel.ids, folders: sel.folders, files: sel.files }, (r) => `Combined into one model: ${named(r, r.id)}.`);
       if (r?.id) select(r.id);
     } });
   }
-  if (oneFolder) {
-    own.push({ id: "sort-join", label: "Combine into one model", icon: "layers", run: async () => {
-      const r = await act("sort_join", { folder: oneFolder.path }, () => `Combined ${oneFolder.name} into one model.`);
-      if (r?.id) select(r.id);
-    } });
-  }
   if (one && !one.done && one.kind !== "files") {
-    own.push({ id: "sort-split", label: "Split", run: async () => {
+    own.push({ id: "sort-split", label: "Split into models", title: one.kind === "group" ? "Back to what it was combined from" : "Read it as a folder of models: one for each folder in it, and for each group of loose files", run: async () => {
       const r = await act("sort_split", { id: one.id }, () => `Split ${one.name}.`);
       if (r) sorter.set({ picked: [], anchor: null });
     } });
@@ -443,7 +474,7 @@ function Actions({ s, sel, ix, overview }) {
     </div>` : null}
     <div class="sw-buttons">
       ${shared.filter((a) => a.id !== "set-category").map((a) => html`<button type="button" class="ghost" key=${a.id} id=${`sort-${a.id}`} title=${a.key ? `${a.label} (${a.key})` : null} onClick=${a.run}>${a.icon ? Icon[a.icon](14) : null} ${a.label}</button>`)}
-      ${own.map((a) => html`<button type="button" class="ghost" key=${a.id} id=${a.id} onClick=${a.run}>${a.icon ? Icon[a.icon](14) : null} ${a.label}</button>`)}
+      ${own.map((a) => html`<button type="button" class="ghost" key=${a.id} id=${a.id} title=${a.title || null} onClick=${a.run}>${a.icon ? Icon[a.icon](14) : null} ${a.label}</button>`)}
     </div>
   </div>`;
 }
@@ -475,7 +506,7 @@ function Details({ s, sel, ix, overview, names, counts }) {
       <p class="muted sw-path">${folder.path}</p>
       <p>${plural(inside.length, "model", "models")} in it${inside.length ? `, ${todo} with no category yet` : ""}.</p>
       ${actions}
-      <p class="muted sw-hint">Setting a folder's category sets it for everything in it; tick “Keep its folders as subcategories” to bring its folders along.</p>
+      <p class="muted sw-hint">If this folder is one model and the folders in it are its parts, choose Make this folder one model; if every folder at this level is a model, choose Make every folder at this level a model. Setting a folder's category sets it for everything in it; tick “Keep its folders as subcategories” to bring its folders along.</p>
     </div>`;
   }
   if (left) {
@@ -491,7 +522,7 @@ function Details({ s, sel, ix, overview, names, counts }) {
     return html`<div class="sw-details sw-details-empty" id="sort-details">
       <h2>${Icon.inbox(18)} Workspace</h2>
       <p id="sort-summary">${plural(counts.all, "model", "models")}: ${counts.todo} with no category, ${counts.sorted} ready to import${counts.skipped ? `, ${counts.skipped} skipped` : ""}${counts.done ? `, ${counts.done} imported` : ""}.</p>
-      <p class="muted sw-hint">Click to select, Ctrl-click to add one, Shift-click for a run, Ctrl+A for everything shown; a selected folder takes everything in it. Right-click for what you can do.</p>
+      <p class="muted sw-hint">Click to select, Ctrl-click to add one, Shift-click for a run, Ctrl+A for everything shown; a selected folder takes everything in it. Right-click for what you can do, such as making a folder (or every folder at its level) one model.</p>
     </div>`;
   }
   const save = (field) => (v) => {
@@ -499,12 +530,18 @@ function Details({ s, sel, ix, overview, names, counts }) {
     if (v !== (item[field] || "")) act("sort_update", { ids: [item.id], patch: { [field]: v } }, () => said);
   };
   const sm = item.summary || {};
+  // the folders above it, from the one that was added: any of them can be the model instead
+  const above = [];
+  for (let p = item.parent; p && ix.folderByPath.has(p); p = ix.folderByPath.get(p).parent) above.unshift(ix.folderByPath.get(p));
   return html`<div class="sw-details" id="sort-details" data-item=${item.id} key=${item.id}>
     <div class="panel-fields">
       <${EditBox} cls="panel-name" id="details-name" label="Name" title="Name (E or F2)" value=${item.name} off=${!!item.done} onSave=${save("name")} />
       <${EditBox} id="details-author" label="Authors" caption="Authors" placeholder="Authors, separated by commas" value=${item.author} off=${!!item.done} onSave=${save("author")} />
       <${EditBox} id="details-tags" label="Tags" caption="Tags" placeholder="Tags, separated by commas" value=${item.tags} off=${!!item.done} onSave=${save("tags")} />
     </div>
+    ${!item.done && above.length ? html`<p class="sw-level" id="sort-level" title="Click a folder above it to make that folder the model instead, with everything in it">
+      <span class="field-label">Model folder</span>
+      <span class="sw-crumbs">${above.map((f) => html`<button type="button" class="linkish sw-crumb" key=${f.path} data-folder=${f.name} title=${`Make ${f.name} the model, with everything in it`} onClick=${() => joinFolder(f)}>${f.name}</button><span class="muted"> › </span>`)}<b>${item.kind === "folder" ? baseName(item.path) : item.name}</b></span></p>` : null}
     <p class="sw-status"><${Place} item=${item} overview=${overview} />
       ${item.done ? html` <a href=${routeHash(`model:${item.done.id}`)}>${item.done.rel}</a>` : null}</p>
     ${item.error ? html`<p class="form-error">${item.error}</p>` : null}
@@ -719,13 +756,6 @@ export function ImportPage() {
         <button type="button" class="primary" id="import-go" disabled=${!ready || busy || !!lib.read_only} title="Import the models that have a category" onClick=${importSorted}>${!ready ? "Nothing to import yet" : `${s.mode === "copy" ? "Copy" : "Import"} ${plural(ready, "model", "models")}`}</button>
       </div>`}
   </div>`;
-}
-
-/** Folders and files dropped on the window: each one is a model. */
-export function onDropped(paths) {
-  if (!paths?.length || !ui.get().library) return;
-  if (ui.get().route !== "import") location.hash = routeHash("import");
-  addSources(paths, false);
 }
 
 /** Open the Import page sorting a folder (Home's "Sort…" for loose library folders). */

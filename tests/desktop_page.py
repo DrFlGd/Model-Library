@@ -42,6 +42,10 @@ UI pass, step 3: one page header on every page, one view switcher and sort menu,
 the list's sorting headers, "Searching for …" in another place, the details
 panel changed in place, Home's sections and Library menu, and the same panel on
 Duplicates and Import.
+Import follow-ups: file type tags on Import and in a model's files, making every
+folder at a level a model (and Undo), choosing a folder above a model as the
+model, and the menu for files dropped on the window (added to the category
+shown, undone; sorted on Import).
 Writes <out>/library-info.json and <out>/library.zip for the cross-platform check.
 """
 import argparse
@@ -191,7 +195,7 @@ async def phase1(pg):
     # 12. a model's details and files
     await pg.click(".card:has-text('Hive Tyrant')")
     await pg.wait_for_selector("#details-files")
-    files = await pg.eval_on_selector_all("#details-files li span:first-child", "els => els.map(e => e.textContent)")
+    files = await pg.eval_on_selector_all("#details-files .insp-file-name", "els => els.map(e => e.textContent)")
     by = await pg.input_value("#details-authors")
     cover = await pg.evaluate("() => { const i = document.querySelector('.card[aria-selected=true] img'); return !!i && i.complete && i.naturalWidth > 0; }")
     check("a model shows its details, parts and cover", files == ["Arms/left.stl", "Arms/right.stl", "_media/cover.png", "body.stl", "readme.pdf"] and by == "Jo Smith" and cover, (files, by, cover))
@@ -1185,6 +1189,122 @@ async def ui_pass3(pg):
           and import_switch == [True] * 4, (name, dupes_row, empty_panel, inside, import_switch))
 
 
+async def drop(pg, *paths, at=(500, 300)):
+    """Drag files over the window and drop them, as a file manager would."""
+    await pg.evaluate("() => window.__shimEmit('tauri://drag-enter', {})")
+    hint = await pg.inner_text("#drop-hint")
+    await pg.evaluate("a => window.__shimEmit('tauri://drag-drop', { paths: a.paths, position: { x: a.x, y: a.y } })", {"paths": [str(x) for x in paths], "x": at[0], "y": at[1]})
+    await pg.wait_for_selector("#context-menu .menu-head")
+    return hint
+
+
+async def import_follow_ups(pg):
+    """The owner's asks after the UI pass: the model's folder level, the drop menu, file types."""
+    # 51. file types are easy to tell apart on Import: a tag per type, folders amber
+    src = home / "Makers"
+    for rel in ["Ann/2024-01/Knight/Body/body.stl", "Ann/2024-01/Knight/Arms/arm.stl", "Ann/2024-02/Dragon/Wings/wing.stl",
+                "Ann/2024-02/Dragon/Head/head.stl", "Bo/2024-03/Robot/Legs/leg.stl"]:
+        put(src / rel, cube(5))
+    put(src / "Bo/2024-03/Robot/Torso/torso.3mf", "PK 3mf")
+    put(src / "Bo/2024-03/Robot/Torso/torso.zip", "PK zip")
+    put(src / "Bo/notes.txt", "hello")
+    await pg.goto(B + "#/import")
+    await start_again(pg)
+    pick(src)
+    await pg.click("#import-sort")
+    await pg.wait_for_selector("#sort-page .sw-main", timeout=30000)
+    await pg.click('[data-filter="all"]')
+    await tree_items(pg)
+    torso = await pg.eval_on_selector_all('#sort-tree .sw-item[data-name="Torso"] .ft', "els => els.map(e => [e.dataset.type, e.className])")
+    body = await pg.eval_on_selector_all('#sort-tree .sw-item[data-name="Body"] .ft', "els => els.map(e => e.dataset.type)")
+    loose = await pg.eval_on_selector_all('#sort-tree .sw-left[data-name="notes.txt"] .ft', "els => els.map(e => e.dataset.type)")
+    folder = await pg.locator('#sort-tree .sw-folder[data-name="Ann"] .sw-mark-folder').count()
+    colours = await pg.evaluate("() => ['stl', '3mf', 'zip'].map(t => getComputedStyle(document.querySelector(`.ft[data-type='${t}']`)).backgroundColor)")
+    await pick_rows_tree(pg, "Torso")
+    await pg.wait_for_selector("#sort-details .tree-file .ft")
+    files = await pg.eval_on_selector_all("#sort-details .tree-file .ft", "els => els.map(e => e.dataset.type)")
+    check("file types are easy to tell apart on Import: a coloured tag per type, folders marked",
+          sorted(t for t, _ in torso) == ["3mf", "zip"] and "ft-archive" in dict(torso)["zip"] and body == ["stl"] and loose == ["txt"] and folder == 1
+          and len(set(colours)) == 3 and sorted(files) == ["3mf", "zip"], (torso, body, loose, folder, colours, files))
+
+    # 52. the parts were read as models: every folder at the model's level is made one, and that's undone
+    before = sorted(await tree_items(pg))
+    await pg.click('#sort-tree .sw-folder[data-name="Knight"] .sw-name')
+    await pg.wait_for_selector("#sort-join-level")
+    level_label = await pg.inner_text("#sort-join-level")
+    await clear_toast(pg)
+    await pg.screenshot(path=str(out / "33-import-level.png"))
+    await pg.click("#sort-join-level")
+    said = await toast_text(pg, "^Made 3 folders into models")
+    after = sorted(await tree_items(pg))
+    await pg.click(".toast .toast-action")
+    await toast_text(pg, "^Undone")
+    undone = sorted(await tree_items(pg))
+    check("every folder at a level can be made a model, with Undo", before == ["Arms", "Body", "Head", "Legs", "Torso", "Wings"]
+          and "(3)" in level_label and after == ["Dragon", "Knight", "Robot"] and undone == before, (before, level_label, said, after, undone))
+
+    # 53. a model's panel shows the folders above it; clicking one makes it the model
+    await pick_rows_tree(pg, "Wings")
+    crumbs = await pg.eval_on_selector_all("#sort-level .sw-crumb", "els => els.map(e => e.textContent)")
+    await clear_toast(pg)
+    await pg.screenshot(path=str(out / "35-model-folder.png"))
+    await pg.click('#sort-level .sw-crumb[data-folder="Dragon"]')
+    await pg.wait_for_function("() => document.querySelector('#sort-details #details-name')?.value === 'Dragon'")
+    kids = sorted(await tree_items(pg))
+    check("a folder above a model can be chosen as the model", crumbs == ["Makers", "Ann", "2024-02", "Dragon"] and "Dragon" in kids and "Wings" not in kids and "Head" not in kids, (crumbs, kids))
+    await start_again(pg)
+
+    # 54. files dropped on a category page: a menu asks; added there (moved in), undone back where they were
+    lamp = home / "Desk/Lamp"
+    put(lamp / "lamp.stl", cube(7))
+    put(lamp / "lamp.png", PNG)
+    await pg.goto(B + "#/browse/schema/household/Kitchen")
+    await count(pg)
+    hint = await drop(pg, lamp)
+    head = await pg.inner_text("#context-menu .menu-head")
+    menu = await labels_of(pg, "#context-menu .menu-item .menu-label")
+    await clear_toast(pg)
+    await pg.screenshot(path=str(out / "34-drop-menu.png"))
+    await pg.click('#context-menu [data-action="drop-add"]')
+    said = await toast_text(pg, "^Moved Lamp into")
+    moved = (library / "Household/Kitchen/Lamp/lamp.stl").is_file() and not lamp.exists()
+    await pg.wait_for_selector(".card:has(.card-name:text-is('Lamp'))")
+    await pg.click(".toast .toast-action")
+    await toast_text(pg, "^Undone")
+    back = (lamp / "lamp.stl").is_file() and not (library / "Household/Kitchen/Lamp").exists()
+    check("files dropped on a category page are added there as a model after asking, and Undo puts them back",
+          "Household › Kitchen" in hint and head == "Lamp (folder)" and menu[0].startswith("Add to Household › Kitchen as a model") and any(x.startswith("Sort it on Import") for x in menu)
+          and said.startswith("Moved Lamp into Household › Kitchen") and moved and back, (hint, head, menu, said, moved, back))
+
+    # 55. or sorted on Import, to choose the models first
+    await drop(pg, src)
+    await pg.click('#context-menu [data-action="drop-sort"]')
+    await pg.wait_for_selector("#sort-page .sw-main", timeout=30000)
+    await pg.wait_for_function("() => (window.__modlib && document.querySelector('#sort-page')?.textContent || '').includes('Makers')", timeout=30000)
+    on_import = await pg.evaluate("() => location.hash")
+    await drop(pg, lamp)
+    import_menu = await labels_of(pg, "#context-menu .menu-item .menu-label")
+    await pg.keyboard.press("Escape")
+    await start_again(pg)
+    check("a dropped folder can be sorted on Import, and Import's own drop menu adds or sorts", on_import == "#/import"
+          and import_menu[0].startswith("Add as a model") and import_menu[1].startswith("Sort what's in it"), (on_import, import_menu))
+
+
+async def tree_items(pg):
+    """The models in Import's Folders view (everything unfolded)."""
+    await pg.click('[data-view="folders"]')
+    await pg.click("#sort-unfold")
+    return await pg.eval_on_selector_all("#sort-tree .sw-item", "els => els.map(e => e.dataset.name)")
+
+
+async def pick_rows_tree(pg, name):
+    """Select one model in Import's Folders view."""
+    await pg.click('[data-view="folders"]')
+    await pg.click("#sort-unfold")
+    await pg.click(f'#sort-tree .sw-item[data-name="{name}"] .sw-name')
+    await pg.wait_for_function("n => document.querySelector('#sort-details #details-name')?.value === n", arg=name)
+
+
 def big_library():
     """10,000 generated models: read, read again from the cache, searched."""
     big = home / "Big"
@@ -1240,6 +1360,7 @@ async def main():
             await ui_pass(pg)
             await ui_pass2(pg)
             await ui_pass3(pg)
+            await import_follow_ups(pg)
 
             # 3. renaming the library
             await pg.click('.sidebar a[href="#/settings"]')

@@ -10,3 +10,7 @@ window.__TAURI__ = { core: { Channel, async invoke(cmd, args, opts) {
   if (r.headers.get("content-type") === "application/octet-stream") return await r.arrayBuffer();
   return await r.json();
 } } };
+// window events (files dragged and dropped on the window): the test sends them with __shimEmit
+window.__shimListeners = {};
+window.__TAURI__.event = { async listen(name, fn) { (window.__shimListeners[name] ||= []).push(fn); return () => {}; } };
+window.__shimEmit = (name, payload) => (window.__shimListeners[name] || []).forEach((fn) => fn({ event: name, payload }));

@@ -44,9 +44,14 @@ export async function createPlatform() {
     apiBytes: (cmd, args = {}) => invoke("api_bytes", { cmd, args }),
     /** A web link in the default browser. */
     openUrl: (url) => invoke("open_url", { url }).catch((err) => console.warn("open_url", err)),
-    /** Folders and files dropped on the window (their paths). */
-    onDrop(cb) {
-      tauri.event?.listen?.("tauri://drag-drop", (e) => cb(e.payload?.paths || [])).catch?.(() => {});
+    /** Folders and files dropped on the window: `cb(paths, at)`, `at` the point
+     *  in CSS pixels. `over(true|false)`: something is being dragged over it. */
+    onDrop(cb, over) {
+      const listen = (name, fn) => tauri.event?.listen?.(name, fn)?.catch?.(() => {});
+      const at = (p) => (p && typeof p.x === "number" ? { x: p.x / (devicePixelRatio || 1), y: p.y / (devicePixelRatio || 1) } : null);
+      listen("tauri://drag-drop", (e) => { over?.(false); cb(e.payload?.paths || [], at(e.payload?.position)); });
+      listen("tauri://drag-enter", () => over?.(true));
+      listen("tauri://drag-leave", () => over?.(false));
     },
     async refreshInfo() { Object.assign(info, await api("app_info")); return info; },
     library: {

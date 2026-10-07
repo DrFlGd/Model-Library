@@ -20,6 +20,7 @@ export const ui = createStore({
   catalogRev: 0,           // bumps when models change (the browse view asks again)
   dialog: null,            // { type: "new-schema" | "edit-model" | "move-models", ... }
   menu: null,              // a right-click or More menu: { x, y, items, from }
+  dragging: false,         // files are being dragged over the window from outside
   open: {},                // sidebar tree rows unfolded: { "<schema>/<value>…": true }
   favs: [],
   jobs: [],                // [{ id, label, started, cancel }]

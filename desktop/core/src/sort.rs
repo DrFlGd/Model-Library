@@ -1028,6 +1028,57 @@ impl Session {
         Ok(id)
     }
 
+    /// The folders shown at the same depth as `dir` in the folder it was added
+    /// with (`dir` among them): "every folder at this level".
+    pub fn level_of(&self, dir: &str) -> Vec<String> {
+        let Some(root) = self
+            .roots
+            .iter()
+            .filter(|r| under(dir, &r.path))
+            .max_by_key(|r| r.path.len())
+        else {
+            return vec![dir.to_string()];
+        };
+        let depth = Path::new(dir).components().count();
+        let mut v: Vec<String> = self
+            .folders
+            .iter()
+            .filter(|f| {
+                under(&f.path, &root.path) && Path::new(&f.path).components().count() == depth
+            })
+            .map(|f| f.path.clone())
+            .collect();
+        v.sort();
+        v
+    }
+
+    /// Make each of `dirs` one model. Returns the new items' ids and the names of
+    /// the folders that couldn't be (grouped with files outside them); fails
+    /// only when none could.
+    pub fn join_many(&mut self, ctx: &Ctx, dirs: &[String]) -> Result<(Vec<String>, Vec<String>)> {
+        let (mut ids, mut left, mut first) = (vec![], vec![], None);
+        for d in dirs {
+            // one inside another that's joined already went with it
+            if !self.folders.iter().any(|f| &f.path == d) {
+                continue;
+            }
+            match self.join(ctx, d) {
+                Ok(id) => ids.push(id),
+                Err(e) => {
+                    left.push(file_name(Path::new(d)));
+                    first.get_or_insert(e);
+                }
+            }
+        }
+        match first {
+            Some(e) if ids.is_empty() => Err(e),
+            _ if ids.is_empty() => {
+                bail!("Those folders aren't in the workspace any more: read the folders again.")
+            }
+            _ => Ok((ids, left)),
+        }
+    }
+
     /// Split a model: a folder becomes a model per sub-folder and per group of
     /// loose files; a group goes back to what it was made of.
     pub fn split(&mut self, ctx: &Ctx, id: &str) -> Result<()> {
@@ -1220,6 +1271,20 @@ impl Session {
         n
     }
 
+    /// Take imported `ids` off the list with the folders and files they were
+    /// added as (what was dropped on the window and went straight into a category).
+    pub fn forget_done(&mut self, ids: &[String]) {
+        let gone: Vec<String> = self
+            .items
+            .iter()
+            .filter(|i| ids.contains(&i.id) && i.done.is_some())
+            .flat_map(|i| i.sources.iter().cloned())
+            .collect();
+        self.items
+            .retain(|i| !(ids.contains(&i.id) && i.done.is_some()));
+        self.roots.retain(|r| !gone.contains(&r.path));
+    }
+
     /// Forget imported models (they're in the library now), or everything.
     pub fn clear(&mut self, imported_only: bool) {
         if imported_only {
@@ -1386,6 +1451,46 @@ mod tests {
         assert!(se
             .add(&ctx, std::slice::from_ref(&d), true, &cancel, &|_, _| {})
             .is_err());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn makes_every_folder_at_a_level_a_model() {
+        let d = tmp("level");
+        let lib = Library::open(d.join("Lib")).unwrap();
+        let src = d.join("Share");
+        // maker › release › model › parts: the parts are read as models
+        put(&src.join("Ann/2024-01/Knight/Body/body.stl"), "x");
+        put(&src.join("Ann/2024-01/Knight/Arms/arm.stl"), "x");
+        put(&src.join("Ann/2024-02/Dragon/Wings/wing.stl"), "x");
+        put(&src.join("Ann/2024-02/Dragon/Head/head.stl"), "x");
+        put(&src.join("Bo/2024-03/Robot/Legs/leg.stl"), "x");
+        put(&src.join("Bo/2024-03/Robot/Torso/torso.3mf"), "x");
+        put(&src.join("Bo/2024-03/Robot/Torso/torso.zip"), "x");
+        let ix = Index::build(&lib, None, false);
+        let ctx = Ctx::new(&lib, &ix);
+        let mut se = Session::new("lib1");
+        let cancel = AtomicBool::new(false);
+        se.add(&ctx, std::slice::from_ref(&src), true, &cancel, &|_, _| {})
+            .unwrap();
+        assert_eq!(
+            names(&se),
+            ["Arms", "Body", "Head", "Legs", "Torso", "Wings"]
+        );
+        // what a model's files are, by type
+        assert_eq!(
+            by_name(&se, "Torso").summary["exts"],
+            json!({ "3mf": 1, "zip": 1 })
+        );
+        let knight = s(&src.join("Ann/2024-01/Knight"));
+        let level = se.level_of(&knight);
+        assert_eq!(level.len(), 3, "{level:?}");
+        let (ids, left) = se.join_many(&ctx, &level).unwrap();
+        assert_eq!((ids.len(), left.len()), (3, 0));
+        assert_eq!(names(&se), ["Dragon", "Knight", "Robot"]);
+        assert_eq!(by_name(&se, "Robot").summary["count"], 3);
+        // the level of a folder that's a model now has no folders left to join
+        assert!(se.join_many(&ctx, &se.level_of(&knight)).is_err());
         let _ = std::fs::remove_dir_all(&d);
     }
 

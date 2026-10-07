@@ -709,3 +709,39 @@ body:has(.sw-go) .toast { bottom: 92px; }
 .dupe-models li[aria-selected="true"] { background: var(--sel); box-shadow: inset 3px 0 0 var(--tool); }
 .dupe-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #dupes-summary { margin-top: 4px; }
+
+/* ---------- Import follow-ups (docs/PLAN.md, "Import follow-ups design") ---------- */
+/* File types: one coloured tag per type, the same everywhere a file is listed */
+.ft { --ft: #6b7280; display: inline-flex; align-items: center; gap: 3px; flex: none; padding: 0 5px; border-radius: 4px; font-size: 10px; font-weight: 800; font-style: normal; letter-spacing: .03em; line-height: 16px; white-space: nowrap; vertical-align: 1px;
+  color: color-mix(in srgb, var(--ft) 80%, black); background: color-mix(in srgb, var(--ft) 13%, var(--white)); border: 1px solid color-mix(in srgb, var(--ft) 45%, var(--white)); }
+:root[data-theme="dark"] .ft, :root[data-theme="night"] .ft { color: color-mix(in srgb, var(--ft) 50%, white); background: color-mix(in srgb, var(--ft) 26%, var(--white)); border-color: color-mix(in srgb, var(--ft) 60%, var(--white)); }
+.ft-n { font-weight: 600; opacity: .85; }
+.ft-stl { --ft: #2563eb; }
+.ft-3mf { --ft: #16a34a; }
+.ft-3d { --ft: #0d9488; }
+.ft-slicer { --ft: #9333ea; }
+.ft-archive { --ft: #ea580c; }
+.ft-image { --ft: #db2777; }
+.ft-video { --ft: #dc2626; }
+.ft-doc { --ft: #64748b; }
+.ft-other { --ft: #78716c; }
+.ft-tags { display: inline-flex; flex-wrap: wrap; gap: 3px; vertical-align: 1px; }
+.ft-more { font-size: 11px; }
+/* the leading mark: folders amber, models a box, files their type's tag */
+.sw-mark-folder, .tree-dir > .tree-btn .tree-icon { color: #c98a00; }
+:root[data-theme="dark"] .sw-mark-folder, :root[data-theme="dark"] .tree-dir > .tree-btn .tree-icon { color: #f2b705; }
+.sw-mark-file .ft, .tree-type .ft { min-width: 40px; justify-content: center; }
+.tile-pic { position: relative; }
+.tile-type { position: absolute; left: 4px; top: 4px; }
+.sw-card-types { min-height: 18px; }
+.insp-file { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+/* Menus: what the menu is about, and a second line under an item */
+.menu-head { padding: 6px 10px 4px; font-size: 12px; font-weight: 700; color: var(--graphite); max-width: 360px; overflow-wrap: anywhere; }
+.menu-sub { display: block; font-size: 11.5px; font-weight: 400; color: var(--graphite); }
+/* Something dragged over the window */
+.drop-hint { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; pointer-events: none; background: color-mix(in srgb, var(--focus) 10%, transparent); outline: 3px dashed var(--focus); outline-offset: -10px; }
+.drop-hint-box { display: flex; align-items: center; gap: 12px; padding: 16px 22px; border-radius: var(--radius-m); background: var(--white); color: var(--ink); box-shadow: var(--shadow); font-weight: 700; }
+/* Which folder is the model */
+.sw-level { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin: 0; font-size: 13px; }
+.sw-crumbs { min-width: 0; overflow-wrap: anywhere; }
+.sw-crumb { font-size: 13px; }

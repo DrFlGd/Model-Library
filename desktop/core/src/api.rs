@@ -833,7 +833,29 @@ impl App {
                 self.sort_change(|se| se.update(&ids, &folders, &args["patch"]))?;
                 j(self.sort_view()?)
             }
-            "sort_group" | "sort_join" | "sort_split" => {
+            "sort_join" => {
+                // a folder, several (`folders`), or every folder at a folder's level (`level`)
+                let ctx = self.sort_ctx().await?;
+                let level = args["level"] == json!(true);
+                let one = args["folder"].as_str().map(String::from);
+                let (ids, left) = self.sort_change(|se| {
+                    let dirs = match (&one, level) {
+                        (Some(d), true) => se.level_of(d),
+                        (Some(d), false) => vec![d.clone()],
+                        (None, _) => folders.clone(),
+                    };
+                    if dirs.is_empty() {
+                        anyhow::bail!("Choose a folder.");
+                    }
+                    se.join_many(&ctx, &dirs)
+                })?;
+                let mut v = self.sort_view()?;
+                v["id"] = json!(ids.first());
+                v["ids"] = json!(ids);
+                v["left"] = json!(left);
+                j(v)
+            }
+            "sort_group" | "sort_split" => {
                 let ctx = self.sort_ctx().await?;
                 let id = self.sort_change(|se| match cmd {
                     "sort_group" => se.group(
@@ -843,7 +865,6 @@ impl App {
                         &strings(&args["files"]),
                         args["name"].as_str(),
                     ),
-                    "sort_join" => se.join(&ctx, arg(&args, "folder")?),
                     _ => se.split(&ctx, arg(&args, "id")?).map(|_| String::new()),
                 })?;
                 let mut v = self.sort_view()?;
@@ -907,6 +928,8 @@ impl App {
                 let only: Option<Vec<String>> = args["ids"].as_array().map(|_| ids.clone());
                 let mv = args["mode"].as_str() != Some("copy");
                 let force_copy = args["force_copy"].as_bool() == Some(true);
+                // dropped on the window and added straight to a category: off the list once in
+                let forget = args["forget"] == json!(true);
                 let lib = self.library()?;
                 lib.writable().map_err(e2s)?;
                 let ready = self.with_sort(true, |se| Ok(se.ready(only.as_deref())))?;
@@ -997,6 +1020,9 @@ impl App {
                     drop(_guard);
                     app.with_sort(true, |se| {
                         se.mark(&marks, mv);
+                        if forget {
+                            se.forget_done(&marks.iter().map(|m| m.0.clone()).collect::<Vec<_>>());
+                        }
                         Ok(())
                     })
                     .map_err(|e| anyhow!(e))?;
@@ -1005,6 +1031,17 @@ impl App {
                     let failed = results.iter().filter(|r| r["error"].is_string()).count();
                     Ok(json!({ "results": results, "imported": results.len() - failed, "failed": failed + bad.len(), "mode": if mv { "move" } else { "copy" }, "journal": journal }))
                 }))
+            }
+            "sort_paths" => {
+                // what was dropped on the window: folders or files, and their names
+                let paths = strings(&args["paths"]);
+                j(json!(paths
+                    .iter()
+                    .map(|p| {
+                        let pb = PathBuf::from(p);
+                        json!({ "path": p, "name": import::file_name(&pb), "dir": pb.is_dir(), "there": pb.exists() })
+                    })
+                    .collect::<Vec<_>>()))
             }
             other => Err(format!("unknown command {other}")),
         }

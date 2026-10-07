@@ -10,7 +10,8 @@ import { Home } from "./home.js";
 import { Browser } from "./browser.js";
 import { Dialogs } from "./dialogs.js";
 import { Settings } from "./settings.js";
-import { ImportPage, onDropped } from "./sort.js";
+import { ImportPage } from "./sort.js";
+import { onDropped, DropHint } from "./drop.js";
 import { DuplicatesPage } from "./dupes.js";
 import { ModelPage } from "./modelpage.js";
 import { loadOverview } from "./library.js";
@@ -39,10 +40,10 @@ export function mountShell(context) {
   mount("main-root", Main);
   mount("statusbar", StatusBar);
   mount("dialog-root", Dialogs);
-  mount("menu-root", ContextMenu);
+  mount("menu-root", () => html`<${ContextMenu} /><${DropHint} />`);
   addEventListener("keydown", onWindowKey);
   loadOverview();
-  context.platform.onDrop?.(onDropped);
+  context.platform.onDrop?.(onDropped, (dragging) => ui.set({ dragging }));
 }
 
 export { ui };
