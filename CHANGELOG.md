@@ -65,6 +65,8 @@ The UI pass in `docs/PLAN.md` ("UI pass design") is done: actions (0.5.1), undo 
 
 ## Unreleased
 
+## 0.5.3 (2026-10-07)
+
 UI pass, step 3 of 3: one layout (design in docs/PLAN.md, "UI pass design"; notes in "UI pass notes").
 
 - **Every page starts the same way**: the title and its count, a line under it where needed, then the page's main button and one menu on the right (Library ▾ on Home, Category ▾ in the library, More ▾ on Import). Under it one toolbar: search, sort, view.
