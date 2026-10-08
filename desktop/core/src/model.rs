@@ -405,6 +405,7 @@ mod tests {
         let category = schema::create(&lib, &json!({"name":"Household"})).unwrap();
         schema::define_path(&lib, &category.id, &["Kitchen".into()]).unwrap();
         let parent = root.join("Household/Kitchen");
+        std::fs::create_dir_all(&parent).unwrap();
         for name in ["hook.stl", "hook.PNG", "hook notes.pdf", "hook_long.zip", "hook_long.png", "unrelated.pdf"] {
             std::fs::write(parent.join(name), name.as_bytes()).unwrap();
         }

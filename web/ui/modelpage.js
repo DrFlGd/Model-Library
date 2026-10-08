@@ -12,7 +12,7 @@ import { FilePanel } from "./filepanel.js";
 import { WorkspaceStage } from "./stage.js";
 import { fileSel, reset, clear } from "./filesel.js";
 import { ExtractionBar, extractionAction, installExtractKeys } from "./extract.js";
-import { ActionRow, MODEL_ACTIONS, usePageKeys, runKey, letter, editDetails, writable } from "./actions.js";
+import { ActionRow, MODEL_ACTIONS, usePageKeys, runKey, letter, editDetails, writable, typing } from "./actions.js";
 import { PageHead } from "./layout.js";
 import { PlaceLinks } from "./details.js";
 
@@ -83,9 +83,14 @@ function ModelWorkspace({ model, names, narrow, drawer, setDrawer }) {
     }
   }, [chosen, model.files_list]);
   useEffect(() => installExtractKeys(), []);
-  usePageKeys((e) => {
-    if (e.key === "[") { e.preventDefault(); toggle(); }
-    if (e.key === "Escape") { clear(); if (narrow) setDrawer(false); }
+  useEffect(() => {
+    const key = (e) => {
+      if (e.defaultPrevented || typing(e) || ui.get().dialog || ui.get().menu) return;
+      if (e.key === "[") { e.preventDefault(); toggle(); }
+      if (e.key === "Escape") { clear(); if (narrow) setDrawer(false); }
+    };
+    addEventListener("keydown", key);
+    return () => removeEventListener("keydown", key);
   });
   const contextActions = () => [extractionAction(src, model)];
   return html`<div class="model-workspace">

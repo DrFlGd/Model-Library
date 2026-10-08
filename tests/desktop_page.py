@@ -61,6 +61,7 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright
 from model_workspace_panel import panel_workspace_checks
+from model_workspace_loose import loose_workspace_checks
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--cli", required=True)
@@ -1496,6 +1497,7 @@ async def main():
             await ui_pass2(pg)
             await ui_pass3(pg)
             await import_follow_ups(pg)
+            await loose_workspace_checks(pg, check, library, B, api, cube, PNG, out)
             await model_workspace_extract(pg)
 
             # 3. renaming the library

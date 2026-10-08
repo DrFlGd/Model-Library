@@ -96,6 +96,8 @@ pub fn execute(lib: &Library, plan: &Value, mode: &str, cancel: &AtomicBool, pro
     stop(cancel)?;
     let (src,dest) = (checked(lib.root(),s(plan,"source"))?,checked(lib.root(),s(plan,"dest"))?);
     if dest.exists() { bail!("The destination is now taken. Preview it again."); }
+    let current=model::read_sidecar(&src);
+    if current["id"].is_string() && current["id"]!=plan["source_id"] { bail!("The source model changed. Preview it again."); }
     let id = relayout::new_id(lib)?;
     let keep = relayout::kept_dir(lib,&id);
     std::fs::create_dir_all(&keep)?;
@@ -144,7 +146,11 @@ pub fn execute(lib: &Library, plan: &Value, mode: &str, cancel: &AtomicBool, pro
             // Check every original before removing any: files may change while staging.
             for f in files { if f["entry"].is_null() && hash(&checked(&src,s(f,"file"))?)? != j["original_hashes"][s(f,"to")].as_str().unwrap_or("") { bail!("A selected file changed while it was copied. Try again."); } }
             j["source_touched"]=json!(true); relayout::write(lib,&j)?;
-            for f in files { stop(cancel)?; if f["entry"].is_null() { std::fs::remove_file(checked(&src,s(f,"file"))?)?; } }
+            for (i,f) in files.iter().enumerate() {
+                progress(files.len()+i,files.len()*2,s(f,"from"));
+                stop(cancel)?;
+                if f["entry"].is_null() { std::fs::remove_file(checked(&src,s(f,"file"))?)?; }
+            }
             let before=model::read_sidecar(&src);
             let cover=s(&before,"cover").to_string();
             model::update(&src,&json!({}),&plan["metadata"])?;
@@ -195,7 +201,7 @@ fn rollback(lib:&Library,j:&Value, strict:bool)->Result<()> {
         if strict { for f in files { if f["entry"].is_null() && checked(&src,s(f,"file"))?.exists() && hash(&checked(&src,s(f,"file"))?)? != j["original_hashes"][s(f,"to")].as_str().unwrap_or("") { bail!("A file is back at {}. Move it aside before undoing.",s(f,"file")); } } }
         for f in files { if f["entry"].is_null() {
             let old=checked(&src,s(f,"file"))?;
-            if !old.exists() { if !owns_dest { bail!("The extracted file is missing; cannot restore it."); } let new=checked(&dest,s(f,"to"))?; import::transfer(&new,&old,false,true,&import::Progress{cancel:&AtomicBool::new(false),on_bytes:&|_|{}})?; }
+            if !old.exists() { if !owns_dest { bail!("The extracted file is missing; cannot restore it."); } let new=checked(&dest,s(f,"to"))?; if hash(&new)? != j["original_hashes"][s(f,"to")].as_str().unwrap_or("") {bail!("An extracted file changed. Nothing was overwritten.");} import::transfer(&new,&old,false,true,&import::Progress{cancel:&AtomicBool::new(false),on_bytes:&|_|{}})?; }
         }}
     }
     if j["source_touched"]==true {
@@ -246,6 +252,25 @@ mod tests {
         let cancel=AtomicBool::new(false);
         assert!(execute(&lib,&p,"move",&cancel,&|i,_,_|{if i==1 {cancel.store(true,Ordering::Relaxed);}}).is_err());
         assert_eq!(hashes(&src).unwrap(),before); assert!(!lib.resolve(s(&p,"dest")).unwrap().exists());
+    }
+    #[test]
+    fn cancellation_after_first_removal_restores_every_original() {
+        let (lib,ix,id)=setup("extract-stop-commit"); let src=lib.root().join("Unsorted/Kit"); let before=hashes(&src).unwrap();
+        let p=plan(&lib,&ix,&json!({"id":id,"files":["Arms"],"name":"Arms"})).unwrap();
+        let cancel=AtomicBool::new(false);
+        assert!(execute(&lib,&p,"move",&cancel,&|i,n,_|{if n==4 && i==3 {cancel.store(true,Ordering::Relaxed);}}).is_err());
+        assert_eq!(hashes(&src).unwrap(),before); assert!(!lib.resolve(s(&p,"dest")).unwrap().exists());
+    }
+    #[test]
+    fn source_without_sidecar_keeps_id_and_undo_removes_added_details() {
+        let (lib,_,_)=setup("extract-bare"); let src=lib.root().join("Unsorted/Kit");
+        std::fs::remove_file(src.join(model::SIDECAR)).unwrap();
+        let ix=Index::build(&lib,None,true); let id=ix.models[0].id(); let before=hashes(&src).unwrap();
+        let p=plan(&lib,&ix,&json!({"id":id,"files":["Arms"],"name":"Arms"})).unwrap();
+        let r=execute(&lib,&p,"move",&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert_eq!(model::read_sidecar(&src)["id"],id);
+        relayout::undo(&lib,s(&r,"journal"),&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert_eq!(hashes(&src).unwrap(),before);
     }
     #[test]
     fn zip_entries_copy_out_and_undo_preserves_zip() {
