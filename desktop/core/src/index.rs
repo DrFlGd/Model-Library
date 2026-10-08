@@ -40,6 +40,8 @@ pub struct Index {
     pub root: PathBuf,
     pub schemas: Vec<Schema>,
     pub models: Vec<Model>,
+    /// Bare model files directly in recognised category folders.
+    pub loose_files: Vec<Value>,
     by_id: HashMap<String, usize>,
     pub ms: u128,
     /// Models read from their folders this time (the rest came from the cache).
@@ -241,18 +243,36 @@ fn probe(dir: &Path) -> Probe {
     }
 }
 
+/// Read only this category's direct files, without following links or descending
+/// into model folders. The category walk below retains its existing decisions.
+fn collect_loose(lib: &Library, dir: &Path, schema: Option<&str>, cats: &[String], out: &mut Vec<Value>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if !name.starts_with('.') && e.file_type().is_ok_and(|t| t.is_file())
+            && matches!(model::file_kind(&name), "model" | "slicer" | "archive") {
+            out.push(json!({"rel": lib.relative(&e.path()), "name": name,
+                "schema": schema, "path": cats, "bytes": e.metadata().map(|m| m.len()).unwrap_or(0)}));
+        }
+    }
+}
+
 /// Every model folder: (folder, schema, path of subcategories). Under a category's
 /// folder, a folder with a model.json is a model; one in the category's tree (or
 /// at an older schema's fixed levels) is a subcategory; otherwise one with model
 /// folders inside is a subcategory and one with files is a model.
-fn find_models(lib: &Library, schemas: &[Schema]) -> Vec<(PathBuf, Option<usize>, Vec<String>)> {
+fn find_models(lib: &Library, schemas: &[Schema], loose: &mut Vec<Value>) -> Vec<(PathBuf, Option<usize>, Vec<String>)> {
     struct Walk<'a> {
+        lib: &'a Library,
+        schema: &'a Schema,
+        loose: &'a mut Vec<Value>,
         si: usize,
         levels: usize,
         tree: &'a HashSet<Vec<String>>,
         out: Vec<(PathBuf, Option<usize>, Vec<String>)>,
     }
     fn under(w: &mut Walk, dir: &Path, cats: &mut Vec<String>) {
+        collect_loose(w.lib, dir, Some(&w.schema.id), cats, w.loose);
         for d in subdirs(dir) {
             if d.join(SIDECAR).is_file() {
                 w.out.push((d, Some(w.si), cats.clone()));
@@ -286,6 +306,7 @@ fn find_models(lib: &Library, schemas: &[Schema]) -> Vec<(PathBuf, Option<usize>
             .map(|p| p.iter().map(|c| c.to_lowercase()).collect())
             .collect();
         let mut w = Walk {
+            lib, schema: s, loose,
             si,
             levels: s.levels.len(),
             tree: &tree,
@@ -294,6 +315,8 @@ fn find_models(lib: &Library, schemas: &[Schema]) -> Vec<(PathBuf, Option<usize>
         under(&mut w, &lib.root().join(&s.folder), &mut vec![]);
         out.extend(w.out);
     }
+    collect_loose(lib, &lib.root().join(UNSORTED), None, &[], loose);
+    loose.sort_by(|a,b| a["rel"].as_str().cmp(&b["rel"].as_str()));
     for d in subdirs(&lib.root().join(UNSORTED)) {
         out.push((d, None, vec![]));
     }
@@ -343,7 +366,8 @@ impl Index {
         }
         let mut read = 0;
         let mut models = vec![];
-        let found = find_models(lib, &schemas);
+        let mut loose_files = vec![];
+        let found = find_models(lib, &schemas, &mut loose_files);
         let n = found.len();
         for (i, (dir, si, cats)) in found.into_iter().enumerate() {
             if i % 50 == 0 {
@@ -372,6 +396,7 @@ impl Index {
             root: lib.root().to_path_buf(),
             schemas,
             models,
+            loose_files,
             by_id: HashMap::new(),
             ms: 0,
             read,
@@ -451,7 +476,7 @@ impl Index {
             .iter()
             .filter(|m| m.v["schema"].is_null())
             .count();
-        json!({ "schemas": schemas, "all": self.models.len(), "unsorted": unsorted, "ms": self.ms as u64 })
+        json!({ "loose_files": self.loose_files, "schemas": schemas, "all": self.models.len(), "unsorted": unsorted, "ms": self.ms as u64 })
     }
 
     /// Search one place of the library. `scope`: all | unsorted | favs | schema:<id>[/<value>…];
@@ -744,6 +769,31 @@ pub fn make_test_library(dir: &Path, n: usize) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn loose_files_are_only_direct_children_of_categories_and_unsorted() {
+        let root = temp("loose-files");
+        let lib = Library::open(&root).unwrap();
+        let s = schema::create(&lib, &json!({"name":"Household"})).unwrap();
+        schema::define_path(&lib, &s.id, &["Kitchen".into()]).unwrap();
+        for rel in ["Household/top.stl", "Household/Kitchen/hook.stl", "Household/Kitchen/project.lys", "Unsorted/download.zip",
+            "Household/Kitchen/photo.png", "Household/Kitchen/readme.pdf", "Household/Kitchen/Existing/part.stl", "Elsewhere/other.stl"] {
+            let file = root.join(rel);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, b"x").unwrap();
+        }
+        let cache = root.join("_library/test-index.json");
+        let ix = Index::build(&lib, Some(&cache), false);
+        let paths: Vec<_> = ix.loose_files.iter().map(|f| f["rel"].as_str().unwrap()).collect();
+        assert_eq!(paths, ["Household/Kitchen/hook.stl", "Household/Kitchen/project.lys", "Household/top.stl", "Unsorted/download.zip"]);
+        assert_eq!(ix.models.len(), 1); // existing folder detection stays intact
+        std::fs::write(root.join("Household/Kitchen/new.3mf"), b"new").unwrap();
+        let changed = Index::build(&lib, Some(&cache), false);
+        assert_eq!(changed.loose_files.len(), 5); // rescans do not cache loose files
+        assert_eq!(changed.read, 0);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+
 
     fn temp(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("modlib-index-{name}-{}", std::process::id()));

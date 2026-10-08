@@ -12,7 +12,19 @@ pub fn is_zip(name: &str) -> bool {
     name.to_ascii_lowercase().ends_with(".zip")
 }
 
-/// The files in a ZIP: [{ name, size, kind }], folders left out, sorted by name.
+// ZIP dates have no timezone. Treat their calendar values consistently for sorting.
+fn modified_millis(d: zip::DateTime) -> i64 {
+    let month = i64::from(d.month());
+    let year = i64::from(d.year()) - i64::from(month <= 2);
+    let era = year.div_euclid(400);
+    let y = year - era * 400;
+    let m = month + if month > 2 { -3 } else { 9 };
+    let days = era * 146097 + y * 365 + y / 4 - y / 100
+        + (153 * m + 2) / 5 + i64::from(d.day()) - 1 - 719468;
+    (days * 86400 + i64::from(d.hour()) * 3600 + i64::from(d.minute()) * 60 + i64::from(d.second())) * 1000
+}
+
+/// The files in a ZIP: [{ name, size, kind, modified }], folders left out, sorted by name.
 pub fn list(path: &Path) -> Result<Vec<Value>> {
     let f = std::fs::File::open(path).with_context(|| format!("can't open {}", path.display()))?;
     let mut z = zip::ZipArchive::new(f).context("this isn't a ZIP the app can read")?;
@@ -27,7 +39,7 @@ pub fn list(path: &Path) -> Result<Vec<Value>> {
         if name.starts_with("__MACOSX/") || base.starts_with("._") || base == ".DS_Store" {
             continue;
         }
-        out.push(json!({ "name": name, "size": e.size(), "kind": file_kind(&name) }));
+        out.push(json!({ "name": name, "size": e.size(), "kind": file_kind(&name), "modified": e.last_modified().map(modified_millis).unwrap_or(0) }));
     }
     out.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
     Ok(out)
@@ -73,7 +85,7 @@ mod tests {
         assert_eq!(l.len(), 2);
         assert_eq!(
             l[0],
-            json!({ "name": "Dragon/body.stl", "size": 7, "kind": "model" })
+            json!({ "name": "Dragon/body.stl", "size": 7, "kind": "model", "modified": 315532800000i64 })
         );
         assert_eq!(read(&p, "Dragon/photo.jpg", 100).unwrap(), b"jpg");
         assert!(read(&p, "Dragon/body.stl", 3).is_err());

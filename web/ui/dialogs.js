@@ -9,6 +9,8 @@ import { api, loadOverview, saveDetails, runChange, undoable, recorded } from ".
 import { CategoryPicker, SubcategoryTree, treeSpec, treeReady, firstBranch } from "./category.js";
 import { RenameNode, EditSchema, DeleteSchema, DeleteSubcategory, EditPicked, AddSubcategory, ChangePreview } from "./categories.js";
 
+import { ExtractDialog } from "./extract.js";
+
 export const FIELD_TYPES = [["text", "Text"], ["number", "Number"], ["choice", "Choice"], ["yes-no", "Yes or no"], ["date", "Date"]];
 export const close = () => ui.set({ dialog: null });
 
@@ -245,6 +247,7 @@ export const confirmDialog = (opts) => ui.set({ dialog: { type: "confirm", ...op
 export function Dialogs() {
   const dialog = useStore(ui, (s) => s.dialog);
   if (!dialog) return null;
+  if (dialog.type === "extract-model") return html`<${ExtractDialog} model=${dialog.model} keys=${dialog.keys} />`;
   if (dialog.type === "new-schema") return html`<${NewSchema} />`;
   if (dialog.type === "move-models") return html`<${MoveModels} models=${dialog.models} />`;
   if (dialog.type === "add-subcategory") return html`<${AddSubcategory} schemaId=${dialog.schemaId} path=${dialog.path} />`;

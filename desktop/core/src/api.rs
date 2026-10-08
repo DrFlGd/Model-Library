@@ -889,7 +889,7 @@ impl App {
                 .await
                 .map_err(|e| e.to_string())?;
                 j(json!({
-                    "files": files.iter().map(|(rel, size, _)| json!({ "rel": rel, "size": size, "kind": model::file_kind(rel) })).collect::<Vec<_>>(),
+                    "files": files.iter().map(|(rel, size, path)| json!({ "rel": rel, "size": size, "kind": model::file_kind(rel), "modified": model::modified(path) })).collect::<Vec<_>>(),
                     "main": main.map(|(file, entry)| json!({ "file": file, "entry": entry })),
                 }))
             }
@@ -1442,7 +1442,7 @@ impl App {
                     .await?;
                 let (mut v, dir) = found.ok_or("That model isn't in the library any more.")?;
                 let dir = dir.map_err(e2s)?;
-                v["files_list"] = json!(model::list_files(&dir).into_iter().map(|(rel, size)| json!({ "rel": rel, "size": size, "kind": model::file_kind(&rel) })).collect::<Vec<_>>());
+                v["files_list"] = json!(model::list_files(&dir).into_iter().map(|(rel, size)| json!({ "rel": rel, "size": size, "kind": model::file_kind(&rel), "modified": model::modified(&dir.join(&rel)) })).collect::<Vec<_>>());
                 v["details"] = model::read_sidecar(&dir);
                 // the 3D file shown first (the one its thumbnail is drawn from)
                 v["main"] = json!(thumb::pick_main(&dir)
@@ -1522,6 +1522,35 @@ impl App {
                 }
                 lib.set_favourites(&json!(favs)).map_err(e2s)?;
                 j(json!({ "id": id, "favourites": favs }))
+            }
+            "model_extract_plan" => {
+                let r = self.with_index(None, |ix, lib| crate::extract::plan(lib, ix, &args)).await?;
+                j(match r { Ok(p) => p, Err(e) => json!({"error":e.to_string(),"files":[]}) })
+            }
+            "model_extract" => {
+                let lib = self.library()?;
+                lib.writable().map_err(e2s)?;
+                let plan = self.with_index(None, |ix, lib| crate::extract::plan(lib, ix, &args)).await?.map_err(e2s)?;
+                let mode = args["mode"].as_str().unwrap_or("move").to_string();
+                j(self.spawn_job("Making a new model", move |app, jid, cancel| {
+                    crate::extract::execute(&lib, &plan, &mode, &cancel, &|i,n,name| app.job_progress(&jid,json!({"item":i,"items":n,"name":name})))
+                }))
+            }
+            "loose_wrap" => {
+                let lib = self.library()?;
+                lib.writable().map_err(e2s)?;
+                let files: Vec<String> = args["files"].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect();
+                j(self.spawn_job("Putting files in folders", move |app,jid,cancel| {
+                    let mut made=vec![];
+                    let mut failed=vec![];
+                    for (i,rel) in files.iter().enumerate() {
+                        if cancel.load(std::sync::atomic::Ordering::Relaxed) { break; }
+                        app.job_progress(&jid,json!({"item":i,"items":files.len(),"name":rel}));
+                        let ix=Index::build(&lib,None,true);
+                        match model::wrap_loose(&lib,&ix,rel) { Ok(m) => made.push(m), Err(e) => failed.push(json!({"rel":rel,"error":e.to_string()})) }
+                    }
+                    Ok(json!({"items":made,"failed":failed,"journal":made.last().map(|m|m["journal"].clone())}))
+                }))
             }
             "relayout_plan" => {
                 let change = args["change"].clone();

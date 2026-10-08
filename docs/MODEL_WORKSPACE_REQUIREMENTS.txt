@@ -1,0 +1,297 @@
+Model page and file workspace: requirements
+   Oct 7, 2026   · @Jerred
+
+
+Summary
+The model page becomes a three-column file workspace: the app's sidebar, a collapsible
+file tree, and a large viewing area that shows the selected file or the contents of the
+selected folder or archive. From either the tree or the viewing area, the owner can select
+one or more files and make them a new model in its own folder, kept in the same category
+or moved to another, with Undo.
+Requirement 1 (single files get a folder) already holds for everything that comes through
+Import or a drop. The one gap is a file copied by hand straight into a category folder: the
+library doesn't list it at all today.
+The work splits into five packages (section "Work packages"). Packages A, B and C can
+run in parallel; D depends on A and B; E (tests and docs) closes it out. Every package
+follows the repository's rules in CLAUDE.md and the "For agents" section of
+CHANGELOG.md.
+Today's model page, for reference: a header (Back, name, place, action row), then a two-
+column body. The left column is the stage, with tabs 3D, Pictures, Documents and Videos.
+The right column (320 px) holds the variant switch and the Files views: Folders, List, By
+type and Grid ( web/ui/parts.js , FilesView and PartsViews ). Import's details panel
+reuses FilesView in a compact one-column form.
+1. Every model is a folder, including single files
+You're right: this is already how Import and drops work. A model made of one loose file (or
+a file with its matching picture) is moved into a new folder named after the model, then
+its model.json is written there ( import::commit_one stages the files in .importing-
+<name> and renames it into place). A folder dropped or sorted keeps its own folder. There
+is no path that puts a bare file into a category folder.
+Gap to close (package C): a file put by hand straight into a category folder, such as
+Household/Kitchen/hook.stl , is not listed anywhere. The index only reads sub-folders
+as models ( index::find_models ), so the file is invisible in the app.
+Requirements:
+ 1. Keep the current Import and drop behaviour unchanged. Add a core test that imports
+    one STL and one ZIP on their own and asserts each lands as <category
+    path>/<name>/<file> with a model.json beside it.
+ 2. When the library is read (and when the folder watcher fires), collect loose model files
+    (3D, slicer and archive kinds) that sit directly in Unsorted/ or a category or
+    subcategory folder.
+ 3. Show them on Home under "Waiting to be sorted", like the loose folders already listed
+    there: the file's path and a Put in a folder button, plus Put all in folders.
+ 4. Put in a folder makes <same folder>/<file name without extension>/ , moves the
+    file in with pictures and documents whose names start the same way (the rule Import
+    uses), and writes model.json . It records a journal entry so Recent changes can undo
+    it.
+ 5. Pictures and documents with no matching model file are left where they are.
+Out of scope: changing how folders already in the library are read.
+2. A collapsible file panel on the left
+The file structure moves from the right column to a panel on the left of the model page,
+directly right of the app's sidebar. The page reads left to right: sidebar, file panel, viewing
+area. The page header (Back, name, place, action row) stays across the top of the file
+panel and viewing area.
+Requirements:
+ 1. Position and size. The panel is 300 px wide by default. A drag handle on its right edge
+    resizes it between 220 and 480 px. The width is kept in preferences
+    ( filePanelWidth ).
+ 2. Collapse. A button in the panel's header collapses it to a 36 px rail with one button to
+    open it again. The [ key toggles it, shown in both buttons' tooltips. Open or closed is
+    kept in preferences ( filePanelOpen , default open). Collapsing gives the viewing
+    area the full width.
+ 3. Contents, top to bottom:
+      a. Header: "Files", the count and total size, and the collapse button.
+      b. The variant switch (Presupported, Unsupported, All), when the model has
+         variants. It moves here from the right column and filters both the panel and the
+         viewing area.
+      c. A search box that filters file names.
+      d. The view switcher, using the shared ViewSwitch : Folders (the tree), List (every
+         file, sortable) and By type. The current Grid view moves to the viewing area
+         (requirement 3).
+      e. The tree or list itself, scrolling inside the panel.
+   4. The tree. The model's own folder is the top node, named after the model, so it can be
+      selected like any folder. Folders show the amber folder icon; files show their type tag
+      ( filetypes.js ); a ZIP can be unfolded to show its entries, with their folders, as
+      today.
+   5. Selecting. Click selects a row and shows it in the viewing area. Ctrl- or Cmd-click
+      adds or removes one; Shift-click selects a run; Esc clears; arrow keys move; Enter
+      opens a folder or archive in the viewing area. These match the library's selection rules
+      (UI pass step 1). The row last clicked is the one shown; the rest are selected for
+      actions (requirement 4).
+   6. Right-click on a row opens the shared menu with the file actions that exist today
+      (Show here, Open in its own app, Show in folder, Use as cover) plus Make a new
+      model… (requirement 4).
+   7. Narrow windows (under 900 px): the panel becomes a drawer over the viewing area,
+      closed by default, opened from a Files button in the page header.
+   8. Import is unchanged. Import's details panel keeps its compact one-column layout.
+      The tree, list and by-type components stay shared, so Import gets the type tags and
+      selection fixes for free.
+
+
+ 3. The viewing area shows a file, or a folder's contents
+ The area right of the file panel shows whatever is selected there. A file opens in its
+ viewer; a folder, the model's top folder or an archive shows its contents as icons. The 3D,
+ Pictures, Documents and Videos tabs go away: the selection decides what is shown.
+
+Selected in the panel                        The viewing area shows
+A 3D file (STL, 3MF, OBJ), or one inside a ZIP   The 3D stage as today: 3/4, Top, Front, Edges, Use
+                                                 as cover, size and triangle count
+A picture                                        The picture, fitted, with Use as cover
+A document (PDF, readme, text)                   The document viewer as today (readmes rendered
+                                                 safely)
+A video                                          The player as today, with seeking
+A folder, or the model's top folder              Its contents as icons (below)
+A ZIP                                            Its entries as icons, folders inside it included
+A 7z or RAR, or a file with no viewer            Its name, type, size and Open in its own app;
+                                                 nothing else
+
+ The contents view:
+   1. Tiles. One tile per direct child: sub-folders first, with a folder tile showing how many
+      files they hold; then files. A file tile shows a preview (a 3D file drawn by the core, a
+      picture's thumbnail) or its type icon, its type tag, its name and size. Previews load as
+      tiles come into view, three at a time (the existing LazyPreview ).
+   2. Sorting. The shared SortMenu with Name, Type, Largest first and Newest. Folders
+      always come first. The choice is kept in preferences.
+   3. Grid or list. The shared ViewSwitch switches between tiles and a compact list with
+      Name, Type and Size columns that sort when clicked. A tile-size slider is optional.
+   4. Breadcrumb. Above the tiles, the path from the model's top folder, for example
+      "Knight Armour › Presupported › Arms". Each part is a link back up. Backspace goes up
+      one level.
+ 5. Opening. Double-click or Enter on a folder or ZIP tile opens it here and selects it in
+    the panel (unfolding the tree to it). On a file tile, it shows that file in its viewer. A file
+    with no viewer opens in its own app on the desktop.
+ 6. Stepping. While a file is shown, the left and right arrow keys step to the previous or
+    next file in the same folder, so pictures and parts can be paged through.
+ 7. Selecting tiles. Click, Ctrl-click, Shift-click, Ctrl+A (everything in this folder) and Esc
+    work as in the panel, and the two share one selection: what's selected in one is
+    selected in the other.
+ 8. On opening the page, the model's main 3D file is selected and shown, as today. A
+    model with no 3D file shows its top folder's contents.
+ 9. Large folders. Over 500 entries, the first 500 are drawn with Show more. An empty
+    folder says "Nothing in this folder."
+
+
+4. Make a new model from selected files
+With one or more files or folders selected in the panel or the viewing area, Make a new
+model… moves them into a new model folder of their own. The new model is placed in the
+current model's category by default, or in another category chosen in the same dialog.
+The change can be undone from its message and from Recent changes on Home.
+Where the action appears. It appears in the right-click menu of rows and tiles, and in a
+selection bar above the viewing area that shows when anything is selected ("3 files
+selected · Make a new model… · Clear"). Its key is N. It is greyed, with the reason as its
+tooltip, when the library is read-only or when the selection is the whole model ("That's
+the whole model: use Move to category instead").
+The dialog uses the shared dialog styles:
+ 1. Name, defaulting to the selected folder's name when one folder is selected.
+    Otherwise it defaults to the files' common name stem, for example "Helmet" from
+    helmet.stl and helmet_supports.stl .
+ 2. Where: "Keep in Wargames › Space Marines" (the current model's place, default) or a
+    different category and subcategory, using the shared CategoryPicker that Move to
+    category uses. Unsorted is allowed.
+ 3. Move or copy: move by default, so the files leave this model; copy keeps them in both.
+ 4. Preview: the destination folder (for example Wargames/Space Marines/Helmet/ )
+    and every file with the path it will have inside the new model.
+ 5. Make model, whose label says how many files go.
+What is moved, and where it lands:
+   Paths inside the new model are relative to the deepest folder holding everything
+   selected. Selecting Arms/left.stl and Arms/right.stl puts both at the top of the
+   new model. Selecting Presupported/Helmet and Unsupported/Helmet keeps both
+   folders, so the variants survive.
+   A selected folder takes everything in it.
+   Entries selected inside a ZIP are copied out (unpacked) into the new model. The ZIP
+   itself is left unchanged. Selecting the ZIP file itself moves the whole archive.
+   The folder name follows the category's model-folder template and gets " (2)" when
+   taken, as Import does ( import::destination ).
+   Moves across drives copy, check by SHA-256, then delete the original, as Import
+   does. A stop or failure leaves the original in place.
+The two models afterwards:
+    The new model gets a fresh id and a model.json with the dialog's name. It also gets
+    the source model's authors, tags, source link and release date, plus split_from set
+    to the source model's id.
+    The source model's model.json is kept. If its cover or main 3D file moved, the cover
+    is cleared and its preview is drawn again. Empty folders left behind are removed.
+    Both models are read into the index straight away. The page stays on the source
+    model, and the message reads "Made Helmet a new model in Wargames › Space
+    Marines." with Undo and Open.
+Core contract (package D):
+    model_extract_plan { id, files: [rel], entries: [{ file, entry }], name,
+    schema, values } returns { dest, files: [{ from, to }], error? } without
+    changing anything, for the preview.
+    model_extract { …same, mode: "move" | "copy" } is a job. It returns { id, rel,
+    journal } .
+    A new journal kind, extract , lives in _library/journal/ . It records each file's from
+    and to, both model.json files before and after, and the replaced cover. Undo puts
+    the files back, deletes the new folder and restores both sidecars. It follows the same
+    newest-first rule as other changes that move folders.
+
+
+Work packages for parallel agents
+Packages A to D run at the same time; E starts when A, B and D are merged; F closes the
+release. Each package owns its files. A package that needs a change in another's file asks
+that package's agent, or waits for its merge.
+Package           Delivers                                 Files it owns                                 Depends on
+A. File panel     Requirement 2: three-column model         web/ui/modelpage.js , new                    The selection contract
+                  page, collapsible and resizable panel,    web/ui/filepanel.js , new                    below, written first
+                  variant switch and views moved, the       web/ui/filesel.js , the tree, list and by-
+                  shared file selection                    type parts of web/ui/parts.js
+B. Viewing        Requirement 3: the viewer for one        New web/ui/stage.js (Stage3D,                 The selection contract
+area              file, the contents view for folders      Pictures, Documents and Videos moved
+                  and ZIPs, breadcrumb, stepping           out of parts.js ), new
+                                                           web/ui/contents.js
+
+C. Loose files    Requirement 1's gap: loose files         desktop/core/src/index.rs ,                   None
+                  found in category folders, Home's        desktop/core/src/model.rs ,
+                  Put in a folder, its journal             web/ui/home.js
+
+D. Extract core   Requirement 4's core:                    New desktop/core/src/extract.rs ;             None
+                   model_extract_plan ,                    additions to api.rs and relayout.rs
+                   model_extract , the extract
+                  journal and its undo, core tests
+E. Make a new     Requirement 4's page: the action,        New web/ui/extract.js ; adds the              A, B and D merged
+model             selection bar, dialog and messages       action to filepanel.js and
+                                                           contents.js
+
+F. Release        Page checks for all four, PLAN notes,    tests/desktop_page.py , docs/PLAN.md ,        A to E merged
+                  CHANGELOG, release and                   CHANGELOG.md
+                  screenshots
+
+                  The selection contract (package A writes web/ui/filesel.js first, in its own commit,
+                  so B and E can build against it):
+   A store, fileSel , holding { src, shown, picked, anchor } . src is the model ( {
+   kind: "model", id, rel } ). shown is the one thing shown in the viewing area.
+   picked is everything selected.
+   Keys: d:<folder rel> for a folder ( d: alone is the model's top folder), f:<file
+   rel> for a file, and z:<zip rel>!<entry path> for an entry inside a ZIP.
+   Functions: show(key) , pick(key, how) with how one of one , toggle or range
+   over an order the caller passes, clear() , and pickedFiles() , which turns the
+   selection into the files and entries lists that model_extract takes.
+Conventions every package keeps:
+   Read CLAUDE.md and the "For agents" section of CHANGELOG.md first. That covers
+   the offline Rust build, the page test, British spellings, "Categories" never "Schemas",
+   and no wargaming-specific example text in the app.
+   Work on a branch per package ( model-workspace-a and so on) and open a pull
+   request. Don't push to main, because CI releases every push.
+   Each package adds its own checks: page checks in desktop_page.py under a
+   function of its own, core tests in the module it touches. It adds one line under
+   Unreleased in CHANGELOG.md.
+   New CSS goes in a block of its own at the end of web/styles.css , headed with the
+   package's name, to keep merges clean.
+   Use the shared pieces rather than new ones: PageHead , ViewSwitch , SortMenu ,
+    openMenu , ConfirmDialog , TypeTag , LazyPreview , CategoryPicker , undoable
+   and recorded .
+   Copy a prop into state only in a layout effect (the lesson in PLAN's step 2 notes).
+Acceptance tests and definition of done
+The work is done when every check below passes in desktop_page.py and the core
+tests, the existing 63 page checks still pass, and CI is green on Linux and Windows. It also
+needs the release published and the screenshots sent.
+    1a. One STL and one ZIP imported on their own each land as
+     <category>/<name>/<file> with a model.json (core test).
+    1b. A file put by hand into Household/Kitchen/ shows under Waiting to be sorted on
+    Home. Put in a folder makes Household/Kitchen/<name>/ , and the model appears in
+    Kitchen. Undo from Recent changes puts the file back.
+    2a. The model page shows sidebar, file panel, viewing area left to right. The panel
+    collapses with its button and with [ , and reopens. It keeps its width and open state
+    after a reload.
+    2b. The variant switch in the panel filters both the panel and the viewing area.
+    2c. At 700 px wide, the panel is a drawer opened from the Files button.
+    3a. Selecting an STL shows the 3D stage; a PNG shows the picture; a readme shows
+    the document.
+    3b. Selecting a folder shows its tiles, folders first. Sorting by Largest first reorders
+    them, and the list view's headers sort.
+    3c. Selecting a ZIP shows its entries as tiles. Double-clicking a 3D entry shows it in the
+    stage.
+    3d. Double-clicking a folder tile opens it, selects it in the tree and updates the
+    breadcrumb. Backspace goes back up.
+    3e. The selection is shared: Ctrl-clicking two tiles selects the same two rows in the
+    tree.
+         4a. Selecting Presupported/Helmet and Unsupported/Helmet in Knight Armour and
+         making a new model "Helmet", kept in the same category, gives a new folder beside it.
+         That folder holds both variant folders, and Knight Armour no longer lists them.
+         4b. The same, sent to another category through the dialog's picker, lands there.
+         4c. Undo from the message restores both models exactly: same files, same
+          model.json files, same cover.
+         4d. Entries picked inside a ZIP are unpacked into the new model, and the ZIP is
+         unchanged.
+         4e. Selecting every file greys the action with the whole-model reason. A read-only
+         library greys it with its reason.
+         4f. A move across drives (the test's force_copy ) copies, checks and deletes, and a
+         stopped job leaves the source model whole (core test).
+         Done. PLAN.md has the design (this document) and a notes section. CHANGELOG
+         has the release lines, and screenshots of the new model page are in the project folder.
+
+
+     Open questions
+     Each has a default, written into the requirements above, so agents can start without
+     waiting.
+
+Question                                              Default assumed
+Files picked inside a ZIP: unpack them into the new   Unpack the picked entries; the ZIP stays as it is
+model, or refuse until the ZIP is unpacked?
+Making a new model: move the files out of this        Move, with Copy as an option in the dialog
+model, or copy them?
+Should Import's details panel get the same three-   No; it keeps its compact layout and gains only the
+column layout?                                      shared fixes
+Keep the 3D / Pictures / Documents tabs as quick    No; the panel's By type view covers it
+filters?
+Fix loose files put by hand into category folders   Yes, as package C
+(requirement 1's gap) now?
+The key that collapses the file panel               [
+

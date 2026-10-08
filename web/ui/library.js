@@ -11,18 +11,18 @@ export const apiBytes = (cmd, args) => ctx.platform.apiBytes(cmd, args);
  *  { ms, action: { label, run } } for a button in the message (Undo). It stays
  *  while the pointer is on it. */
 export function toast(text, opts = {}) {
-  const { ms = 3500, action = null } = typeof opts === "number" ? { ms: opts } : opts;
+  const { ms = 3500, action = null, actions = [] } = typeof opts === "number" ? { ms: opts } : opts;
   const el = document.getElementById("toast");
   if (!el) return;
   const span = document.createElement("span");
   span.textContent = text;
   el.replaceChildren(span);
-  if (action) {
+  for (const item of [...(action ? [action] : []), ...actions]) {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "toast-action";
-    b.textContent = action.label;
-    b.onclick = () => { el.hidden = true; action.run(); };
+    b.textContent = item.label;
+    b.onclick = () => { el.hidden = true; item.run(); };
     el.append(b);
   }
   el.hidden = false;
@@ -38,11 +38,11 @@ const undos = [];
 /** Say a change was made, with Undo in the message; Ctrl+Z undoes it too.
  *  `undo()` puts it back, and may return the message to show then. Returns a
  *  function that undoes it (for an Undo button on the page). */
-export function undoable(text, undo, ms = 8000) {
+export function undoable(text, undo, ms = 8000, actions = []) {
   const entry = { text, undo };
   undos.push(entry);
   if (undos.length > 20) undos.shift();
-  toast(text, { ms, action: { label: "Undo", run: () => runUndo(entry) } });
+  toast(text, { ms, action: { label: "Undo", run: () => runUndo(entry) }, actions });
   return () => runUndo(entry);
 }
 
@@ -227,12 +227,12 @@ export async function saveDetails(model, patch) {
 
 /** Say a recorded change was made (a move, an edit, an import), with Undo in the
  *  message; `after()` runs once it's undone (the page reads things again). */
-export function recorded(text, journal, after) {
-  if (!journal) return toast(text);
+export function recorded(text, journal, after, actions = []) {
+  if (!journal) return toast(text, { actions });
   undoable(text, async () => {
     const r = await undoChange(journal);
     await after?.(r);
-  });
+  }, 8000, actions);
 }
 
 /** Wait for a background job (importing), showing it in the status bar.

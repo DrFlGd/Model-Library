@@ -745,3 +745,62 @@ body:has(.sw-go) .toast { bottom: 92px; }
 .sw-level { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin: 0; font-size: 13px; }
 .sw-crumbs { min-width: 0; overflow-wrap: anywhere; }
 .sw-crumb { font-size: 13px; }
+
+/* Package B: selection-driven viewing area and folder contents. */
+.workspace-stage { min-width: 0; display: flex; flex-direction: column; }
+.contents-breadcrumb { display: flex; flex-wrap: wrap; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--steel-2); gap: 2px; }
+.contents-breadcrumb .ghost { padding: 4px 5px; }
+.contents-view { padding: 12px; overflow: auto; min-height: 180px; flex: 1; }
+.contents-tools { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.contents-grid .file-tile { min-width: 0; }
+.contents-grid .contents-size { display: block; padding: 0 8px 8px; font-size: 11px; }
+.contents-columns, .contents-row { display: grid; grid-template-columns: minmax(100px, 1fr) 90px 90px; gap: 10px; align-items: center; }
+.contents-columns { border-bottom: 1px solid var(--steel-2); }
+.contents-columns button { text-align: left; }
+.contents-row { width: 100%; text-align: left; padding: 9px; border-radius: 4px; background: transparent; border: 1px solid transparent; }
+.contents-row:hover { background: var(--panel); }
+.contents-row.on { background: var(--sel); border-color: var(--tool); }
+.contents-row .tile-name { padding: 0; display: flex; gap: 7px; }
+.folder-icon { color: #ce983d; }
+.workspace-no-view { padding: 40px; margin: auto; text-align: center; }
+.workspace-step { display: flex; justify-content: space-between; padding: 6px 12px; border-top: 1px solid var(--steel-2); }
+.workspace-stage .thumb-strip, .workspace-stage .doc-list { display: none; }
+.workspace-stage .stage-pictures, .workspace-stage .stage-docs, .workspace-stage .stage-videos { flex: 1; min-height: 0; }
+@media (max-width: 600px) { .contents-columns, .contents-row { grid-template-columns: minmax(80px, 1fr) 65px 65px; gap: 5px; } }
+/* Package A: model file panel */
+.model-workspace { display:flex; position:relative; align-items:stretch; min-height:600px; gap:16px; }
+.file-panel { flex:none; position:relative; display:flex; flex-direction:column; gap:12px; border-right:1px solid var(--steel-2); padding:12px; min-width:0; box-sizing:border-box; }
+.file-panel.collapsed { padding:4px; }
+.file-panel-head { display:flex; justify-content:space-between; align-items:center; }
+.file-panel-head > div { display:flex; flex-direction:column; gap:4px; }
+.file-panel-scroll { overflow:auto; max-height:calc(100vh - 320px); min-height:300px; }
+.file-panel .parts-filter { width:100%; min-width:0; flex:0 0 auto; height:36px; }
+.file-panel .variant-seg { flex-wrap:wrap; }
+.file-panel .view-switch { display:flex; }
+.file-panel .view-switch button { flex:1; padding:7px 4px; }
+.file-panel .view-switch .view-label { font-size:11px; }
+.file-panel-resize { position:absolute; right:-4px; top:0; bottom:0; width:8px; cursor:col-resize; touch-action:none; }
+.file-panel-resize:hover,.file-panel-resize:focus { background:var(--tool); opacity:.5; }
+.file-selection-row { display:flex; align-items:center; }
+.file-selection-row .tree-btn { flex:1; min-width:0; }
+.file-selection-row .tree-icon svg { color:#cf9a37; }
+.file-fold { flex:none; width:20px; padding:2px!important; text-align:center; }
+.file-type-heading { padding:12px 4px 6px; font-weight:600; }
+.workspace-viewing-area { flex:1; min-width:0; overflow:hidden; }
+.workspace-notes { margin:16px 0; }
+.file-panel-shade { position:absolute; inset:0; z-index:20; background:#0005; border:0; }
+@media(max-width:899px) {
+  .model-workspace { display:block; }
+  .file-panel.drawer { position:absolute; z-index:21; inset:0 auto 0 0; background:var(--white); box-shadow:4px 0 18px #0004; max-width:90%; }
+  .file-panel.drawer.collapsed { display:none; }
+  .file-panel-scroll { max-height:calc(100vh - 280px); }
+}
+/* Package E: Make a new model */
+.extraction-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--steel-2); }
+.extraction-bar > span { margin-right: auto; }
+.extract-preview { max-height: 210px; overflow: auto; padding-left: 22px; }
+.extract-preview code { overflow-wrap: anywhere; }
+#extract-dialog fieldset { border: 0; padding: 0; min-width: 0; }
+/* Package C: loose model files on Home */
+#home-loose-files .loose-file-path { overflow-wrap: anywhere; min-width: 0; }
+#home-loose-files .wrap-loose { flex-shrink: 0; }
