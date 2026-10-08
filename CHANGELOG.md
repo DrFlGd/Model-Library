@@ -65,6 +65,13 @@ The UI pass in `docs/PLAN.md` ("UI pass design") is done: actions (0.5.1), undo 
 
 ## Unreleased
 
+- Model files open directly from the shared selection: a 3D part, picture, readme or video has its own viewer; folders and ZIPs have sortable tiles or a list, a breadcrumb, shared selection and sibling navigation. Compact Import keeps its existing viewer.
+- **A file panel on the left of each model**: resize it, collapse it with `[` or its button, and use it as a drawer on small windows. Folders, List and By type share file selection with the viewing area; variants and search keep large models manageable. Panel width, view and open state are remembered. Import keeps its compact layout.
+- Make selected files or folders a new model from the file panel or viewing area: preview its name and category, move or copy, then Undo or Open from the message. Whole-model and read-only selections explain why extraction is unavailable.
+- **Make a new model from selected files:** preview destinations, move or copy files and folders, unpack selected ZIP entries, and undo from Recent changes. Transfers stage verified copies before removing originals, preserve source details and previews for exact undo, reject unsafe paths, and protect files changed outside the app.
+- Files copied directly into category folders now appear on Home, with Put in a folder, matching pictures and documents, and Undo in Recent changes.
+- Updated the existing model-page acceptance checks for the shared file panel and folder viewers, added the panel checks to the acceptance run, and recorded the workspace implementation notes in `docs/PLAN.md`.
+
 ## 0.5.4 (2026-10-07)
 
 Import follow-ups (owner's asks after the UI pass; design and notes in docs/PLAN.md, "Import follow-ups").

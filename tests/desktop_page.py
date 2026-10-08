@@ -60,6 +60,7 @@ import urllib.request
 from pathlib import Path
 
 from playwright.async_api import async_playwright
+from model_workspace_panel import panel_workspace_checks
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--cli", required=True)
@@ -467,7 +468,7 @@ async def phase3(pg):
     size_text = await pg.inner_text("#viewer-size") if await pg.locator("#viewer-size").count() else await pg.inner_text(".stage-3d .form-error")
     shown = await pg.inner_text("#viewer-file")
     variants = await pg.eval_on_selector_all("#variants button", "els => els.map(e => e.textContent + (e.getAttribute('aria-pressed') === 'true' ? '*' : ''))")
-    dirs = await pg.eval_on_selector_all("#part-tree [data-dir]", "els => els.map(e => e.dataset.dir)")
+    dirs = await pg.eval_on_selector_all("#part-tree [data-dir]", "els => els.map(e => e.dataset.dir).filter(Boolean)")
     await pg.screenshot(path=str(out / "12-model-page.png"))
     check("a model opens on its own page with a 3D view, parts and variants", "20.0 × 20.0 × 20.0 mm" in size_text and shown == "Presupported/Helmet/helmet.stl"
           and variants == ["Presupported*", "Unsupported", "All"] and dirs == ["Presupported", "Presupported/Arms", "Presupported/Helmet"], (size_text, shown, variants, dirs))
@@ -475,7 +476,7 @@ async def phase3(pg):
     await pg.wait_for_function("() => document.querySelector('#viewer-size')?.textContent.startsWith('8.0')")
     await pg.click("#variants button:text-is('Unsupported')")
     await pg.wait_for_function("() => document.querySelector('#viewer-file')?.textContent === 'Unsupported/Helmet/helmet.stl'")
-    dirs = await pg.eval_on_selector_all("#part-tree [data-dir]", "els => els.map(e => e.dataset.dir)")
+    dirs = await pg.eval_on_selector_all("#part-tree [data-dir]", "els => els.map(e => e.dataset.dir).filter(Boolean)")
     check("the variant switch shows that variant's parts", dirs == ["Unsupported", "Unsupported/Helmet"], dirs)
 
     # 20b. variant names are set in Settings: Resin and FDM folders become a switch
@@ -499,9 +500,9 @@ async def phase3(pg):
     await pg.click("#variants button:text-is('Unsupported')")
 
     # 21. a ZIP's entries open from inside it
-    await pg.click("#part-tree [data-file='extras.zip']")
+    await pg.click("#part-tree [aria-label='Unfold extras.zip']")
     await pg.wait_for_selector("#part-tree [data-entry]")
-    entries = await pg.eval_on_selector_all("#part-tree [data-entry]", "els => els.map(e => e.dataset.entry)")
+    entries = await pg.eval_on_selector_all("#part-tree [data-entry]", "els => els.map(e => e.dataset.entry).filter(e => !e.endsWith('/'))")
     await pg.click("#part-tree [data-entry='Extras/shield.stl']")
     await pg.wait_for_function("() => document.querySelector('#viewer-file')?.textContent === 'extras.zip › Extras/shield.stl' && document.querySelector('#viewer-size')?.textContent.startsWith('15.0')")
     check("a ZIP's parts are listed and shown without unzipping", entries == ["Extras/shield.stl"] and (dest / "extras.zip").is_file(), entries)
@@ -511,12 +512,12 @@ async def phase3(pg):
     await pg.wait_for_function("() => document.querySelector('.toast')?.textContent.includes('cover')")
     side = json.loads((dest / "model.json").read_text())
     snap = (dest / "_media/cover.png").read_bytes()[:4] == b"\x89PNG" if (dest / "_media/cover.png").exists() else False
-    await pg.click("[data-tab=docs]")
+    await pg.click("#part-tree [data-file='README.md']")
     await pg.wait_for_selector("#doc-text h1")
     doc = await pg.inner_html("#doc-text")
     pwned = await pg.evaluate("() => window.__pwned || 0")
     await pg.screenshot(path=str(out / "13-readme.png"))
-    await pg.click("[data-tab=pictures]")
+    await pg.click("#part-tree [data-file='photo.png']")
     await pg.wait_for_selector("#picture-big")
     await pg.click(".strip-btn[data-file='photo.png']")
     await pg.click("#picture-cover")
@@ -526,27 +527,31 @@ async def phase3(pg):
           and "<strong>0.12 mm</strong>" in doc and "<script" not in doc and 'href="javascript' not in doc and not pwned, (side.get("cover"), side2.get("cover"), doc[:200], pwned))
 
     # 22b. the model's files in other views: all files, by type, a grid of previews
-    await pg.click('[data-tab="3d"]')
     await pg.click("#variants button:text-is('All')")  # the variant switch picks the files every view shows
     on_disk = sorted(x.relative_to(dest).as_posix() for x in dest.rglob("*") if x.is_file() and x.name != "model.json" and not x.relative_to(dest).as_posix().startswith("_thumbs/"))
     await pg.click('#parts-views [data-view="all"]')
     await pg.wait_for_selector("#all-files")
     every = await pg.eval_on_selector_all("#all-files [data-file]", "els => els.map(e => e.dataset.file)")
-    await pg.fill("#all-files .parts-filter", "helmet")
+    await pg.fill("#file-panel .parts-filter", "helmet")
     await pg.wait_for_function("() => document.querySelectorAll('#all-files [data-file]').length === 2")
+    await pg.fill("#file-panel .parts-filter", "")
     await pg.click('#parts-views [data-view="type"]')
     kinds = await pg.eval_on_selector_all("#by-type [data-kind]", "els => els.map(e => e.dataset.kind)")
-    await pg.click('#parts-views [data-view="grid"]')
-    await pg.wait_for_selector("#file-grid .file-tile")
-    await pg.wait_for_function("() => [...document.querySelectorAll('#file-grid img')].some(i => i.complete && i.naturalWidth > 0 && /preview/.test(i.src))", timeout=30000)
-    tiles = await pg.locator("#file-grid .file-tile").count()
+    await pg.click('#parts-views [data-view="folders"]')
+    await pg.click('#part-tree [data-key="d:Presupported/Helmet"]')
+    await pg.wait_for_selector("#contents-view .file-tile")
+    await pg.wait_for_function("() => [...document.querySelectorAll('#contents-view img')].some(i => i.complete && i.naturalWidth > 0)", timeout=30000)
+    tiles = await pg.locator("#contents-view .file-tile").count()
     await pg.screenshot(path=str(out / "13b-files-grid.png"))
+    await pg.click('#parts-views [data-view="type"]')
     await pg.wait_for_timeout(600)  # preferences are saved after a short pause
-    kept = json.loads((home / "config/prefs.json").read_text()).get("ml-ui", {}).get("partsView") if (home / "config/prefs.json").exists() else None
+    kept = json.loads((home / "config/prefs.json").read_text()).get("ml-ui", {}).get("filePanelView") if (home / "config/prefs.json").exists() else None
     await pg.click('#parts-views [data-view="folders"]')
     await pg.wait_for_selector("#part-tree")
-    check("a model's files show as folders, all files, by type and as a grid of previews", sorted(every) == on_disk and kinds == ["model", "image", "doc", "archive"]
-          and tiles == len(on_disk) and kept == "grid", (every, on_disk, kinds, tiles, kept))
+    check("a model's files show as folders, a searchable list, by type and folder previews", sorted(every) == on_disk and kinds == ["model", "image", "doc", "archive"]
+          and tiles == 1 and kept == "type", (every, on_disk, kinds, tiles, kept))
+
+    await panel_workspace_checks(pg, check)
 
     # 23. library files can be read in ranges (videos seek)
     req = urllib.request.Request(B + "library/Unsorted/Knight%20Armour/README.md", headers={"Range": "bytes=2-7"})
@@ -568,6 +573,49 @@ async def phase3(pg):
     src_ = await hand.get_attribute("src")
     check("Make previews draws the missing ones, shown on the card", (library / "Unsorted/Hand Made/_thumbs/model.png").is_file() and src_.endswith("_thumbs/model.png"), (msg, src_))
     await pg.screenshot(path=str(out / "14-previews.png"))
+
+
+async def workspace_viewing(pg):
+    """Package B: selection-driven viewers and direct folder/archive contents."""
+    await pg.goto(B + "#/browse/unsorted")
+    await pg.locator(".card:has(.card-name:text-is('Knight Armour'))").dblclick()
+    await pg.wait_for_selector("#workspace-stage")
+    # Drive the public selection contract; verify actual rendered viewers/tiles.
+    async def show_file(key):
+        await pg.evaluate("async key => (await import('./ui/filesel.js')).pick(key)", key)
+    await show_file("f:photo.png")
+    await pg.wait_for_selector("#picture-big")
+    await show_file("f:README.md")
+    await pg.wait_for_selector("#doc-text h1")
+    check("file selection opens the picture and safe readme viewers", not await pg.evaluate("window.__pwned || 0"))
+    await show_file("d:")
+    await pg.wait_for_selector("#contents-view .file-tile")
+    keys = await pg.eval_on_selector_all("#contents-view .file-tile", "els => els.map(e => e.dataset.key)")
+    first_file = next((i for i, k in enumerate(keys) if k.startswith("f:")), len(keys))
+    check("folder contents put subfolders before direct files", all(k.startswith("d:") for k in keys[:first_file]) and all(k.startswith("f:") for k in keys[first_file:]), keys)
+    await pg.locator('#contents-view [data-key="f:photo.png"]').click()
+    await pg.locator('#contents-view [data-key="f:README.md"]').click(modifiers=["Control"])
+    selected = await pg.evaluate("async () => (await import('./ui/filesel.js')).fileSel.get().picked")
+    check("tiles share a multiple selection without leaving the folder", sorted(selected) == ["f:README.md", "f:photo.png"] and await pg.locator("#contents-view").count() == 1, selected)
+    await pg.locator('#contents-view [data-key="f:extras.zip"]').dblclick()
+    await pg.locator('#contents-view [data-key="z:extras.zip!Extras/"]').dblclick()
+    await pg.locator('#contents-view [data-key="z:extras.zip!Extras/shield.stl"]').dblclick()
+    await pg.wait_for_function("() => document.querySelector('#viewer-file')?.textContent === 'extras.zip › Extras/shield.stl'")
+    await pg.locator("#workspace-stage").click(position={"x": 8, "y": 8})
+    await pg.keyboard.press("Backspace")
+    await pg.wait_for_selector('#contents-view [data-key="z:extras.zip!Extras/shield.stl"]')
+    check("ZIP folders open their mesh and Backspace returns to the folder", await pg.locator('[data-crumb="z:extras.zip!Extras/"]').count() == 1)
+    await show_file("d:")
+    await pg.click('#contents-views [data-view="list"]')
+    await pg.click('.contents-columns [data-sort="size"]')
+    check("contents list headers sort by largest first", await pg.locator('#contents-sort').get_attribute('data-sort') == 'size')
+    projection = await pg.evaluate("""async () => {
+      const {childrenOf, sortChildren} = await import('./ui/contents.js');
+      const rows = childrenOf([{rel:'Z/a.stl',size:2},{rel:'a.stl',size:2,modified:10},{rel:'b.stl',size:9,modified:20}]);
+      return {size:sortChildren(rows,'size').map(x=>x.key), newest:sortChildren(rows,'newest').map(x=>x.key)};
+    }""")
+    check("folder projection keeps folders first for size and newest sorts", projection == {"size": ["d:Z", "f:b.stl", "f:a.stl"], "newest": ["d:Z", "f:b.stl", "f:a.stl"]}, projection)
+    await pg.click('#contents-views [data-view="grid"]')
 
 
 async def phase4(pg):
@@ -929,20 +977,22 @@ async def ui_pass(pg):
     await pg.wait_for_selector("#delete-schema-dialog", state="detached")
     check("a category's menu is on the sidebar too, and Delete category is red", items == ["Add subcategory…", "Edit category…", "Delete category…"] and red, (items, red))
 
-    # 38. files with no viewer are greyed, with a reason
+    # 38. files without a viewer show their details and an external-app action
     put(library / "Unsorted/Knight Armour/settings.ini", "x")
     await api(pg, "library_scan", {"full": False})
     await pg.goto(B + "#/browse/unsorted")
     await pg.dblclick(".card:has(.card-name:text-is('Knight Armour'))")
     await pg.wait_for_selector("#part-tree [data-file='settings.ini']", timeout=30000)
-    greyed = "no-view" in (await pg.get_attribute("#part-tree [data-file='settings.ini']", "class"))
-    why = await pg.get_attribute("#part-tree [data-file='settings.ini']", "title") or ""
+    await pg.click("#part-tree [data-file='settings.ini']")
+    await pg.wait_for_selector(".workspace-no-view")
+    fallback = await pg.inner_text(".workspace-no-view")
     await pg.click("#part-tree [data-file='settings.ini']", button="right")
     file_menu = await labels_of(pg, "#context-menu .menu-label")
     await pg.keyboard.press("Escape")
     mp_row = await labels_of(pg, "#model-page .action-row button")
-    check("files with no viewer are greyed and open in their own app; the model page has the same row", greyed and "no viewer" in why
-          and file_menu == ["Open in its own app", "Show in folder"] and mp_row == ["Edit details…", "Move to category…", "Star", "Show in folder", "More ▾"], (greyed, why, file_menu, mp_row))
+    check("files with no viewer show details and open in their own app; the model page has the same row", "settings.ini" in fallback and "Open in its own app" in fallback
+          and "Open in its own app" in file_menu and "Show in folder" in file_menu and "Make a new model…" in file_menu
+          and mp_row == ["Edit details…", "Move to category…", "Star", "Show in folder", "More ▾"], (fallback, file_menu, mp_row))
 
     # 39. Import: right-click, Ctrl+A and Esc, Ctrl+Z, and messages clear of the footer
     more = home / "More"
@@ -1290,6 +1340,90 @@ async def import_follow_ups(pg):
           and import_menu[0].startswith("Add as a model") and import_menu[1].startswith("Sort what's in it"), (on_import, import_menu))
 
 
+async def model_workspace_extract(pg):
+    """Package E: real dialog, core preview/job, and both message actions."""
+    import zipfile
+    source = library / "Unsorted/Workspace extraction"
+    put(source / "Presupported/Helmet/helmet.stl", cube(7))
+    put(source / "Unsupported/Helmet/helmet.stl", cube(8))
+    put(source / "body.stl", cube(12))
+    put(source / "photo.png", PNG)
+    put(source / "model.json", json.dumps({"id": "workspace-extract", "name": "Workspace extraction",
+                                          "authors": [{"name": "Test maker"}], "tags": ["fixture"], "cover": "photo.png"}))
+    with zipfile.ZipFile(source / "extras.zip", "w") as z:
+        z.writestr("Parts/clip.stl", cube(3))
+    await api(pg, "library_scan", {"full": True})
+    await pg.goto(B + "#/model/workspace-extract")
+    await pg.wait_for_selector('#model-page[data-model="workspace-extract"]')
+    before = {str(p.relative_to(source)): p.read_bytes() for p in source.rglob("*") if p.is_file() and "_thumbs" not in p.parts}
+
+    async def select(keys):
+        await pg.evaluate("""async keys => {
+            const {fileSel} = await import('/ui/filesel.js');
+            fileSel.set({picked: keys, anchor: keys[0] || null});
+        }""", keys)
+        await pg.wait_for_selector("#extract-model")
+
+    async def make(name):
+        await pg.fill("#extract-name", name)
+        await pg.wait_for_function("() => document.querySelector('#extract-destination')?.textContent.includes(document.querySelector('#extract-name').value)")
+        destination = (await pg.inner_text("#extract-destination")).rstrip("/")
+        await pg.click('#extract-dialog button[type=submit]')
+        await pg.wait_for_selector("#extract-dialog", state="detached")
+        await pg.wait_for_function("() => document.querySelector('#toast')?.textContent.startsWith('Made ')")
+        return library / destination
+
+    async def undo():
+        await pg.locator('#toast button:text-is("Undo")').click()
+        await pg.wait_for_function("() => document.querySelector('#toast')?.textContent.includes('Undone')")
+
+    await select(["d:Presupported/Helmet", "d:Unsupported/Helmet"])
+    await pg.click("#extract-model")
+    dest = await make("Helmet")
+    moved = (dest / "Presupported/Helmet/helmet.stl").exists() and (dest / "Unsupported/Helmet/helmet.stl").exists()
+    buttons = await pg.locator("#toast button").all_text_contents()
+    on_source = await pg.get_attribute("#model-page", "data-model") == "workspace-extract"
+    check("selected variant folders become a new model beside the source, with Undo and Open", moved and not (source / "Presupported/Helmet/helmet.stl").exists()
+          and buttons == ["Undo", "Open"] and on_source, (moved, buttons, on_source))
+    await undo()
+    after = {str(p.relative_to(source)): p.read_bytes() for p in source.rglob("*") if p.is_file() and "_thumbs" not in p.parts}
+    check("extraction Undo restores source files and sidecar exactly", before == after and not dest.exists())
+
+    await select(["f:body.stl"])
+    await pg.click("#extract-model")
+    await pg.locator('input[name="extract-where"]').nth(1).check()
+    overview = await api(pg, "library_overview")
+    category = next(s for s in overview["schemas"] if s["name"] == "Household")
+    await pg.select_option("#extract-schema", category["id"])
+    await pg.select_option("#extract-mode", "copy")
+    copy_dest = await make("Copied body")
+    destination = copy_dest / "body.stl"
+    copied = destination.exists() and (source / "body.stl").exists()
+    await pg.locator('#toast button:text-is("Open")').click()
+    await pg.wait_for_function("() => document.querySelector('#mp-name')?.textContent === 'Copied body'")
+    check("extraction category picker and Copy keep the source; Open opens the new model", copied)
+    await pg.keyboard.press("Control+z")
+    await pg.wait_for_function("() => document.querySelector('#toast')?.textContent.includes('Undone')")
+    await pg.goto(B + "#/model/workspace-extract")
+    await pg.wait_for_selector('#model-page[data-model="workspace-extract"]')
+
+    archive = (source / "extras.zip").read_bytes()
+    await select(["z:extras.zip!Parts/clip.stl"])
+    await pg.click("#extract-model")
+    unpack_dest = await make("Unpacked clip")
+    check("selected ZIP entries are unpacked and the ZIP stays unchanged", (unpack_dest / "clip.stl").exists()
+          and (source / "extras.zip").read_bytes() == archive)
+    await undo()
+    model = await api(pg, "model_get", {"id": "workspace-extract"})
+    await select(["f:" + f["rel"] for f in model["files_list"]])
+    disabled = await pg.is_disabled("#extract-model")
+    reason = await pg.get_attribute("#extract-model", "title")
+    await pg.evaluate("""async () => {const {ui} = await import('/ui/state.js'); ui.set({library: {...ui.get().library, read_only: true}});} """)
+    readonly = await pg.get_attribute("#extract-model", "title")
+    check("whole-model and read-only extraction explain why they are unavailable", disabled and reason == "That's the whole model: use Move to category instead" and "read-only" in readonly, (reason, readonly))
+    await pg.evaluate("""async () => {const {ui} = await import('/ui/state.js'); ui.set({library: {...ui.get().library, read_only: false}});} """)
+
+
 async def tree_items(pg):
     """The models in Import's Folders view (everything unfolded)."""
     await pg.click('[data-view="folders"]')
@@ -1355,12 +1489,14 @@ async def main():
             await phase1(pg)
             await phase2(pg)
             await phase3(pg)
+            await workspace_viewing(pg)
             await phase4(pg)
             await phase5(pg)
             await ui_pass(pg)
             await ui_pass2(pg)
             await ui_pass3(pg)
             await import_follow_ups(pg)
+            await model_workspace_extract(pg)
 
             # 3. renaming the library
             await pg.click('.sidebar a[href="#/settings"]')

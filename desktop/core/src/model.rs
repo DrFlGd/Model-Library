@@ -38,6 +38,13 @@ pub const KINDS: [&str; 7] = [
     "model", "slicer", "image", "doc", "video", "archive", "other",
 ];
 
+/// Filesystem modification time, in milliseconds since the Unix epoch.
+pub fn modified(path: &Path) -> u64 {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
 /// Files in a model folder (relative paths, '/'), its parts' sub-folders included,
 /// without the sidecar and generated previews. Sorted.
 pub fn list_files(dir: &Path) -> Vec<(String, u64)> {
@@ -265,9 +272,167 @@ pub fn set_place(dir: &Path, schema: Option<&str>, path: &[String]) -> Result<Va
     Ok(side)
 }
 
+/// Wrap a manually copied model file and matching pictures/documents, journalling
+/// before any move so a partial operation can be put back from Recent changes.
+pub fn wrap_loose(lib: &crate::library::Library, ix: &crate::index::Index, rel: &str) -> Result<Value> {
+    lib.writable()?;
+    let item = ix.loose_files.iter().find(|f| f["rel"].as_str() == Some(rel))
+        .ok_or_else(|| anyhow::anyhow!("That file is no longer waiting to be sorted."))?;
+    let source = lib.resolve(rel)?;
+    if !source.canonicalize()?.starts_with(lib.root().canonicalize()?) { bail!("That file is outside the library."); }
+    if !source.symlink_metadata()?.file_type().is_file() { bail!("That is not a regular file."); }
+    let parent = source.parent().ok_or_else(|| anyhow::anyhow!("Missing category folder."))?;
+    let name = source.file_stem().unwrap().to_string_lossy().into_owned();
+    let stem = |p: &Path| crate::import::stem(&crate::import::file_name(p));
+    let wanted = stem(&source);
+    let mains: Vec<_> = ix.loose_files.iter().filter_map(|f| f["rel"].as_str())
+        .filter_map(|r| lib.resolve(r).ok()).filter(|p| p.parent() == Some(parent)).map(|p| stem(&p)).collect();
+    let mut files = vec![source.clone()];
+    for e in std::fs::read_dir(parent)?.flatten() {
+        let path = e.path();
+        if !e.file_type()?.is_file() || !matches!(file_kind(&e.file_name().to_string_lossy()), "image" | "doc") { continue; }
+        let candidate = stem(&path);
+        if mains.iter().filter(|m| candidate.starts_with(m.as_str())).max_by_key(|m| m.len()) == Some(&wanted) { files.push(path); }
+    }
+    let base = crate::schema::clean_folder_name(name.trim_start_matches(['_', '.']), 120);
+    let mut dest = parent.join(&base);
+    let mut n = 2;
+    while dest.exists() { dest = parent.join(format!("{base} ({n})")); n += 1; }
+    let target = lib.relative(&dest).unwrap();
+    let moves: Vec<_> = files.iter().map(|f| json!({"from": lib.relative(f), "to": lib.relative(&dest.join(f.file_name().unwrap()))})).collect();
+    let jid = crate::relayout::start(lib, &json!({"kind":"wrap_loose", "label":format!("Put {name} in a folder"), "models":[{"rel":target}], "moves":moves, "dest":target}))?;
+    let mut created = false;
+    let result = (|| -> Result<Value> {
+        std::fs::create_dir(&dest)?;
+        created = true;
+        for f in &files { std::fs::rename(f, dest.join(f.file_name().unwrap()))?; }
+        let side = update(&dest, &json!({"name":name}), &json!({"schema": item["schema"], "path": item["path"]}))?;
+        let mut j = crate::relayout::read(lib, &jid)?;
+        j["state"] = json!("done"); j["finished"] = json!(crate::library::now());
+        save_loose_journal(lib, &jid, &j)?;
+        Ok(json!({"id":side["id"],"rel":target,"journal":jid}))
+    })();
+    if result.is_err() {
+        if created { let _ = undo_loose(lib, &jid, &std::sync::atomic::AtomicBool::new(false)); }
+        else {
+            let mut j = crate::relayout::read(lib, &jid)?;
+            j["state"] = json!("undone");
+            save_loose_journal(lib, &jid, &j)?;
+        }
+    }
+    result
+}
+
+fn save_loose_journal(lib: &crate::library::Library, id: &str, j: &Value) -> Result<()> {
+    crate::library::valid_id(id)?;
+    write_json(&lib.root().join(crate::library::APP_DIR).join("journal").join(format!("{id}.json")), j)
+}
+
+/// Resume an undo, checking all conflicts before moving any files back.
+pub fn undo_loose(lib: &crate::library::Library, id: &str, cancel: &std::sync::atomic::AtomicBool) -> Result<Value> {
+    lib.writable()?;
+    let mut j = crate::relayout::read(lib, id)?;
+    let dest = lib.resolve(j["dest"].as_str().ok_or_else(|| anyhow::anyhow!("Missing model folder."))?)?;
+    let moves = j["moves"].as_array().cloned().unwrap_or_default();
+    for m in &moves {
+        let from = lib.resolve(m["from"].as_str().unwrap_or(""))?;
+        let to = lib.resolve(m["to"].as_str().unwrap_or(""))?;
+        if from.symlink_metadata().is_ok() && to.symlink_metadata().is_ok() { bail!("{} already exists; move it aside before undoing.", from.display()); }
+        if !from.exists() && !to.exists() { bail!("A file needed to undo this change is missing."); }
+    }
+    if dest.exists() {
+        let expected: std::collections::HashSet<_> = moves.iter().filter_map(|m| m["to"].as_str()).collect();
+        for entry in std::fs::read_dir(&dest)? {
+            let entry = entry?;
+            let file = entry.file_name();
+            if file == SIDECAR || file == "_thumbs" { continue; }
+            let path = lib.relative(&entry.path()).unwrap_or_default();
+            if !expected.contains(path.as_str()) { bail!("The new model has extra files; move them aside before undoing."); }
+        }
+    }
+    j["state"] = json!("undoing"); j["direction"] = json!("undo"); save_loose_journal(lib, id, &j)?;
+    for m in &moves {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) { bail!("Stopped; finish undoing from Recent changes."); }
+        let from = lib.resolve(m["from"].as_str().unwrap_or(""))?;
+        let to = lib.resolve(m["to"].as_str().unwrap_or(""))?;
+        if to.exists() { std::fs::rename(to, from)?; }
+    }
+    if dest.exists() {
+        if dest.join(SIDECAR).exists() { std::fs::remove_file(dest.join(SIDECAR))?; }
+        if dest.join("_thumbs").is_dir() { std::fs::remove_dir_all(dest.join("_thumbs"))?; }
+        std::fs::remove_dir(&dest)?;
+    }
+    j["state"] = json!("undone"); save_loose_journal(lib, id, &j)?;
+    Ok(json!({"journal":id,"moved":moves.len(),"state":"undone","failed":[]}))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn lone_stl_and_zip_imports_each_have_a_model_folder() {
+        use crate::{import, index::Index, library::Library, schema};
+        let root = crate::library::tests::temp_dir("single-file-import");
+        let lib = Library::open(root.join("Library")).unwrap();
+        let category = schema::create(&lib, &json!({"name":"Household"})).unwrap();
+        schema::define_path(&lib, &category.id, &["Kitchen".into()]).unwrap();
+        let ix = Index::build(&lib, None, true);
+        std::fs::create_dir_all(root.join("Downloads")).unwrap();
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        let progress = import::Progress { cancel: &stop, on_bytes: &|_| {} };
+        for (name, ext) in [("hook", "stl"), ("bracket", "zip")] {
+            let file = format!("{name}.{ext}");
+            let source = root.join("Downloads").join(&file);
+            std::fs::write(&source, b"single model").unwrap();
+            let scanned = import::scan(&lib, &ix, &[source.clone()], false).unwrap();
+            let mut item = scanned["items"][0].clone();
+            item["name"] = json!(name); item["schema"] = json!(category.id); item["values"] = json!(["Kitchen"]);
+            let plan = import::plan(&lib, &ix, &[item.clone()]);
+            let dest = std::path::PathBuf::from(plan[0]["dest"].as_str().unwrap());
+            import::commit_one(&lib, &item, &dest, Some(&category), true, false, &Default::default(), &progress).unwrap();
+            assert_eq!(dest, lib.root().join(format!("Household/Kitchen/{name}")));
+            assert!(dest.join(file).is_file()); assert!(dest.join(SIDECAR).is_file());
+            assert!(!source.exists());
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn loose_wrap_preserves_category_matches_longest_stem_and_undo_restores_files() {
+        use crate::{index::Index, library::Library, schema};
+        let root = crate::library::tests::temp_dir("loose-wrap");
+        let lib = Library::open(&root).unwrap();
+        let category = schema::create(&lib, &json!({"name":"Household"})).unwrap();
+        schema::define_path(&lib, &category.id, &["Kitchen".into()]).unwrap();
+        let parent = root.join("Household/Kitchen");
+        for name in ["hook.stl", "hook.PNG", "hook notes.pdf", "hook_long.zip", "hook_long.png", "unrelated.pdf"] {
+            std::fs::write(parent.join(name), name.as_bytes()).unwrap();
+        }
+        // An existing folder gets a numbered sibling, without changing the category.
+        std::fs::create_dir(parent.join("hook")).unwrap();
+        let ix = Index::build(&lib, None, true);
+        let made = wrap_loose(&lib, &ix, "Household/Kitchen/hook.stl").unwrap();
+        assert_eq!(made["rel"], "Household/Kitchen/hook (2)");
+        let dest = lib.resolve(made["rel"].as_str().unwrap()).unwrap();
+        assert!(dest.join("hook.PNG").exists()); assert!(dest.join("hook notes.pdf").exists());
+        assert!(parent.join("hook_long.png").exists()); assert!(parent.join("unrelated.pdf").exists());
+        let side = read_sidecar(&dest);
+        assert_eq!(side["schema"], category.id); assert_eq!(side["path"], json!(["Kitchen"]));
+        assert_eq!(Index::build(&lib, None, true).models.len(), 1);
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        // Preflight conflicts keep all wrapped files intact.
+        std::fs::write(parent.join("hook.stl"), b"new file").unwrap();
+        assert!(undo_loose(&lib, made["journal"].as_str().unwrap(), &stop).is_err());
+        assert!(dest.join("hook.PNG").exists());
+        std::fs::remove_file(parent.join("hook.stl")).unwrap();
+        undo_loose(&lib, made["journal"].as_str().unwrap(), &stop).unwrap();
+        assert!(!dest.exists()); assert!(parent.join("hook").is_dir());
+        for name in ["hook.stl", "hook.PNG", "hook notes.pdf"] { assert_eq!(std::fs::read(parent.join(name)).unwrap(), name.as_bytes()); }
+        assert_eq!(Index::build(&lib, None, true).loose_files.len(), 2);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+
 
     #[test]
     fn kinds_by_extension() {

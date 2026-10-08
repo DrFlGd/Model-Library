@@ -18,6 +18,7 @@ import { api, apiBytes, isDesktop, libraryUrl, openModelFile, toast, loadOvervie
 import { ViewSwitch, SortMenu } from "./layout.js";
 import { size } from "./details.js";
 import { openMenu, typing } from "./actions.js";
+import { fileSel, pick, pickEvent, show, clear } from "./filesel.js";
 import { TypeTag } from "./filetypes.js";
 
 export const MESH = /\.(stl|obj|3mf)$/i;
@@ -158,7 +159,7 @@ async function setCover(id, args, said) {
   } catch (e) { toast(`Couldn't set the cover: ${e.message || e}`, 6000); }
 }
 
-const useAsCover = (id, file) => setCover(id, { file }, "Saved as the model's cover.");
+export const useAsCover = (id, file) => setCover(id, { file }, "Saved as the model's cover.");
 
 /** One file in a list: opens it (a ZIP unfolds into its entries). A file with no
  *  viewer here is greyed; double-click opens it in its own app. */
@@ -220,7 +221,7 @@ function ByType({ files, src, open, current }) {
 // Previews are drawn a few at a time, as they come into view.
 let running = 0;
 const waiting = [];
-function queued(fn) {
+export function queued(fn) {
   return new Promise((resolve, reject) => {
     const go = () => {
       running++;
@@ -297,7 +298,7 @@ export function PartsViews({ src, files, names, open, current, treeKey }) {
   </div>`;
 }
 
-function Stage3D({ src, model, current, onInfo }) {
+export function Stage3D({ src, model, current, onInfo }) {
   const canvas = useRef(null);
   const viewer = useRef(null);
   const [state, setState] = useState({ busy: false, error: "", info: null });
@@ -345,7 +346,7 @@ function Stage3D({ src, model, current, onInfo }) {
   </div>`;
 }
 
-function Pictures({ src, model, pictures, current, setCurrent }) {
+export function Pictures({ src, model, pictures, current, setCurrent }) {
   const [url, setUrl] = useState(null);
   const pic = current || pictures[0];
   useEffect(() => {
@@ -399,14 +400,14 @@ function followLink(e) {
   if (/^https?:\/\//i.test(href)) window.open(href, "_blank", "noopener");
 }
 
-function Documents({ src, model, docs, current, setCurrent }) {
+export function Documents({ src, model, docs, current, setCurrent }) {
   const doc = current || docs[0];
   const [text, setText] = useState(null);
   useEffect(() => {
     setText(null);
     if (!doc || !MD.test(doc.file)) return;
     let live = true;
-    api("model_doc", { ...srcArgs(src), file: doc.file }).then((r) => { if (live) setText(r.html); }, (e) => { if (live) setText(`<p>${String(e.message || e)}</p>`); });
+    api("model_doc", { ...srcArgs(src), file: doc.file }).then((r) => { if (live) setText(r.html); }, (e) => { if (live) setText(`<p>${String(e.message || e).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]))}</p>`); });
     return () => { live = false; };
   }, [src.id, doc?.file]);
   if (!doc) return html`<div class="stage-note muted">No documents.</div>`;
@@ -423,7 +424,7 @@ function Documents({ src, model, docs, current, setCurrent }) {
   </div>`;
 }
 
-function Videos({ src, model, videos, current, setCurrent }) {
+export function Videos({ src, model, videos, current, setCurrent }) {
   const v = current || videos[0];
   if (!v) return html`<div class="stage-note muted">No videos.</div>`;
   return html`<div class="stage-videos">
@@ -473,5 +474,126 @@ export function FilesView({ src, files: allFiles, main, model, names, compact, s
         <${PartsViews} src=${src} files=${files} names=${names} open=${open} current=${cur[shown]} treeKey=${`${src.id}:${chosen || "all"}`} /></div>
       ${side || null}
     </aside>
+  </div>`;
+}
+
+/** The shared file tree/list with the model workspace's multi-selection. */
+export function SelectionRows({ src, files, name, view = "folders", contextActions }) {
+  const sel = useStore(fileSel);
+  const [folded, setFolded] = useState({});
+  const [archives, setArchives] = useState({});
+  const [sort, setSort] = useState("name");
+  const root = tree(files);
+  const rows = [];
+  const source = useRef(src.id);
+  useLayoutEffect(() => {
+    if (source.current !== src.id) { source.current = src.id; setFolded({}); setArchives({}); }
+  }, [src.id]);
+  const addTree = (node, level) => {
+    const key = `d:${node.path}`;
+    rows.push({ key, name: node.path ? node.name : name, rel: node.path, folder: true, level });
+    if (folded[key]) return;
+    [...node.dirs.values()].sort((a, b) => a.name.localeCompare(b.name)).forEach((d) => addTree(d, level + 1));
+    [...node.files].sort((a, b) => a.name.localeCompare(b.name)).forEach((f) => addFile(f, level + 1));
+  };
+  const addFile = (f, level) => {
+    const key = `f:${f.rel}`;
+    rows.push({ ...f, key, file: f.rel, name: splitRel(f.rel)[1], level });
+    if (folded[key] !== false || !archives[f.rel]?.entries) return;
+    const dirs = new Set();
+    for (const e of archives[f.rel].entries) {
+      const pieces = e.name.split("/");
+      for (let i = 1; i < pieces.length; i++) dirs.add(pieces.slice(0, i).join("/") + "/");
+    }
+    const all = [...[...dirs].map((entry) => ({ entry, folder: true, size: 0 })), ...archives[f.rel].entries.filter((e) => !e.name.endsWith("/")).map((e) => ({ ...e, entry: e.name }))];
+    all.sort((a, b) => a.entry.localeCompare(b.entry));
+    for (const e of all) {
+      const parents = e.entry.replace(/\/$/, "").split("/").slice(0, -1);
+      if (parents.some((_, i) => folded[`z:${f.rel}!${parents.slice(0, i + 1).join("/")}/`])) continue;
+      rows.push({ ...e, key: `z:${f.rel}!${e.entry}`, file: f.rel, name: e.entry.replace(/\/$/, "").split("/").pop(), rel: e.entry, level: level + 1 + parents.length });
+    }
+  };
+  if (view === "folders") addTree(root, 0);
+  else {
+    const ordered = [...files].sort((a, b) => sort === "size" ? b.size - a.size : sort === "kind" ? a.kind.localeCompare(b.kind) || a.rel.localeCompare(b.rel) : a.rel.localeCompare(b.rel));
+    if (view === "type") for (const [kind, label] of TYPES) {
+      const list = ordered.filter((f) => f.kind === kind);
+      if (list.length) { rows.push({ heading: `${label} · ${list.length}`, kind, key: `heading:${kind}` }); list.forEach((f) => addFile(f, 0)); }
+    } else ordered.forEach((f) => addFile(f, 0));
+  }
+  const order = rows.filter((r) => !r.heading).map((r) => r.key);
+  const unfold = async (row) => {
+    const isZip = !row.entry && /\.zip$/i.test(row.rel);
+    const now = folded[row.key] ?? isZip;
+    setFolded((s) => ({ ...s, [row.key]: !now }));
+    if (isZip && !archives[row.rel]) {
+      setArchives((s) => ({ ...s, [row.rel]: { loading: true } }));
+      const id = src.id;
+      try { const entries = await api("model_zip", { ...srcArgs(src), file: row.rel }); if (source.current === id) setArchives((s) => ({ ...s, [row.rel]: { entries } })); }
+      catch (e) { if (source.current === id) setArchives((s) => ({ ...s, [row.rel]: { error: e.message || String(e) } })); }
+    }
+  };
+  // Opening a folder from tiles reveals its ancestors in the tree.
+  useEffect(() => {
+    const key = sel.shown;
+    const path = key.slice(2).split("!")[0];
+    setFolded((s) => {
+      const next = { ...s, "d:": false };
+      const bits = path.split("/");
+      for (let i = 1; i < bits.length; i++) next[`d:${bits.slice(0, i).join("/")}`] = false;
+      return next;
+    });
+    if (key.startsWith("z:")) {
+      const file = key.slice(2).split("!")[0];
+      if (!archives[file]) unfold({ key: `f:${file}`, rel: file });
+      else setFolded((s) => ({ ...s, [`f:${file}`]: false }));
+      const entry = key.slice(key.indexOf("!") + 1).replace(/\/$/, "").split("/");
+      setFolded((s) => {
+        const next = { ...s };
+        for (let i = 1; i < entry.length; i++) next[`z:${file}!${entry.slice(0, i).join("/")}/`] = false;
+        return next;
+      });
+    }
+  }, [sel.shown]);
+  const menu = (e, row) => {
+    if (!sel.picked.includes(row.key)) pick(row.key);
+    const extra = contextActions?.(row) || [];
+    const lib = ui.get().library;
+    openMenu(e, [
+      { id: "view", label: "Show here", icon: "eye", run: () => show(row.key) },
+      ...(ownApp(src) && !row.entry ? [
+        { id: "open-own", label: "Open in its own app", icon: "external", run: () => openModelFile({ rel: src.rel }, row.rel) },
+        { id: "folder", label: "Show in folder", icon: "folder", run: () => ctx.platform.library.openPath([lib.path, src.rel, row.folder ? row.rel : splitRel(row.rel)[0]].filter(Boolean).join("/")) },
+      ] : []),
+      ...(row.kind === "image" && !row.entry ? [{ id: "cover", label: "Use as cover", icon: "image", disabled: lib?.read_only ? "The library is read-only." : false, run: () => useAsCover(src.id, row.rel) }] : []), ...extra,
+    ]);
+  };
+  const keys = (e) => {
+    if (typing(e)) return;
+    if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+      const row = rows.find((r) => r.key === (e.target.closest?.("[data-key]")?.dataset.key || sel.shown));
+      if (row) { e.preventDefault(); menu(e, row); }
+    }
+    else if (e.key === "Escape") { clear(); e.preventDefault(); }
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") { fileSel.set({ picked: order, anchor: order[0] }); e.preventDefault(); }
+    else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
+      const i = order.indexOf(e.target.closest?.("[data-key]")?.dataset.key || sel.shown);
+      const j = e.key === "Home" ? 0 : e.key === "End" ? order.length - 1 : Math.max(0, Math.min(order.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)));
+      if (order[j]) { pick(order[j], e.shiftKey ? "range" : "one", order); [...e.currentTarget.querySelectorAll("[data-key]")].find((el) => el.dataset.key === order[j])?.focus(); }
+      e.preventDefault();
+    }
+  };
+  return html`<div class="selection-rows" onKeyDown=${keys}>
+    ${view === "all" ? html`<${SortMenu} id="files-sort" options=${[["name", "Name"], ["kind", "Type"], ["size", "Largest first"]]} value=${sort} onChange=${setSort} />` : null}
+    <ul class="tree" id=${view === "folders" ? "part-tree" : view === "all" ? "all-files" : "by-type"}>${rows.map((r) => r.heading ? html`<li key=${r.key} class="file-type-heading" data-kind=${r.kind}>${r.heading}</li>` : html`<li key=${r.key} class=${r.folder ? "tree-dir" : "tree-file"}>
+      <div class="file-selection-row" style=${{ paddingLeft: `${r.level * 14}px` }}>
+        ${r.folder || (!r.entry && /\.zip$/i.test(r.rel)) ? html`<button class="ghost file-fold" type="button" aria-label=${`${(folded[r.key] ?? !r.folder) ? "Unfold" : "Fold"} ${r.name}`} aria-expanded=${!(folded[r.key] ?? !r.folder)} onClick=${() => unfold(r)}>${(folded[r.key] ?? !r.folder) ? "›" : "⌄"}</button>` : html`<span class="file-fold"></span>`}
+        <button type="button" class=${`tree-btn${sel.picked.includes(r.key) ? " on" : ""}`} data-key=${r.key} data-file=${!r.folder && !r.entry ? r.rel : null} data-dir=${r.folder ? r.rel : null} data-entry=${r.entry || null} aria-pressed=${sel.picked.includes(r.key)}
+          onClick=${(e) => pickEvent(r.key, e, order)} onContextMenu=${(e) => menu(e, r)} title=${r.rel || name}>
+          <span class="tree-icon tree-type">${r.folder ? Icon.folder(13) : html`<${TypeTag} name=${r.entry || r.rel} />`}</span><span class="tree-name">${r.name}</span>${!r.folder ? html`<span class="muted tree-size">${size(r.size || 0)}</span>` : null}
+        </button>
+      </div>
+      ${archives[r.rel]?.loading ? html`<p class="tree-note muted">Reading the archive…</p>` : archives[r.rel]?.error ? html`<p class="tree-note form-error">${archives[r.rel].error}</p>` : null}
+    </li>`)}</ul>
   </div>`;
 }

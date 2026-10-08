@@ -6,7 +6,7 @@ import { html, useState, useEffect } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui, setPref } from "./state.js";
 import { ctx, routeHash, schemaScope } from "./context.js";
-import { api, isDesktop, openLibrary, showLibraryFolder, rescan, followJob, loadOverview, toast, undoChange, finishChange } from "./library.js";
+import { api, isDesktop, openLibrary, showLibraryFolder, rescan, followJob, loadOverview, toast, undoChange, finishChange, recorded } from "./library.js";
 import { sortFolder } from "./sort.js";
 import { Cover } from "./details.js";
 import { PageHead } from "./layout.js";
@@ -85,6 +85,22 @@ function RecentlyAdded({ rev, total }) {
 /** Models with no place yet: Unsorted, and folders in the library outside any category. */
 function Waiting({ lib, ov }) {
   const loose = ov.loose || [];
+  const files = ov.loose_files || [];
+  const [busy, setBusy] = useState(false);
+  const wrap = async (rels) => {
+    setBusy(true);
+    try {
+      const { job } = await api("loose_wrap", { files: rels });
+      const done = await followJob(job, "Putting files in folders");
+      await loadOverview();
+      if (done.error) throw new Error(done.error);
+      const result = done.result || {};
+      if (result.failed?.length) throw new Error(result.failed.map(f => f.error || f).join("; "));
+      const journal = result.journal || result.items?.at(-1)?.journal;
+      recorded(rels.length === 1 ? "Put the file in its own model folder." : "Put the files in their own model folders. Undo each from Recent changes.", journal);
+    } catch (e) { toast(e.message || String(e), 8000); }
+    finally { setBusy(false); }
+  };
   return html`<section class="home-card" id="home-waiting">
     <h2>Waiting to be sorted</h2>
     ${ov.unsorted ? html`<p><a href=${routeHash("browse:unsorted")}>${plural(ov.unsorted, "model is", "models are")} in Unsorted</a>: select ${ov.unsorted === 1 ? "it" : "them"} there and choose Move to category… to give ${ov.unsorted === 1 ? "it" : "them"} a place.</p>` : null}
@@ -92,7 +108,13 @@ function Waiting({ lib, ov }) {
       <p>These folders are in the library but not in a category or Unsorted, so their models aren't listed. Sort them to give each model a place.</p>
       <ul class="ls-list">${loose.map((f) => html`<li key=${f}><span>${f}</span>
         <button type="button" class="ghost sort-loose" data-folder=${f} onClick=${() => sortFolder(`${lib.path}/${f}`)}>Sort…</button></li>`)}</ul></div>` : null}
-    ${!ov.unsorted && !loose.length ? html`<p class="muted">Nothing: every model has a category. New models come in through <a href=${routeHash("import")}>Import</a>.</p>` : null}
+    ${files.length ? html`<div id="home-loose-files">
+      <p>These model files need their own folders. Matching pictures and documents go with them.</p>
+      <button type="button" class="ghost" id="wrap-all-loose" disabled=${busy || !!lib.read_only} title=${lib.read_only || "Keep each model in its current category"} onClick=${() => wrap(files.map(f => f.rel))}>Put all in folders</button>
+      <ul class="ls-list">${files.map(f => html`<li key=${f.rel}><span class="loose-file-path">${f.rel}</span>
+        <button type="button" class="ghost wrap-loose" data-file=${f.rel} disabled=${busy || !!lib.read_only} title=${lib.read_only || ""} onClick=${() => wrap([f.rel])}>Put in a folder</button></li>`)}</ul>
+    </div>` : null}
+    ${!ov.unsorted && !loose.length && !files.length ? html`<p class="muted">Nothing: every model has a category. New models come in through <a href=${routeHash("import")}>Import</a>.</p>` : null}
   </section>`;
 }
 

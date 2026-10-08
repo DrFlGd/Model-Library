@@ -402,7 +402,7 @@ fn begin(lib: &Library, id: &str, change: &Value, state: &str) -> Result<()> {
     Ok(())
 }
 
-fn write(lib: &Library, j: &Value) -> Result<()> {
+pub(crate) fn write(lib: &Library, j: &Value) -> Result<()> {
     let id = j["id"].as_str().unwrap_or("");
     crate::library::valid_id(id)?;
     crate::config::write_json(&journal_dir(lib).join(format!("{id}.json")), j)
@@ -434,10 +434,11 @@ pub fn list(lib: &Library) -> Vec<Value> {
 
 /// What Home shows about a change.
 pub fn brief(j: &Value) -> Value {
-    let models = j["moves"]
-        .as_array()
-        .or(j["models"].as_array())
-        .map_or(0, Vec::len);
+    let models = if j["kind"] == "wrap_loose" {
+        j["models"].as_array().map_or(0, Vec::len)
+    } else {
+        j["moves"].as_array().or(j["models"].as_array()).map_or(0, Vec::len)
+    };
     json!({ "id": j["id"], "kind": j["kind"], "label": j["label"], "created": j["created"], "state": j["state"], "direction": j["direction"], "models": models, "error": j["error"] })
 }
 
@@ -652,7 +653,7 @@ pub fn apply(
     if j["state"] == "emptied" {
         bail!("Those copies were deleted already.");
     }
-    if matches!(j["kind"].as_str(), Some("details" | "import")) {
+    if matches!(j["kind"].as_str(), Some("details" | "import" | "extract" | "wrap_loose")) {
         bail!("That change can't be made again from here.");
     }
     j["state"] = json!("running");
@@ -744,6 +745,8 @@ pub fn undo(
     write(lib, &j)?;
     match j["kind"].as_str() {
         Some("details") => return undo_details(lib, j),
+        Some("extract") => return crate::extract::undo(lib, j),
+        Some("wrap_loose") => return model::undo_loose(lib, id, cancel),
         Some("import") => return undo_import(lib, j, cancel, on_item),
         _ => {}
     }
