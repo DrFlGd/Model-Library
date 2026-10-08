@@ -520,7 +520,6 @@ async def phase3(pg):
     await pg.screenshot(path=str(out / "13-readme.png"))
     await pg.click("#part-tree [data-file='photo.png']")
     await pg.wait_for_selector("#picture-big")
-    await pg.click(".strip-btn[data-file='photo.png']")
     await pg.click("#picture-cover")
     await pg.wait_for_function("() => document.querySelector('#picture-cover')?.disabled")
     side2 = json.loads((dest / "model.json").read_text())

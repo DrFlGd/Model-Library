@@ -75,6 +75,11 @@ jobs:
           cp Cargo.lock ../ci-out/Cargo.lock
       - name: Front end
         run: python tools/build_desktop.py --out build/desktop --fetch-fonts
+      - name: Acceptance test (the page and the app's backend)
+        if: always()
+        run: |
+          timeout 600 python tests/desktop_page.py --cli desktop/target/release/modlib-cli --ui build/desktop/ui \
+            --home "$RUNNER_TEMP/pagehome" --out ci-out/page 2>&1 | tee ci-out/desktop-page.log
       - name: Build the app (AppImage, deb)
         working-directory: desktop
         run: npx --yes @tauri-apps/cli@2 build --bundles appimage,deb 2>&1 | tee ../ci-out/tauri-build.log
@@ -103,11 +108,6 @@ jobs:
           tauri-driver > ci-out/tauri-driver.log 2>&1 &
           sleep 2
           timeout 600 python tests/desktop_ui.py --app desktop/target/release/model-library --out ci-out/shots 2>&1 | tee ci-out/desktop-ui.log
-      - name: Acceptance test (the page and the app's backend)
-        if: always()
-        run: |
-          timeout 600 python tests/desktop_page.py --cli desktop/target/release/modlib-cli --ui build/desktop/ui \
-            --home "$RUNNER_TEMP/pagehome" --out ci-out/page 2>&1 | tee ci-out/desktop-page.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:

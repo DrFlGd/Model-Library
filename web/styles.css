@@ -769,7 +769,7 @@ body:has(.sw-go) .toast { bottom: 92px; }
 @media (max-width: 600px) { .contents-columns, .contents-row { grid-template-columns: minmax(80px, 1fr) 65px 65px; gap: 5px; } }
 /* Package A: model file panel */
 .model-workspace { display:flex; position:relative; align-items:stretch; min-height:600px; gap:16px; }
-.file-panel { flex:none; position:relative; display:flex; flex-direction:column; gap:12px; border-right:1px solid var(--line); padding:12px; min-width:0; box-sizing:border-box; }
+.file-panel { flex:none; position:relative; display:flex; flex-direction:column; gap:12px; border-right:1px solid var(--steel-2); padding:12px; min-width:0; box-sizing:border-box; }
 .file-panel.collapsed { padding:4px; }
 .file-panel-head { display:flex; justify-content:space-between; align-items:center; }
 .file-panel-head > div { display:flex; flex-direction:column; gap:4px; }
@@ -780,7 +780,7 @@ body:has(.sw-go) .toast { bottom: 92px; }
 .file-panel .view-switch button { flex:1; padding:7px 4px; }
 .file-panel .view-switch .view-label { font-size:11px; }
 .file-panel-resize { position:absolute; right:-4px; top:0; bottom:0; width:8px; cursor:col-resize; touch-action:none; }
-.file-panel-resize:hover,.file-panel-resize:focus { background:var(--accent); opacity:.5; }
+.file-panel-resize:hover,.file-panel-resize:focus { background:var(--tool); opacity:.5; }
 .file-selection-row { display:flex; align-items:center; }
 .file-selection-row .tree-btn { flex:1; min-width:0; }
 .file-selection-row .tree-icon svg { color:#cf9a37; }
@@ -796,7 +796,7 @@ body:has(.sw-go) .toast { bottom: 92px; }
   .file-panel-scroll { max-height:calc(100vh - 280px); }
 }
 /* Package E: Make a new model */
-.extraction-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.extraction-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--steel-2); }
 .extraction-bar > span { margin-right: auto; }
 .extract-preview { max-height: 210px; overflow: auto; padding-left: 22px; }
 .extract-preview code { overflow-wrap: anywhere; }
