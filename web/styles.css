@@ -774,7 +774,7 @@ body:has(.sw-go) .toast { bottom: 92px; }
 .file-panel-head { display:flex; justify-content:space-between; align-items:center; }
 .file-panel-head > div { display:flex; flex-direction:column; gap:4px; }
 .file-panel-scroll { overflow:auto; max-height:calc(100vh - 320px); min-height:300px; }
-.file-panel .parts-filter { width:100%; min-width:0; }
+.file-panel .parts-filter { width:100%; min-width:0; flex:0 0 auto; height:36px; }
 .file-panel .variant-seg { flex-wrap:wrap; }
 .file-panel .view-switch { display:flex; }
 .file-panel .view-switch button { flex:1; padding:7px 4px; }
