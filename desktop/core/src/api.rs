@@ -1523,6 +1523,43 @@ impl App {
                 lib.set_favourites(&json!(favs)).map_err(e2s)?;
                 j(json!({ "id": id, "favourites": favs }))
             }
+            "model_files_plan" => {
+                let r = self.with_index(None, |ix, lib| crate::fileops::plan(lib, ix, &args)).await?;
+                j(r.map_err(e2s)?)
+            }
+            "model_files_apply" => {
+                let lib = self.library()?;
+                lib.writable().map_err(e2s)?;
+                let action=&args["action"];
+                let review=&args["review"];
+                let plan=self.with_index(None, |ix, lib| crate::fileops::plan(lib, ix, action)).await?.map_err(e2s)?;
+                // Re-check exactly what the user reviewed, not a silently updated manifest.
+                for key in ["files","conflicts","source","target","source_before","target_before","mode","conflict"] {
+                    if plan[key]!=review[key] {return Err("The files or destination changed after review. Please review the operation again.".into());}
+                }
+                j(self.spawn_job("Transferring model files", move |app,jid,cancel| {
+                    crate::fileops::execute(&lib,&plan,&cancel,&|i,n,name|
+                        app.job_progress(&jid,json!({"item":i,"items":n,"name":name})))
+                }))
+            }
+            "models_delete_plan" => {
+                let r=self.with_index(None, |ix,lib| crate::delete::plan(lib,ix,&args)).await?;
+                j(r.map_err(e2s)?)
+            }
+            "models_delete" => {
+                let lib=self.library()?;
+                lib.writable().map_err(e2s)?;
+                let action=&args["action"];
+                let review=&args["review"];
+                let plan=self.with_index(None, |ix,lib| crate::delete::plan(lib,ix,action)).await?.map_err(e2s)?;
+                if plan["models"]!=review["models"] {
+                    return Err("A model changed after review. Please review the deletion again.".into());
+                }
+                j(self.spawn_job("Deleting models into recovery",move |app,jid,cancel| {
+                    crate::delete::execute(&lib,&plan,&cancel,&|i,n,name|
+                        app.job_progress(&jid,json!({"item":i,"items":n,"name":name})))
+                }))
+            }
             "model_extract_plan" => {
                 let r = self.with_index(None, |ix, lib| crate::extract::plan(lib, ix, &args)).await?;
                 j(match r { Ok(p) => p, Err(e) => json!({"error":e.to_string(),"files":[]}) })
