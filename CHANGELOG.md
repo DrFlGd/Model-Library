@@ -65,6 +65,8 @@ The UI pass in `docs/PLAN.md` ("UI pass design") is done: actions (0.5.1), undo 
 
 ## Unreleased
 
+- Agent E: Added reviewed subcategory removal (move models/child subcategories up intact, or move descendant models to Unsorted) and multi-source category/subcategory merges into an existing or new target. The planner validates model ownership and linked/unindexed entries, reports collisions and paths, and uses the existing journal for Undo/recovery. See `desktop/core/src/restructure.rs`; further integration review is required.
+
 - Document the published 0.5.5 workspace and its validated screenshots.
 
 ## 0.5.5 (2026-10-08)
