@@ -907,8 +907,8 @@ async def ui_pass(pg):
     await pg.keyboard.press("Escape")
     check("the details panel and the right-click menu have the same actions, in the same order",
           row == ["Open", "Edit details…", "Move to category…", "Star", "Show in folder", "More ▾"]
-          and menu == ["Open", "Edit details…", "Move to category…", "Star", "Show in folder", "Make a new preview", "Copy folder path"]
-          and more == ["Make a new preview", "Copy folder path"], (row, menu, more))
+          and menu == ["Open", "Edit details…", "Move to category…", "Star", "Show in folder", "Delete model…", "Make a new preview", "Copy folder path"]
+          and more == ["Delete model…", "Make a new preview", "Copy folder path"], (row, menu, more))
 
     # 34. keys: arrows and Shift, Ctrl+A, Esc, E, M, S, Ctrl+Z
     n = int((await count(pg)).split()[0])
@@ -992,7 +992,7 @@ async def ui_pass(pg):
     mp_row = await labels_of(pg, "#model-page .action-row button")
     check("files with no viewer show details and open in their own app; the model page has the same row", "settings.ini" in fallback and "Open in its own app" in fallback
           and "Open in its own app" in file_menu and "Show in folder" in file_menu and "Make a new model…" in file_menu
-          and mp_row == ["Edit details…", "Move to category…", "Star", "Show in folder", "More ▾"], (fallback, file_menu, mp_row))
+          and mp_row == ["Edit details…", "Move to category…", "Add files…", "Star", "Show in folder", "More ▾"], (fallback, file_menu, mp_row))
 
     # 39. Import: right-click, Ctrl+A and Esc, Ctrl+Z, and messages clear of the footer
     more = home / "More"
