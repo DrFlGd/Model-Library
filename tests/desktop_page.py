@@ -1424,6 +1424,86 @@ async def model_workspace_extract(pg):
     await pg.evaluate("""async () => {const {ui} = await import('/ui/state.js'); ui.set({library: {...ui.get().library, read_only: false}});} """)
 
 
+async def agent_c_pdf_archive_checks(pg):
+    """Agent C browser smoke: real two-page PDF, ZIP PDF, corrupt entry and plan drift.
+
+    Chromium can exercise the browser controls and fetch path. It does not
+    substitute for Windows WebView2 / Linux WebKitGTK renderer testing.
+    """
+    import zipfile
+
+    def pdf_two_pages():
+        streams = [b"BT /F1 24 Tf 72 700 Td (First PDF page) Tj ET",
+                   b"BT /F1 24 Tf 72 700 Td (Second PDF page) Tj ET"]
+        objects = [
+            b"<< /Type /Catalog /Pages 2 0 R >>",
+            b"<< /Type /Pages /Count 2 /Kids [3 0 R 4 0 R] >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 7 0 R >>",
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        ]
+        objects.extend(b"<< /Length " + str(len(data)).encode() + b" >>\nstream\n" + data + b"\nendstream" for data in streams)
+        data = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+        offsets = [0]
+        for number, obj in enumerate(objects, 1):
+            offsets.append(len(data))
+            data.extend(f"{number} 0 obj\n".encode() + obj + b"\nendobj\n")
+        startxref = len(data)
+        data.extend(f"xref\n0 {len(offsets)}\n0000000000 65535 f \n".encode())
+        for offset in offsets[1:]:
+            data.extend(f"{offset:010d} 00000 n \n".encode())
+        data.extend(f"trailer\n<< /Root 1 0 R /Size {len(offsets)} >>\nstartxref\n{startxref}\n%%EOF\n".encode())
+        return bytes(data)
+
+    source = library / "Unsorted/Agent C PDF QA"
+    doc = pdf_two_pages()
+    put(source / "manual.pdf", doc)
+    put(source / "model.json", json.dumps({"id": "agent-c-pdf-qa", "name": "PDF QA"}))
+    with zipfile.ZipFile(source / "bundle.zip", "w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr("good.pdf", doc)
+        z.writestr("bad.pdf", b"this is not a PDF")
+    original_zip = (source / "bundle.zip").read_bytes()
+    await api(pg, "library_scan", {"full": True})
+    await pg.goto(B + "#/model/agent-c-pdf-qa")
+    await pg.wait_for_selector('#model-page[data-model="agent-c-pdf-qa"]')
+    await pg.click('#part-tree [data-file="manual.pdf"]')
+    await pg.wait_for_selector(".pdf-viewer .pdf-frame")
+    direct = await pg.get_attribute(".pdf-viewer .pdf-frame", "src")
+    await pg.click('button[aria-label="Next PDF page"]')
+    await pg.wait_for_function("() => document.querySelector('.pdf-frame')?.getAttribute('src').includes('page=2')")
+    await pg.select_option('select[aria-label="PDF zoom"]', "fit-page")
+    fit = await pg.get_attribute(".pdf-frame", "src")
+    await pg.select_option('select[aria-label="PDF zoom"]', "page-width")
+    width = await pg.get_attribute(".pdf-frame", "src")
+    check("ordinary multipage PDF has page controls and standard fit options",
+          direct and "manual.pdf" in direct and "page=2" in fit
+          and "view=Fit" in fit and "view=FitH" in width, (direct, fit, width))
+    await pg.screenshot(path=str(out / "agent-c-pdf-browser.png"))
+    await pg.click('#part-tree [data-file="bundle.zip"]')
+    await pg.wait_for_selector('#part-tree [data-entry="good.pdf"]')
+    await pg.click('#part-tree [data-entry="good.pdf"]')
+    await pg.wait_for_selector('.pdf-viewer .pdf-frame[src^="blob:"]')
+    in_zip = await pg.get_attribute(".pdf-frame", "src")
+    check("a real two-page PDF in ZIP opens from a temporary blob without changing the ZIP",
+          in_zip.startswith("blob:") and (source / "bundle.zip").read_bytes() == original_zip,
+          in_zip)
+    await pg.click('#part-tree [data-entry="bad.pdf"]')
+    await pg.wait_for_selector('.pdf-viewer [role="alert"]')
+    bad = await pg.inner_text('.pdf-viewer [role="alert"]')
+    check("a corrupt ZIP PDF reports a readable error without changing the archive",
+          "not a valid PDF" in bad and (source / "bundle.zip").read_bytes() == original_zip, bad)
+    review = {"id": "agent-c-pdf-qa", "action": "compress", "file": "reviewed.zip"}
+    preview = await api(pg, "archive_plan", review)
+    put(source / "added-after-preview.txt", b"unreviewed file")
+    rejected = False
+    try:
+        await api(pg, "archive_execute", {**review, "reviewed_plan": preview})
+    except Exception as e:
+        rejected = "review" in str(e).lower() or "changed" in str(e).lower()
+    check("archive execution rejects a file added after the reviewed plan",
+          rejected and not (source / "reviewed.zip").exists(), rejected)
+
+
 async def tree_items(pg):
     """The models in Import's Folders view (everything unfolded)."""
     await pg.click('[data-view="folders"]')
@@ -1498,6 +1578,7 @@ async def main():
             await import_follow_ups(pg)
             await loose_workspace_checks(pg, check, library, B, api, cube, PNG, out)
             await model_workspace_extract(pg)
+            await agent_c_pdf_archive_checks(pg)
 
             # 3. renaming the library
             await pg.click('.sidebar a[href="#/settings"]')
