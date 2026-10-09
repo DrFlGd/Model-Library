@@ -31,6 +31,46 @@ fn contains(tree: &[Vec<String>], path: &[String]) -> bool {
     tree.iter().any(|p| same(p, path))
 }
 fn parent(path: &[String]) -> Vec<String> { path[..path.len() - 1].to_vec() }
+/// Reject links anywhere below the approved library root. A lexically relative
+/// destination can otherwise escape through a linked category directory.
+fn check_links(lib: &Library, path: &Path) -> Result<()> {
+    let rel = path.strip_prefix(lib.root()).map_err(|_| anyhow!("Path is outside the library."))?;
+    let mut dir = lib.root().to_path_buf();
+    for segment in rel.components() {
+        dir.push(segment.as_os_str());
+        if let Ok(info) = std::fs::symlink_metadata(&dir) {
+            if info.file_type().is_symlink() {
+                bail!("Linked folder {} cannot be used as a category destination.", dir.display());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Windows regards case-only differences as path collisions. Resolve them now
+/// even when planning on a case-sensitive system, so libraries stay portable.
+fn clashes_case_insensitive(path: &Path, own: &Path, taken: &HashSet<PathBuf>) -> bool {
+    let filename = path.file_name().unwrap_or_default().to_string_lossy();
+    taken.iter().any(|p| p.to_string_lossy().eq_ignore_ascii_case(&path.to_string_lossy()))
+        || path.parent().and_then(|p| std::fs::read_dir(p).ok()).is_some_and(|rd| {
+            rd.flatten().any(|e| {
+                e.path() != own && e.file_name().to_string_lossy().eq_ignore_ascii_case(&filename)
+            })
+        })
+}
+
+fn model_destination(
+    lib: &Library, schema: Option<&Schema>, path: &[String],
+    name: &str, src: &Path, taken: &HashSet<PathBuf>,
+) -> Result<PathBuf> {
+    for n in 1..=1000 {
+        let label = if n == 1 { name.to_string() } else { format!("{name} ({n})") };
+        let dest = destination(lib, schema, path, &label, Some(src), taken)?;
+        check_links(lib, &dest)?;
+        if !clashes_case_insensitive(&dest, src, taken) { return Ok(dest); }
+    }
+    bail!("Too many model folder name collisions. Choose another destination.")
+}
 fn on_node(model: &Model, source: &Node) -> bool {
     model.v["schema"].as_str() == Some(source.schema.as_str())
         && schema::starts_with(&strings(&model.v["path"]), &source.path)
@@ -197,6 +237,7 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
                 let target_folder = p.iter().fold(lib.root().join(v["folder"].as_str().unwrap_or("")), |d, n| d.join(n));
                 if target_folder.exists() { bail!("A folder already occupies the proposed new target; choose or rename it explicitly."); }
                 schema::check_path(lib, v["folder"].as_str().unwrap_or(""), &existing, &p)?;
+                check_links(lib, &target_folder)?;
                 target_path = p;
                 let mut new_paths = existing;
                 new_paths.push(target_path.clone());
@@ -207,6 +248,8 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
                 if !target_path.is_empty() && !contains(&existing, &target_path) {
                     bail!("Choose an existing target subcategory.");
                 }
+                let target_folder = target_path.iter().fold(lib.root().join(v["folder"].as_str().unwrap_or("")), |d, n| d.join(n));
+                check_links(lib, &target_folder)?;
             }
         }
         for s in &sources {
@@ -321,7 +364,7 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
         };
         let dest_schema = sid.and_then(|id| Schema::from_value(&after[id]));
         let src = lib.resolve(m.rel())?;
-        let dest = destination(lib, dest_schema.as_ref(), &values, &file_name(&src), Some(&src), &taken)?;
+        let dest = model_destination(lib, dest_schema.as_ref(), &values, &file_name(&src), &src, &taken)?;
         taken.insert(dest.clone());
         let dest_rel = lib.relative(&dest).ok_or_else(|| anyhow!("Destination is outside the library."))?;
         let actual_path = place_of(lib, dest_schema.as_ref(), &dest);
