@@ -107,7 +107,7 @@ fn read_model(lib: &Library, dir: &Path, schema: Option<&Schema>, cats: &[String
     // time, not just the model folder's time (nested edits leave that unchanged).
     if let Some(previews) = summary["previews"].as_array_mut() {
         for preview in previews {
-            if let Some(rel) = preview["file"].as_str() {
+            if let Some(rel) = preview["file"].as_str().map(String::from) {
                 preview["modified"] = json!(model::modified(&dir.join(rel)));
             }
         }
