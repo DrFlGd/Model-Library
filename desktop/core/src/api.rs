@@ -3241,7 +3241,7 @@ mod tests {
         let r = app.call("category_import_commit", json!({
             "proposal": proposed, "mode": "copy", "reviewed": review
         })).await;
-        assert!(r.is_err(), "occupied reviewed destination must be rejected: {r:?}");
+        assert!(r.is_err(), "occupied reviewed destination must be rejected");
         assert!(!lib.join("Target/Rock (2)").exists());
         assert!(source.join("Rock.stl").is_file());
         assert!(call(&app, "journals", json!({})).await.as_array().unwrap().is_empty(),
