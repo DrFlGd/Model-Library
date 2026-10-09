@@ -1,4 +1,4 @@
-// Model-level ZIP review. The backend revalidates the preview before writing.
+// Model-level ZIP review. Commit must match the exact reviewed hashes and destinations.
 import { html, useEffect, useState } from "../lib/html.js";
 import { ui } from "./state.js";
 import { api, followJob, loadOverview, recorded } from "./library.js";
@@ -50,7 +50,7 @@ export function ArchiveDialog({ request }) {
     }
     setBusy(true); setError("");
     try {
-      const { job } = await api("archive_execute", { id, action, file: filename, remove_sources: false });
+      const { job } = await api("archive_execute", { id, action, file: filename, reviewed_plan: plan });
       const done = await followJob(job, action === "compress" ? "Compressing ZIP" : "Extracting ZIP");
       if (done.error) throw new Error(done.error + " If any outputs were published, Home → Recent changes contains the recovery journal.");
       const result = done.result;
