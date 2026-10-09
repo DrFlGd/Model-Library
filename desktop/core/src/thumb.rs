@@ -106,7 +106,7 @@ pub fn file_preview(cache: &Path, path: &Path, entry: Option<&str>) -> Result<St
         .modified()
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
+        .map(|d| d.as_nanos())
         .unwrap_or(0);
     let mut h = Sha256::new();
     h.update(path.to_string_lossy().as_bytes());
