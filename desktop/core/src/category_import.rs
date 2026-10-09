@@ -530,6 +530,9 @@ fn undo_item(lib: &Library, entry: &Value) -> Result<()> {
         }
         return Ok(());
     }
+    if phase == "planned" {
+        bail!("The destination was occupied without this item ever being started. It was kept.");
+    }
     if !entry["manifest"].is_array() {
         return remove_incomplete_copy(entry, &dest);
     }
