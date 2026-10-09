@@ -707,6 +707,14 @@ mod tests {
         }
     }
 
+    /// Check exact stored directory entry case on both Windows and Linux:
+    /// Path::exists is case-insensitive on Windows and cannot test this.
+    fn directory_names(dir: &Path) -> Vec<String> {
+        std::fs::read_dir(dir).unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect()
+    }
+
     #[test]
     fn matching_children_at_several_depths_use_existing_target_case_and_undo() {
         let root = temp_dir("canonical-child-case");
@@ -727,7 +735,8 @@ mod tests {
             m["to"] == "Target/Terrain/Rocks/Deep/Boulder"));
         let id = execute(&lib,c);
         assert!(root.join("Target/Terrain/Rocks/Deep/Boulder/rock.stl").is_file());
-        assert!(!root.join("Target/terrain").exists());
+        assert!(directory_names(&root.join("Target")).contains(&"Terrain".to_string()));
+        assert!(!directory_names(&root.join("Target")).contains(&"terrain".to_string()));
         let side = model::read_sidecar(&root.join("Target/Terrain/Rocks/Deep/Boulder"));
         assert_eq!(side["path"],json!(["Terrain","Rocks","Deep"]));
         let tree = schema::list(&lib)[0].tree();
@@ -752,7 +761,8 @@ mod tests {
             "target":{"schema":"target","path":["office"]},"child_conflicts":"merge"});
         let id = execute(&lib,change);
         assert!(root.join("Target/Office/Boulder/rock.stl").is_file());
-        assert!(!root.join("Target/office").exists());
+        assert!(directory_names(&root.join("Target")).contains(&"Office".to_string()));
+        assert!(!directory_names(&root.join("Target")).contains(&"office".to_string()));
         relayout::undo(&lib,&id,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
         assert!(root.join("Source/Boulder/rock.stl").is_file());
         std::fs::remove_dir_all(root).unwrap();
