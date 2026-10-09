@@ -107,7 +107,11 @@ export function ExtractDialog({ model, keys }) {
       clear(); show("d:");
       await loadOverview();
       close();
-      recorded(`Made ${args.name} a new model in ${where}.`, result.journal, () => { clear(); show("d:"); }, [{ label: "Open", run: () => { location.hash = routeHash(`model:${result.id}`); } }]);
+      if (result.retired) location.hash = routeHash(`model:${result.id}`);
+      recorded(`Made ${args.name} a new model in ${where}.`, result.journal, () => {
+        clear(); show("d:");
+        if (result.retired) location.hash = routeHash(`model:${model.id}`);
+      }, [{ label: "Open", run: () => { location.hash = routeHash(`model:${result.id}`); } }]);
     } catch (e) { setError(e.message || String(e)); }
     finally { setBusy(false); }
   };
