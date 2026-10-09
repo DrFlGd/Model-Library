@@ -740,13 +740,15 @@ pub fn undo(
             x["label"].as_str().unwrap_or("")
         );
     }
+    // Archive undo performs its own preflight before changing journal state, so
+    // a conflict remains actionable rather than leaving an "undoing" record.
+    if j["kind"] == "archive-op" { return crate::archive_ops::undo(lib, j); }
     j["state"] = json!("undoing");
     j["direction"] = json!("undo");
     write(lib, &j)?;
     match j["kind"].as_str() {
         Some("details") => return undo_details(lib, j),
         Some("extract") => return crate::extract::undo(lib, j),
-        Some("archive-op") => return crate::archive_ops::undo(lib, j),
         Some("wrap_loose") => return model::undo_loose(lib, id, cancel),
         Some("import") => return undo_import(lib, j, cancel, on_item),
         _ => {}
