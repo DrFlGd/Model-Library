@@ -160,7 +160,7 @@ export function WorkspaceDetails({ model, onModelChange }) {
     <label class="field-block"><span>Released</span><input type="date" value=${form.released} disabled=${readOnly || busy} onInput=${change("released")} /></label>
     <label class="field-block"><span>Licence</span><input type="text" value=${form.license} disabled=${readOnly || busy} onInput=${change("license")} /></label>
     <label class="field-block"><span>Source</span><input type="url" placeholder="https://…" value=${form.source} disabled=${readOnly || busy} onInput=${change("source")} /></label>
-    <label class="field-block"><span>Tags</span><input type="text" placeholder="tag one, tag two" value=${form.tags} disabled=${readOnly || busy} onInput=${change("tags")} /></label>
+    <label class="field-block"><span>Tags</span><input id="workspace-edit-tags" type="text" placeholder="tag one, tag two" value=${form.tags} disabled=${readOnly || busy} onInput=${change("tags")} /></label>
     ${(schema?.fields || []).map((field) => html`<label class="field-block" key=${field.key}><span>${field.label}</span>
       <${FieldInput} field=${field} value=${fields[field.key]} onChange=${(value) => updateField(field.key, value)} /></label>`)}
     ${images.length ? html`<label class="field-block"><span>Cover picture</span><select value=${form.cover} disabled=${readOnly || busy} onChange=${change("cover")}>
