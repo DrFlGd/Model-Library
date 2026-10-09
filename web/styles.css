@@ -804,3 +804,39 @@ body:has(.sw-go) .toast { bottom: 92px; }
 /* Package C: loose model files on Home */
 #home-loose-files .loose-file-path { overflow-wrap: anywhere; min-width: 0; }
 #home-loose-files .wrap-loose { flex-shrink: 0; }
+
+
+/* Reviewed folder-to-category import (Agent D). The proposal remains separate
+   from the normal sorter until the user confirms the final destination plan. */
+.ci-workspace { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.ci-heading, .ci-toolbar, .ci-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.ci-heading h2, .ci-proposal h2, .ci-review h2 { margin: 0 0 5px; }
+.ci-heading p, .ci-proposal > p, .ci-note { margin: 0; }
+.ci-proposal, .ci-review, .ci-results { border: 1px solid var(--line, #7775); border-radius: 10px; padding: 15px; min-width: 0; }
+.ci-tree, .ci-children { padding: 0; margin: 0; list-style: none; }
+.ci-children { margin-left: 15px; border-left: 1px solid var(--line, #7775); }
+.ci-node { min-width: 0; }
+.ci-row { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; padding: 7px 3px 7px calc(var(--ci-depth) * 2px); border-bottom: 1px solid var(--line, #7773); }
+.ci-row:focus-within { outline: 2px solid var(--accent, #618cde); outline-offset: -2px; }
+.ci-included { display: flex; align-items: center; }
+.ci-kind { font-size: 0.78rem; font-weight: 650; text-transform: uppercase; min-width: 72px; }
+.ci-name { flex: 2 1 170px; min-width: 90px; }
+.ci-row select { flex: 1 1 180px; min-width: 135px; }
+.ci-size { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ci-options { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 2px 0 8px 33px; padding-left: calc(var(--ci-depth) * 2px); }
+.ci-options label { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 0.87rem; }
+.ci-options select { max-width: 440px; }
+.ci-check input { margin: 0; }
+.ci-group-name { max-width: 220px; }
+.ci-note { padding: 5px 8px; margin-left: calc(30px + var(--ci-depth) * 2px); font-size: 0.84rem; opacity: 0.8; }
+.ci-destinations { overflow: auto; max-height: 360px; }
+.ci-destinations table { width: 100%; border-collapse: collapse; text-align: left; min-width: 600px; }
+.ci-destinations td, .ci-destinations th { text-align: left; border-bottom: 1px solid var(--line, #7773); padding: 7px; max-width: 290px; overflow-wrap: anywhere; }
+.ci-review .form-error ul { margin-top: 6px; }
+@media (max-width: 800px) {
+  .ci-proposal, .ci-review, .ci-results { padding: 10px; }
+  .ci-row { gap: 5px; }
+  .ci-row .ci-kind { min-width: 54px; }
+  .ci-children { margin-left: 8px; }
+  .ci-options { margin-left: 13px; }
+}
