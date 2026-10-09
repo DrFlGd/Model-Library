@@ -950,3 +950,18 @@ body:has(.sw-go) .toast { bottom: 92px; }
   .model-page .page-actions { flex-wrap: wrap; }
   .workspace-stage .stage-canvas { min-height: 120px; }
 }
+
+
+/* Explicit concurrent-edit resolution in the Details ribbon (Agent A-1). */
+.details-conflict {
+  border: 1px solid var(--steel-2);
+  border-left: 3px solid var(--tool);
+  border-radius: var(--radius-s);
+  padding: 10px 12px;
+  background: var(--panel);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.details-conflict p { margin: 6px 0; }
+.details-conflict-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.details-conflict-actions button:focus-visible { outline: 3px solid var(--focus); }
