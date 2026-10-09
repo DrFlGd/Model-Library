@@ -20,7 +20,7 @@ C3: Recognise .3ds and .max as model files; .7z is already recognised as an arch
 - model_external_entry: {id|sort,file,entry} -> managed {path,temporary:true}.
 - Journal kind: archive-op; recovery path under _library/journal/ID/sources.
 
-Shared files: desktop/core/src/api.rs, lib.rs, model.rs, relayout.rs, web/ui/actions.js, dialogs.js, parts.js, stage.js, contents.js, library.js, filetypes.js, web/styles.css and CHANGELOG.md. New isolated modules: desktop/core/src/archive_ops.rs, web/ui/archive-actions.js, web/ui/pdf.js.
+Shared files: desktop/core/src/api.rs, lib.rs, model.rs, relayout.rs, web/ui/actions.js, dialogs.js, parts.js, stage.js, contents.js, library.js, filetypes.js, web/styles.css and CHANGELOG.md. New isolated modules: desktop/core/src/archive_ops.rs, web/ui/archive-actions.js, web/ui/document-viewer.js.
 
 ## Design decisions, limitations and integration
 
@@ -28,4 +28,4 @@ ZIP only in-app; no nested archive traversal. Bound size to 8 GiB expanded and 2
 
 The system PDF engine, rather than vendored PDF.js, is used. The browser PDF viewer uses standard Fit/FitH fragment parameters and offers Open externally for ordinary and ZIP-backed files. Plainly corrupt ZIP PDFs are rejected before creating the frame. Native PDF rendering, page/zoom support and resize screenshots **must still be checked on Windows WebView2 and Linux WebKitGTK**. Browser iframe smoke checks do not prove native support. Agent A's resizing and Agent B's mutation/journal contracts require integration review; F can optionally consume PDF thumbnails, and D owns arbitrary-extension explicit import UI.
 
-Dedicated Rust unit tests cover verified ZIP round-trip, optional cleanup/undo, cancellation, corrupt/malicious archives, changed output conflicts, last-copy preservation for compressed/extracted sources, missing recovery copies, reviewed-plan drift/replaced ZIP, and recovery journal retention after 30 changes. The acceptance suite now checks real two-page PDF controls in Chromium, PDF-in-ZIP, corrupt ZIP PDF and a changed reviewed plan. Review fresh CI test results before integration; the prior reviewed head had two stale acceptance assertions. No releases or main merges performed. No releases or main merges performed.
+Dedicated Rust unit tests cover verified ZIP round-trip, optional cleanup/undo, cancellation, corrupt/malicious archives, changed output conflicts, last-copy preservation for compressed/extracted sources, missing recovery copies, reviewed-plan drift/replaced ZIP, and recovery journal retention after 30 changes. The acceptance suite now checks real two-page PDF controls in Chromium, PDF-in-ZIP, corrupt ZIP PDF and a changed reviewed plan. Review fresh CI test results before integration; the prior reviewed head had two stale acceptance assertions. No releases or main merges performed.
