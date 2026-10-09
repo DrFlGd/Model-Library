@@ -178,10 +178,10 @@ export function CategoryImport() {
   const back = () => categoryStage.set({ open: false });
   const review = () => run("plan", async () => {
     const plan = await api("category_import_plan", { proposal: s.proposal });
-    categoryStage.set({ plan });
+    categoryStage.set({ plan: { ...plan, reviewed_mode: categoryStage.get().mode } });
   });
   const commit = () => run("commit", async () => {
-    const { job } = await api("category_import_commit", { proposal: s.proposal, mode: s.mode });
+    const { job } = await api("category_import_commit", { proposal: s.proposal, mode: s.mode, reviewed: s.plan });
     categoryStage.set({ job });
     try {
       const done = await followJob(job, "Importing folders as categories");
@@ -212,8 +212,8 @@ export function CategoryImport() {
       <${Proposal} proposal=${s.proposal} overview=${overview} />
       <div class="ci-footer">
         <div class="seg" role="group" aria-label="Import originals">
-          <button type="button" aria-pressed=${s.mode === "copy"} onClick=${() => categoryStage.set({ mode: "copy" })}>Copy</button>
-          <button type="button" aria-pressed=${s.mode === "move"} onClick=${() => categoryStage.set({ mode: "move" })}>Move</button>
+          <button type="button" aria-pressed=${s.mode === "copy"} onClick=${() => categoryStage.set({ mode: "copy", plan: null })}>Copy</button>
+          <button type="button" aria-pressed=${s.mode === "move"} onClick=${() => categoryStage.set({ mode: "move", plan: null })}>Move</button>
         </div>
         <button type="button" class="primary" id="ci-review" disabled=${s.busy} onClick=${review}>Review destinations</button>
       </div>
