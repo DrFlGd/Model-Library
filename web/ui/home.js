@@ -58,7 +58,10 @@ function RecentChanges({ lib, rev }) {
     <h2>Recent changes</h2>
     ${broken && !lib.read_only ? html`<div class="warn-note" role="alert" id="change-broken">
       <p>${broken.label} didn't finish${broken.error ? `: ${broken.error}` : "."} Some folders may have moved and others not.</p>
-      ${broken.direction === "undo"
+      ${broken.category_import
+        ? html`<div class="home-actions"><button type="button" class="primary" id="putback-change" disabled=${busy}
+            onClick=${() => act(undoChange, broken.id, "Reviewed import recovered; original files restored.")}>Put imported models back</button></div>`
+        : broken.direction === "undo"
         ? html`<div class="home-actions"><button type="button" class="primary" id="finish-change" disabled=${busy} onClick=${() => act(undoChange, broken.id, "Undone: the folders are back where they were.")}>Finish undoing it</button>
           <button type="button" class="ghost" id="putback-change" disabled=${busy} onClick=${() => act(finishChange, broken.id, "The change is made again.")}>Make the change again</button></div>`
         : html`<div class="home-actions"><button type="button" class="primary" id="finish-change" disabled=${busy} onClick=${() => act(finishChange, broken.id, "Finished.")}>Finish it</button>
