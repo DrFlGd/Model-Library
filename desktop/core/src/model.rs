@@ -23,7 +23,7 @@ pub fn file_kind(name: &str) -> &'static str {
         .unwrap_or_default();
     match ext.as_str() {
         "stl" | "3mf" | "obj" | "step" | "stp" | "ply" | "amf" | "iges" | "igs" | "f3d"
-        | "blend" => "model",
+        | "blend" | "3ds" | "max" => "model",
         "gcode" | "bgcode" | "lys" | "lyt" | "chitubox" | "ctb" | "cbddlp" | "goo" | "prz"
         | "fabbproject" | "3mfproject" | "ufp" => "slicer",
         "jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp" | "avif" => "image",
