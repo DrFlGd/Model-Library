@@ -5,7 +5,7 @@ import { ui, setPref } from "./state.js";
 import { extractionAction } from "./extract.js";
 import { ctx } from "./context.js";
 import { Icon } from "./icons.js";
-import { api, apiBytes, isDesktop, openModelFile } from "./library.js";
+import { api, apiBytes, isDesktop, openModelFile, openArchiveEntry } from "./library.js";
 import { size } from "./details.js";
 import { TypeTag, fileType } from "./filetypes.js";
 import { SortMenu, ViewSwitch } from "./layout.js";
@@ -100,9 +100,10 @@ export function Contents({ src, model, files, shown, archive, entries, error, co
   const p = keyParts(shown), folder = archive ? p.entry || "" : p.file;
   const rows = sortChildren(childrenOf(archive ? entries : files, folder, archive), prefs[0]);
   const order = rows.map((r) => r.key);
+  const scopeKey = archive ? (folder ? "z:" + archive + "!" + (folder.endsWith("/") ? folder : folder + "/") : null) : "d:" + folder;
   const open = (row) => {
     pick(row.key);
-    if (!row.folder && !row.entry && !viewable(row.name) && isDesktop()) openModelFile(model, row.file);
+    if (!row.folder && !viewable(row.name) && isDesktop()) row.entry ? openArchiveEntry(src, row.file, row.entry) : openModelFile(model, row.file);
   };
   const select = (row, e) => { pickEvent(row.key, e, order); show(shown); };
   const menu = (e, row) => {
@@ -110,9 +111,9 @@ export function Contents({ src, model, files, shown, archive, entries, error, co
     const lib = ui.get().library;
     openMenu(e, [
       { id: "view", label: "Show here", icon: "eye", run: () => open(row) },
-      ...(!row.entry && isDesktop() ? [
-        ...(!row.folder ? [{ id: "open-own", label: "Open in its own app", icon: "external", run: () => openModelFile(model, row.file) }] : []),
-        { id: "folder", label: "Show in folder", icon: "folder", run: () => ctx.platform.library.openPath([lib.path, src.rel, row.folder ? row.rel : parentPath(row.rel)].filter(Boolean).join("/")) },
+      ...(isDesktop() ? [
+        ...(!row.folder ? [{ id: "open-own", label: "Open externally", icon: "external", run: () => row.entry ? openArchiveEntry(src, row.file, row.entry) : openModelFile(model, row.file) }] : []),
+        ...(!row.entry ? [{ id: "folder", label: "Show in folder", icon: "folder", run: () => ctx.platform.library.openPath([lib.path, src.rel, row.folder ? row.rel : parentPath(row.rel)].filter(Boolean).join("/")) }] : []),
       ] : []),
       ...(!row.entry && fileType(row.name).group === "image" ? [{ id: "cover", label: "Use as cover", icon: "image", disabled: lib?.read_only ? "The library is read-only." : false, run: () => useAsCover(src.id, row.file) }] : []),
       extractionAction(src, model),
@@ -134,6 +135,10 @@ export function Contents({ src, model, files, shown, archive, entries, error, co
     return html`<${LazyPreview} key=${row.key} cacheKey=${`${src.id}:${row.key}:${row.size}`} ask=${() => image ? Promise.resolve({ url: `${src.rel}/${row.file}` }) : api("file_preview", { ...srcArgs(src), file: row.file, entry: row.entry || null })} fallback=${fallback} />`;
   };
   return html`<div class="contents-view" id="contents-view" tabIndex="0" onKeyDown=${key}>
+    <div class="file-scope-tools" role="group" aria-label="Folder selection scope">
+      <button type="button" class="ghost" id="select-this-level" disabled=${!order.length} onClick=${() => fileSel.set({ picked: order, anchor: order[0] || null })}>Select this level (${rows.length})</button>
+      <button type="button" class="ghost" id="select-folder-contents" disabled=${!scopeKey || !rows.length} title="Recursively select all descendants, including files not in this level" onClick=${() => fileSel.set({ picked: [scopeKey], anchor: scopeKey })}>Select folder contents</button>
+    </div>
     <div class="contents-tools"><${SortMenu} id="contents-sort" options=${[["name", "Name"], ["type", "Type"], ["size", "Largest first"], ["newest", "Newest"]]} value=${prefs[0]} onChange=${(contentsSort) => setPref({ contentsSort })} /><${ViewSwitch} id="contents-views" views=${[["grid", "Grid", "grid"], ["list", "List", "list"]]} value=${prefs[1]} onChange=${(contentsView) => setPref({ contentsView })} /></div>
     ${error ? html`<p class="form-error" role="alert">${error}</p>` : archive && !entries ? html`<p class="muted">Reading the archive…</p>` : !rows.length ? html`<p class="muted">Nothing in this folder.</p>` : null}
     ${prefs[1] === "list" ? html`<div class="contents-columns">${[["name", "Name"], ["type", "Type"], ["size", "Size"]].map(([k, label]) => html`<button type="button" class="ghost" data-sort=${k} onClick=${() => setPref({ contentsSort: k })}>${label}${prefs[0] === k ? " ↓" : ""}</button>`)}</div>` : null}

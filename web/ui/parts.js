@@ -14,12 +14,13 @@ import { useStore } from "../lib/store.js";
 import { ui, resolvedTheme, setPref } from "./state.js";
 import { ctx } from "./context.js";
 import { Icon } from "./icons.js";
-import { api, apiBytes, isDesktop, libraryUrl, openModelFile, toast, loadOverview, recorded, followIds } from "./library.js";
+import { api, apiBytes, isDesktop, libraryUrl, openModelFile, openArchiveEntry, toast, loadOverview, recorded, followIds } from "./library.js";
 import { ViewSwitch, SortMenu } from "./layout.js";
 import { size } from "./details.js";
 import { openMenu, typing } from "./actions.js";
 import { fileSel, pick, pickEvent, show, clear } from "./filesel.js";
 import { TypeTag } from "./filetypes.js";
+import { PdfDocument } from "./document-viewer.js";
 
 export const MESH = /\.(stl|obj|3mf)$/i;
 const MD = /\.(md|markdown|txt)$/i;
@@ -87,7 +88,7 @@ function target(f, entry) {
   const name = entry || f.rel;
   if (MESH.test(name)) return { tab: "3d", file: f.rel, entry };
   if (f.kind === "image" || (entry && PICTURE.test(entry))) return { tab: "pictures", file: f.rel, entry };
-  if (!entry && f.kind === "doc") return { tab: "docs", file: f.rel };
+  if ((entry && /\.pdf$/i.test(entry)) || (!entry && f.kind === "doc")) return { tab: "docs", file: f.rel, entry };
   if (!entry && f.kind === "video") return { tab: "videos", file: f.rel };
   return null;
 }
@@ -110,7 +111,7 @@ function ZipEntries({ src, f, open, current }) {
     const on = current?.file === f.rel && current?.entry === e.name;
     return html`<li key=${e.name} class="tree-file in-zip">
       <button type="button" class=${`tree-btn${on ? " on" : ""}`} disabled=${!t} data-entry=${e.name} onClick=${() => t && open(t)}>
-        <span class="tree-icon tree-type"><${TypeTag} name=${e.name} /></span><span class="tree-name">${e.name}</span><span class="muted tree-size">${size(e.size)}</span></button></li>`;
+        <span class="tree-icon tree-type"><${TypeTag} name=${e.name} /></span><span class="tree-name">${e.name}</span><span class="muted tree-size">${size(e.size)}</span></button>${ownApp(src) && !t ? html`<button type="button" class="ghost" aria-label=${`Open ${e.name} externally`} onClick=${() => openArchiveEntry(src, f.rel, e.name)}>Open externally</button>` : null}</li>`;
   });
 }
 
@@ -141,7 +142,7 @@ function fileMenu(e, src, f, open) {
   const items = [
     ...(t ? [{ id: "view", label: "Show here", icon: "eye", run: () => open(t) }] : []),
     ...(ownApp(src) ? [
-      { id: "open-own", label: "Open in its own app", icon: "external", run: () => openModelFile({ rel: src.rel }, f.rel) },
+      { id: "open-own", label: "Open externally", icon: "external", run: () => openModelFile({ rel: src.rel }, f.rel) },
       { id: "folder", label: "Show in folder", icon: "folder", run: () => ctx.platform.library.openPath([lib.path, src.rel, dir].filter(Boolean).join("/")) },
     ] : []),
     ...(src.kind === "model" && f.kind === "image" ? [{ id: "cover", label: "Use as cover", icon: "image", disabled: lib?.read_only ? "The library is read-only." : false, run: () => useAsCover(src.id, f.rel) }] : []),
@@ -405,22 +406,22 @@ export function Documents({ src, model, docs, current, setCurrent }) {
   const [text, setText] = useState(null);
   useEffect(() => {
     setText(null);
-    if (!doc || !MD.test(doc.file)) return;
+    if (!doc || doc.entry || !MD.test(doc.file)) return;
     let live = true;
     api("model_doc", { ...srcArgs(src), file: doc.file }).then((r) => { if (live) setText(r.html); }, (e) => { if (live) setText(`<p>${String(e.message || e).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]))}</p>`); });
     return () => { live = false; };
-  }, [src.id, doc?.file]);
+  }, [src.id, doc?.file, doc?.entry]);
   if (!doc) return html`<div class="stage-note muted">No documents.</div>`;
   const lib = ui.get().library;
   return html`<div class="stage-docs">
-    <div class="doc-list">${docs.map((d) => html`<button type="button" key=${d.file} class=${`ghost${d.file === doc.file ? " on" : ""}`} onClick=${() => setCurrent(d)}>${d.file}</button>`)}</div>
+    <div class="doc-list">${docs.map((d) => html`<button type="button" key=${d.file + (d.entry || "")} class=${`ghost${d.file === doc.file && d.entry === doc.entry ? " on" : ""}`} onClick=${() => setCurrent(d)}>${d.entry || d.file}</button>`)}</div>
     <div class="doc-view">
-      ${MD.test(doc.file) ? html`<div class="doc-text-view" id="doc-text" onClick=${followLink} dangerouslySetInnerHTML=${{ __html: text || "" }}></div>`
-        : /\.pdf$/i.test(doc.file) ? html`<iframe class="doc-frame" title=${doc.file} src=${fileUrl(src, doc.file)}></iframe>`
+      ${!doc.entry && MD.test(doc.file) ? html`<div class="doc-text-view" id="doc-text" onClick=${followLink} dangerouslySetInnerHTML=${{ __html: text || "" }}></div>`
+        : /\.pdf$/i.test(doc.entry || doc.file) ? html`<${PdfDocument} key=${doc.file + (doc.entry || "")} src=${src} doc=${doc} model=${model} />`
         : html`<div class="stage-note muted">This kind of document opens in its own app.</div>`}
     </div>
-    <div class="stage-bar"><span class="stage-what">${doc.file}</span>
-      ${isDesktop() && lib && model ? html`<span class="stage-tools"><button type="button" class="ghost" onClick=${() => openModelFile(model, doc.file)}>${Icon.external(14)} Open in its own app</button></span>` : null}</div>
+    <div class="stage-bar"><span class="stage-what">${doc.entry ? `${doc.file} / ${doc.entry}` : doc.file}</span>
+      ${isDesktop() && lib && model && !doc.entry ? html`<span class="stage-tools"><button type="button" class="ghost" onClick=${() => openModelFile(model, doc.file)}>${Icon.external(14)} Open externally</button></span>` : null}</div>
   </div>`;
 }
 
@@ -430,7 +431,7 @@ export function Videos({ src, model, videos, current, setCurrent }) {
   return html`<div class="stage-videos">
     ${VIDEO_OK.test(v.file) ? html`<video class="stage-video" controls preload="metadata" src=${fileUrl(src, v.file)} key=${v.file}></video>`
       : html`<div class="stage-note muted">${v.file} plays in its own app.
-        ${model && ownApp(src) ? html` <button type="button" class="ghost" id="video-open" onClick=${() => openModelFile(model, v.file)}>${Icon.external(14)} Open in its own app</button>` : null}</div>`}
+        ${model && ownApp(src) ? html` <button type="button" class="ghost" id="video-open" onClick=${() => openModelFile(model, v.file)}>${Icon.external(14)} Open externally</button>` : null}</div>`}
     <div class="doc-list">${videos.map((x) => html`<button type="button" key=${x.file} class=${`ghost${x.file === v.file ? " on" : ""}`} onClick=${() => setCurrent(x)}>${x.file}</button>`)}</div>
   </div>`;
 }
@@ -562,7 +563,7 @@ export function SelectionRows({ src, files, name, view = "folders", contextActio
     openMenu(e, [
       { id: "view", label: "Show here", icon: "eye", run: () => show(row.key) },
       ...(ownApp(src) && !row.entry ? [
-        { id: "open-own", label: "Open in its own app", icon: "external", run: () => openModelFile({ rel: src.rel }, row.rel) },
+        { id: "open-own", label: "Open externally", icon: "external", run: () => openModelFile({ rel: src.rel }, row.rel) },
         { id: "folder", label: "Show in folder", icon: "folder", run: () => ctx.platform.library.openPath([lib.path, src.rel, row.folder ? row.rel : splitRel(row.rel)[0]].filter(Boolean).join("/")) },
       ] : []),
       ...(row.kind === "image" && !row.entry ? [{ id: "cover", label: "Use as cover", icon: "image", disabled: lib?.read_only ? "The library is read-only." : false, run: () => useAsCover(src.id, row.rel) }] : []), ...extra,

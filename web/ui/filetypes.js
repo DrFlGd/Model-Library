@@ -7,7 +7,7 @@ import { html } from "../lib/html.js";
 const GROUPS = {
   stl: ["stl"],
   "3mf": ["3mf"],
-  "3d": ["obj", "step", "stp", "ply", "amf", "iges", "igs", "f3d", "blend"],
+  "3d": ["obj", "step", "stp", "ply", "amf", "iges", "igs", "f3d", "blend", "3ds", "max"],
   slicer: ["gcode", "bgcode", "lys", "lyt", "chitubox", "ctb", "cbddlp", "goo", "prz", "fabbproject", "3mfproject", "ufp"],
   archive: ["zip", "7z", "rar", "tar", "gz"],
   image: ["jpg", "jpeg", "png", "webp", "gif", "bmp", "avif"],

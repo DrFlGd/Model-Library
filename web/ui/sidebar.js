@@ -13,7 +13,7 @@ function NavLink({ route, label, icon, count, current, depth = 0, toggle = null,
   const on = current === route;
   return html`<li class="nav-row" style=${depth ? `--depth: ${depth}` : null}>
     ${toggle || html`<span class="nav-toggle-space"></span>`}
-    <a class=${`nav-link${on ? " active" : ""}`} href=${routeHash(route)} aria-current=${on ? "page" : null}
+    <a class=${`nav-link${on ? " active" : ""}`} href=${routeHash(route)} title=${label} aria-label=${label} aria-current=${on ? "page" : null}
       onClick=${() => ui.set({ navOpen: false })} onContextMenu=${menu ? (e) => openMenu(e, menu()) : null}
       onKeyDown=${menu ? (e) => { if ((e.shiftKey && e.key === "F10") || e.key === "ContextMenu") { e.preventDefault(); e.stopPropagation(); openMenu(e.currentTarget, menu()); } } : null}>
       ${icon ? html`<span class="nav-icon">${Icon[icon](15)}</span>` : null}<span class="nav-label">${label}</span>
@@ -35,10 +35,10 @@ function TreeRows({ schema, nodes, values, depth, current, open }) {
 }
 
 export function Sidebar() {
-  const s = useStore(ui, (st) => ({ route: st.route, navOpen: st.navOpen, overview: st.overview, open: st.open, library: st.library }));
+  const s = useStore(ui, (st) => ({ route: st.route, navOpen: st.navOpen, overview: st.overview, open: st.open, library: st.library, navCollapsed: st.navCollapsed }));
   const ov = s.overview;
   return html`${s.navOpen ? html`<div class="nav-backdrop" onClick=${() => ui.set({ navOpen: false })}></div>` : null}
-    <nav class=${`sidebar${s.navOpen ? " open" : ""}`} aria-label="Library">
+    <nav class=${`sidebar${s.navOpen ? " open" : ""}${s.navCollapsed ? " collapsed" : ""}`} aria-label="Library">
       <ul class="nav-list">
         <${NavLink} route="home" label="Home" icon="home" current=${s.route} />
         <${NavLink} route="import" label="Import" icon="inbox" current=${s.route} />

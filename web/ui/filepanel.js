@@ -5,6 +5,7 @@ import { ui, setPref } from "./state.js";
 import { SelectionRows } from "./parts.js";
 import { ViewSwitch } from "./layout.js";
 import { size } from "./details.js";
+import { fileSel } from "./filesel.js";
 
 export function FilePanel({ src, model, files, variants, variant, setVariant, open, toggle, narrow, contextActions }) {
   const prefs = useStore(ui);
@@ -30,6 +31,12 @@ export function FilePanel({ src, model, files, variants, variant, setVariant, op
       ${variants.length ? html`<div class="seg variant-seg" role="group" aria-label="Variant" id="variants">${variants.map((v) => html`<button type="button" key=${v} aria-pressed=${variant === v} onClick=${() => setVariant(v)}>${v}</button>`)}<button type="button" aria-pressed=${variant === null} onClick=${() => setVariant(null)}>All</button></div>` : null}
       <input type="search" class="parts-filter" placeholder="Search files" aria-label="Search files" value=${q} onInput=${(e) => setQ(e.target.value)} />
       <${ViewSwitch} id="parts-views" label="Show the files as" views=${[["folders", "Folders", "folder"], ["all", "List", "list"], ["type", "By type", "grouped"]]} value=${view} onChange=${(value) => setPref({ filePanelView: value })} />
+      <div class="file-scope-tools" role="group" aria-label="File selection scope">
+        <button type="button" class="ghost" id="select-visible-files" disabled=${!filtered.length}
+          title="Select only files matching the current variant and search" onClick=${() => fileSel.set({ picked: filtered.map((f) => "f:" + f.rel), anchor: filtered.length ? "f:" + filtered[0].rel : null })}>Select visible files (${filtered.length})</button>
+        <button type="button" class="ghost" id="select-whole-model" disabled=${!model.files_list?.length}
+          title="Explicitly include files hidden by search or variant filters" onClick=${() => fileSel.set({ picked: ["d:"], anchor: "d:" })}>Select entire model (${model.files_list?.length || 0})</button>
+      </div>
       <div class="file-panel-scroll"><${SelectionRows} src=${src} files=${filtered} name=${model.name} view=${view} contextActions=${contextActions} />${!filtered.length && q ? html`<p class="muted">No files match.</p>` : null}</div>
       ${!narrow ? html`<div class="file-panel-resize" role="separator" aria-label="File panel width" aria-orientation="vertical" aria-valuemin="220" aria-valuemax="480" aria-valuenow=${width} tabIndex="0" onPointerDown=${resize} onKeyDown=${(e) => { if (["ArrowLeft", "ArrowRight"].includes(e.key)) { e.preventDefault(); setPref({ filePanelWidth: Math.max(220, Math.min(480, width + (e.key === "ArrowLeft" ? -20 : 20))) }); } }}></div>` : null}
     `}

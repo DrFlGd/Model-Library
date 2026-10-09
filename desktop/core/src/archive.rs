@@ -5,7 +5,27 @@ use crate::model::file_kind;
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::io;
+
+/// Validate an entry before materialising it outside its archive. In particular,
+/// backslashes are separators on Windows, not innocuous file-name characters.
+pub fn safe_entry(name: &str) -> Result<PathBuf> {
+    if name.is_empty() || name.starts_with('/') || (name.contains('\\') || name.contains(':') || name.contains('\0'))
+        || name.split('/').any(|part| part.is_empty() || part == "." || part == "..")
+        || name.chars().any(|c| c.is_control()) {
+        bail!("The ZIP contains an unsafe path: {name}");
+    }
+    // Reserved Windows device names are unsafe even when they have extensions.
+    for part in name.split('/') {
+        let stem = part.split('.').next().unwrap_or("").trim_end_matches(' ').to_ascii_uppercase();
+        if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9" | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9")
+            || (part.ends_with(' ') || part.ends_with('.')) {
+            bail!("The ZIP contains a path unavailable on Windows: {name}");
+        }
+    }
+    Ok(PathBuf::from(name))
+}
 
 /// Whether a file is an archive this app can look inside.
 pub fn is_zip(name: &str) -> bool {
@@ -55,8 +75,9 @@ pub fn read(path: &Path, entry: &str, limit: u64) -> Result<Vec<u8>> {
     if e.size() > limit {
         bail!("{entry} is too big to show ({} MB)", e.size() >> 20);
     }
-    let mut out = Vec::with_capacity(e.size() as usize);
-    e.read_to_end(&mut out)?;
+    let mut out = Vec::with_capacity((e.size().min(limit)) as usize);
+    (&mut e).take(limit + 1).read_to_end(&mut out).map_err(|e| io::Error::new(e.kind(), format!("Cannot read ZIP entry (it may be encrypted or corrupt): {e}")))?;
+    if out.len() as u64 > limit { bail!("{entry} expanded beyond the safe reading limit."); }
     Ok(out)
 }
 

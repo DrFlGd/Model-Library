@@ -60,8 +60,9 @@ import urllib.request
 from pathlib import Path
 
 from playwright.async_api import async_playwright
-from model_workspace_panel import panel_workspace_checks
+from model_workspace_panel import panel_workspace_checks, details_refresh_checks
 from model_workspace_loose import loose_workspace_checks
+from agent_f_cards import card_checks
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--cli", required=True)
@@ -459,8 +460,32 @@ async def phase3(pg):
     await pg.goto(B + "#/browse/unsorted")
     card = pg.locator(".card:has(.card-name:text-is('Knight Armour'))")
     await card.wait_for()
-    cover = await card.locator("img").get_attribute("src") or ""
-    check("a preview is drawn on import (a picture of the model is still its cover)", thumb and cover.endswith("/photo.png"), (thumb, cover))
+    await card.scroll_into_view_if_needed()
+    await pg.wait_for_function("""() => {
+      const card = [...document.querySelectorAll('.card')].find(e => e.querySelector('.card-name')?.textContent === 'Knight Armour');
+      const imgs = [...(card?.querySelectorAll('.cover-file img') || [])];
+      return imgs.some(i => i.src.includes('/photo.png') && i.complete && i.naturalWidth > 0)
+        && imgs.some(i => i.src.includes('~preview/') && i.complete && i.naturalWidth > 0);
+    }""", timeout=60000)
+    cover = await card.locator(".cover-file img").evaluate_all("imgs => imgs.map(i => i.src)")
+    check("import creates the model thumbnail and the automatic card shows its picture alongside 3D previews",
+          thumb and any("/photo.png" in src for src in cover)
+          and any("~preview/" in src for src in cover)
+          and await card.locator(".cover-composed").count() == 1, (thumb, cover))
+
+    # Agent A: Unsorted selection exposes the same folders and ZIP tree before opening.
+    await card.click()
+    await pg.wait_for_selector('#unsorted-preview #part-tree')
+    unsorted_files = await pg.locator('#unsorted-preview #part-tree [data-file]').count()
+    check("Unsorted model can browse its files beside the model grid",
+          unsorted_files > 0 and await pg.locator('#unsorted-preview .unsorted-preview-stage').count() == 1)
+    await pg.screenshot(path=str(out / "agent-a-unsorted-preview.png"))
+    if await pg.locator('.results .card').count() > 1:
+        other = pg.locator('.results .card').filter(has_not=pg.locator('.card-name:text-is("Knight Armour")')).first
+        await other.click(modifiers=["Control"])
+        check("multi-model selection does not reuse a single model's files",
+              await pg.locator('#picked-panel').count() == 1 and await pg.locator('#unsorted-preview').count() == 0)
+        await card.click()
 
     # 20. the model's page: 3D view, part tree, variants
     await card.dblclick()
@@ -551,7 +576,8 @@ async def phase3(pg):
     check("a model's files show as folders, a searchable list, by type and folder previews", sorted(every) == on_disk and kinds == ["model", "image", "doc", "archive"]
           and tiles == 1 and kept == "type", (every, on_disk, kinds, tiles, kept))
 
-    await panel_workspace_checks(pg, check)
+    await panel_workspace_checks(pg, check, out)
+    await details_refresh_checks(pg, check, out)
 
     # 23. library files can be read in ranges (videos seek)
     req = urllib.request.Request(B + "library/Unsorted/Knight%20Armour/README.md", headers={"Range": "bytes=2-7"})
@@ -568,10 +594,16 @@ async def phase3(pg):
     await pg.wait_for_function("() => /preview/.test(document.querySelector('.toast')?.textContent || '')", timeout=60000)
     msg = await pg.inner_text(".toast")
     await pg.goto(B + "#/browse/unsorted")
-    hand = pg.locator(".card:has(.card-name:text-is('Hand Made')) img")
-    await hand.wait_for()
-    src_ = await hand.get_attribute("src")
-    check("Make previews draws the missing ones, shown on the card", (library / "Unsorted/Hand Made/_thumbs/model.png").is_file() and src_.endswith("_thumbs/model.png"), (msg, src_))
+    hand = pg.locator(".card:has(.card-name:text-is('Hand Made'))")
+    await hand.scroll_into_view_if_needed()
+    await pg.wait_for_function("""() => {
+      const card = [...document.querySelectorAll('.card')].find(e => e.querySelector('.card-name')?.textContent === 'Hand Made');
+      return [...(card?.querySelectorAll('.cover-file img') || [])].some(i => i.complete && i.naturalWidth > 0);
+    }""", timeout=60000)
+    src_ = await hand.locator(".cover-file img").first.get_attribute("src")
+    check("Make previews draws the missing asset and the card uses a real automatic file preview",
+          (library / "Unsorted/Hand Made/_thumbs/model.png").is_file()
+          and "~preview/" in src_ and await hand.locator(".cover-composed").count() == 1, (msg, src_))
     await pg.screenshot(path=str(out / "14-previews.png"))
 
 
@@ -716,7 +748,11 @@ async def phase4(pg):
     await pg.wait_for_selector("#context-menu")
     items = await pg.eval_on_selector_all("#context-menu .menu-label", "els => els.map(e => e.textContent)")
     await pg.screenshot(path=str(out / "18-subcategories.png"))
-    await pg.click('#context-menu [data-action="delete-subcategory"]')  # empty: at once, with Undo
+    await pg.click('#context-menu [data-action="delete-subcategory"]')
+    await pg.wait_for_selector("#delete-subcategory-dialog #change-preview")
+    await pg.screenshot(path=str(out / "18b-delete-subcategory-modes.png"))
+    await pg.click("#delete-subcategory-dialog button[type=submit]")
+    await pg.wait_for_selector("#delete-subcategory-dialog", state="detached", timeout=60000)
     await pg.wait_for_function("() => !location.hash.includes('Orks')")
     gone = not (t / "Orks").exists()
     await toast_text(pg, "^Deleted the subcategory Orks")
@@ -724,7 +760,7 @@ async def phase4(pg):
     await toast_text(pg, "^Undone")
     back = (t / "Orks").is_dir()
     check("subcategories are added at any depth, kept with no models, and deleted with Undo", made and gone and back and "Orks" in w40k and "Aeldari" in w40k
-          and items == ["Add subcategory…", "Edit category…", "Rename or move…", "Delete subcategory"], (made, gone, back, w40k, items))
+          and items == ["Add subcategory…", "Edit category…", "Rename or move…", "Merge categories…", "Delete subcategory…"], (made, gone, back, w40k, items))
     # one with models in it: they move up a level, after a list of what moves
     model_folder("Tabletop/Terrain/Buildings/Ruins/Tower", {"tower.stl": cube(6)})
     await api(pg, "library_scan", {"full": False})
@@ -737,12 +773,23 @@ async def phase4(pg):
     red = "danger" in (await pg.get_attribute("#delete-subcategory-dialog button[type=submit]", "class"))
     await pg.click("#delete-subcategory-dialog button[type=submit]")
     await pg.wait_for_selector("#delete-subcategory-dialog", state="detached", timeout=60000)
-    up = (library / "Tabletop/Terrain/Buildings/Tower/tower.stl").is_file() and not (library / "Tabletop/Terrain/Buildings/Ruins").exists()
+    up = (library / "Tabletop/Terrain/Buildings/Tower/tower.stl").is_file() and (library / "Tabletop/Terrain/Buildings/Gothic").is_dir() and not (library / "Tabletop/Terrain/Buildings/Ruins").exists()
     await toast_text(pg, "^Deleted the subcategory Ruins")
     await pg.keyboard.press("Control+z")
     await toast_text(pg, "^Undone", 60000)
     down = (library / "Tabletop/Terrain/Buildings/Ruins/Tower/tower.stl").is_file() and (library / "Tabletop/Terrain/Buildings/Ruins/Gothic").is_dir()
     check("a subcategory with models is deleted after a list of what moves up, and Ctrl+Z puts it back", red and up and down, (red, up, down))
+
+    # Agent E: the multi-source merge staging dialog is discoverable and reviewable.
+    await pg.goto(B + "#/browse/schema/wargames")
+    await pg.click("#category-menu")
+    await pg.click('#context-menu [data-action="merge-categories"]')
+    await pg.wait_for_selector("#merge-categories-dialog")
+    await pg.screenshot(path=str(out / "18c-merge-categories.png"))
+    selectable = await pg.locator("#merge-sources input[type=checkbox]").count()
+    check("Merge categories opens an accessible multi-source review", selectable >= 2, selectable)
+    await pg.click("#merge-categories-dialog .dialog-actions .ghost")
+    await pg.wait_for_selector("#merge-categories-dialog", state="detached")
 
     # 29. several models' details at once
     await pg.goto(B + "#/browse/schema/wargames")
@@ -907,8 +954,8 @@ async def ui_pass(pg):
     await pg.keyboard.press("Escape")
     check("the details panel and the right-click menu have the same actions, in the same order",
           row == ["Open", "Edit details…", "Move to category…", "Star", "Show in folder", "More ▾"]
-          and menu == ["Open", "Edit details…", "Move to category…", "Star", "Show in folder", "Make a new preview", "Copy folder path"]
-          and more == ["Make a new preview", "Copy folder path"], (row, menu, more))
+          and menu == ["Open", "Edit details…", "Move to category…", "Star", "Show in folder", "Delete model…", "Compress to ZIP…", "Extract archive…", "Make a new preview", "Copy folder path"]
+          and more == ["Delete model…", "Compress to ZIP…", "Extract archive…", "Make a new preview", "Copy folder path"], (row, menu, more))
 
     # 34. keys: arrows and Shift, Ctrl+A, Esc, E, M, S, Ctrl+Z
     n = int((await count(pg)).split()[0])
@@ -975,7 +1022,7 @@ async def ui_pass(pg):
     await pg.screenshot(path=str(out / "25-delete-category.png"))
     await pg.click("#delete-schema-dialog .dialog-actions .ghost")
     await pg.wait_for_selector("#delete-schema-dialog", state="detached")
-    check("a category's menu is on the sidebar too, and Delete category is red", items == ["Add subcategory…", "Edit category…", "Delete category…"] and red, (items, red))
+    check("a category's menu is on the sidebar too, and Delete category is red", items == ["Add subcategory…", "Edit category…", "Merge categories…", "Delete category…"] and red, (items, red))
 
     # 38. files without a viewer show their details and an external-app action
     put(library / "Unsorted/Knight Armour/settings.ini", "x")
@@ -990,9 +1037,9 @@ async def ui_pass(pg):
     file_menu = await labels_of(pg, "#context-menu .menu-label")
     await pg.keyboard.press("Escape")
     mp_row = await labels_of(pg, "#model-page .action-row button")
-    check("files with no viewer show details and open in their own app; the model page has the same row", "settings.ini" in fallback and "Open in its own app" in fallback
-          and "Open in its own app" in file_menu and "Show in folder" in file_menu and "Make a new model…" in file_menu
-          and mp_row == ["Edit details…", "Move to category…", "Star", "Show in folder", "More ▾"], (fallback, file_menu, mp_row))
+    check("files with no viewer show details and open in their own app; the model page has the same row", "settings.ini" in fallback and "Open externally" in fallback
+          and "Open externally" in file_menu and "Show in folder" in file_menu and "Make a new model…" in file_menu
+          and mp_row == ["Edit details…", "Move to category…", "Add files…", "Star", "Show in folder", "More ▾"], (fallback, file_menu, mp_row))
 
     # 39. Import: right-click, Ctrl+A and Esc, Ctrl+Z, and messages clear of the footer
     more = home / "More"
@@ -1416,12 +1463,102 @@ async def model_workspace_extract(pg):
     await undo()
     model = await api(pg, "model_get", {"id": "workspace-extract"})
     await select(["f:" + f["rel"] for f in model["files_list"]])
-    disabled = await pg.is_disabled("#extract-model")
-    reason = await pg.get_attribute("#extract-model", "title")
+    enabled = not await pg.is_disabled("#extract-model")
+    await pg.click("#extract-model")
+    whole_dest = await make("Entire workspace")
+    check("complete selection makes a new model and retires its empty source", enabled and not source.exists() and
+          (whole_dest / "model.json").is_file() and (whole_dest / "extras.zip").is_file())
+    await undo()
+    restored = {str(p.relative_to(source)): p.read_bytes() for p in source.rglob("*") if p.is_file() and "_thumbs" not in p.parts}
+    check("whole-model extraction Undo restores original identity and files", restored == before and not whole_dest.exists())
+    await pg.goto(B + "#/model/workspace-extract")
+    await pg.wait_for_selector('#model-page[data-model="workspace-extract"]')
+    await select(["d:"])
     await pg.evaluate("""async () => {const {ui} = await import('/ui/state.js'); ui.set({library: {...ui.get().library, read_only: true}});} """)
     readonly = await pg.get_attribute("#extract-model", "title")
-    check("whole-model and read-only extraction explain why they are unavailable", disabled and reason == "That's the whole model: use Move to category instead" and "read-only" in readonly, (reason, readonly))
+    check("whole-model extraction is enabled and read-only still forbids mutation", enabled and "read-only" in readonly, (enabled, readonly))
     await pg.evaluate("""async () => {const {ui} = await import('/ui/state.js'); ui.set({library: {...ui.get().library, read_only: false}});} """)
+
+
+async def agent_c_pdf_archive_checks(pg):
+    """Agent C browser smoke: real two-page PDF, ZIP PDF, corrupt entry and plan drift.
+
+    Chromium can exercise the browser controls and fetch path. It does not
+    substitute for Windows WebView2 / Linux WebKitGTK renderer testing.
+    """
+    import zipfile
+
+    def pdf_two_pages():
+        streams = [b"BT /F1 24 Tf 72 700 Td (First PDF page) Tj ET",
+                   b"BT /F1 24 Tf 72 700 Td (Second PDF page) Tj ET"]
+        objects = [
+            b"<< /Type /Catalog /Pages 2 0 R >>",
+            b"<< /Type /Pages /Count 2 /Kids [3 0 R 4 0 R] >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 7 0 R >>",
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        ]
+        objects.extend(b"<< /Length " + str(len(data)).encode() + b" >>\nstream\n" + data + b"\nendstream" for data in streams)
+        data = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+        offsets = [0]
+        for number, obj in enumerate(objects, 1):
+            offsets.append(len(data))
+            data.extend(f"{number} 0 obj\n".encode() + obj + b"\nendobj\n")
+        startxref = len(data)
+        data.extend(f"xref\n0 {len(offsets)}\n0000000000 65535 f \n".encode())
+        for offset in offsets[1:]:
+            data.extend(f"{offset:010d} 00000 n \n".encode())
+        data.extend(f"trailer\n<< /Root 1 0 R /Size {len(offsets)} >>\nstartxref\n{startxref}\n%%EOF\n".encode())
+        return bytes(data)
+
+    source = library / "Unsorted/Agent C PDF QA"
+    doc = pdf_two_pages()
+    put(source / "manual.pdf", doc)
+    put(source / "model.json", json.dumps({"id": "agent-c-pdf-qa", "name": "PDF QA"}))
+    with zipfile.ZipFile(source / "bundle.zip", "w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr("good.pdf", doc)
+        z.writestr("bad.pdf", b"this is not a PDF")
+    original_zip = (source / "bundle.zip").read_bytes()
+    await api(pg, "library_scan", {"full": True})
+    await pg.goto(B + "#/model/agent-c-pdf-qa")
+    await pg.wait_for_selector('#model-page[data-model="agent-c-pdf-qa"]')
+    await pg.click('#part-tree [data-file="manual.pdf"]')
+    await pg.wait_for_selector(".pdf-viewer .pdf-frame")
+    direct = await pg.get_attribute(".pdf-viewer .pdf-frame", "src")
+    await pg.click('button[aria-label="Next PDF page"]')
+    await pg.wait_for_function("() => document.querySelector('.pdf-frame')?.getAttribute('src').includes('page=2')")
+    await pg.select_option('select[aria-label="PDF zoom"]', "fit-page")
+    fit = await pg.get_attribute(".pdf-frame", "src")
+    await pg.select_option('select[aria-label="PDF zoom"]', "page-width")
+    width = await pg.get_attribute(".pdf-frame", "src")
+    check("ordinary multipage PDF has page controls and standard fit options",
+          direct and "manual.pdf" in direct and "page=2" in fit
+          and "view=Fit" in fit and "view=FitH" in width, (direct, fit, width))
+    await pg.screenshot(path=str(out / "agent-c-pdf-browser.png"))
+    await pg.click('#part-tree [aria-label="Unfold bundle.zip"]')
+    await pg.wait_for_selector('#part-tree [data-entry="good.pdf"]')
+    await pg.click('#part-tree [data-entry="good.pdf"]')
+    await pg.wait_for_selector('.pdf-viewer .pdf-frame[src^="blob:"]')
+    in_zip = await pg.get_attribute(".pdf-frame", "src")
+    check("a real two-page PDF in ZIP opens from a temporary blob without changing the ZIP",
+          in_zip.startswith("blob:") and (source / "bundle.zip").read_bytes() == original_zip,
+          in_zip)
+    await pg.click('#part-tree [data-entry="bad.pdf"]')
+    await pg.wait_for_selector('.pdf-viewer [role="alert"]')
+    bad = await pg.inner_text('.pdf-viewer [role="alert"]')
+    check("a corrupt ZIP PDF reports a readable error without changing the archive",
+          ("not a valid PDF" in bad or "not a readable PDF" in bad)
+          and (source / "bundle.zip").read_bytes() == original_zip, bad)
+    review = {"id": "agent-c-pdf-qa", "action": "compress", "file": "reviewed.zip"}
+    preview = await api(pg, "archive_plan", review)
+    put(source / "added-after-preview.txt", b"unreviewed file")
+    rejected = False
+    try:
+        await api(pg, "archive_execute", {**review, "reviewed_plan": preview})
+    except Exception as e:
+        rejected = "review" in str(e).lower() or "changed" in str(e).lower()
+    check("archive execution rejects a file added after the reviewed plan",
+          rejected and not (source / "reviewed.zip").exists(), rejected)
 
 
 async def tree_items(pg):
@@ -1449,6 +1586,65 @@ def big_library():
     check(f"{a.big} models open in seconds and search in under 100 ms", t["models"] == a.big and t["first_ms"] < 20000 and t["reopen_ms"] < 10000 and t["search_us"] < 100000, t)
     shutil.rmtree(big, ignore_errors=True)
 
+
+
+async def agent_d_reviewed_import(pg):
+    """Direct Import controls, non-destructive staging, grouped models and Undo."""
+    src = home / "Agent D collection"
+    put(src / "Terrain/Rock.stl", cube(4))
+    put(src / "Terrain/Rock.png", PNG)
+    put(src / "Terrain/Mystery.max", b"unknown model format")
+    put(src / "Terrain/Detail/body.stl", cube(2))
+    put(src / "Terrain/Detail/photo.jpg", PNG)
+    await pg.goto(B + "#/import")
+    await pg.wait_for_selector("#sort-page[data-ready]")
+    controls = ["#import-sort", "#import-folder", "#import-file", "#import-categories"]
+    direct = all([await pg.is_visible(q) for q in controls])
+    await pg.set_viewport_size({"width": 700, "height": 600})
+    narrow = all([await pg.is_visible(q) for q in controls])
+    await pg.set_viewport_size({"width": 1400, "height": 900})
+    check("Import actions are directly visible at desktop and narrow widths", direct and narrow)
+    pick(src)
+    await pg.click("#import-categories")
+    await pg.wait_for_selector("#category-import .ci-tree")
+    staged = not (library / "Agent D collection").exists()
+    await pg.fill('.ci-node[data-depth="1"] > .ci-row .ci-name', "Landscape")
+    await pg.locator('.ci-node[data-depth="1"] > .ci-options .ci-check input').check()
+    await pg.fill('.ci-node[data-depth="1"] > .ci-options .ci-group-name', "Terrain files")
+    await pg.click("#ci-back")
+    await pg.click("#import-categories")
+    kept = await pg.input_value('.ci-node[data-depth="1"] > .ci-row .ci-name') == "Landscape"
+    await pg.click("#ci-review")
+    await pg.wait_for_selector(".ci-review")
+    names = await pg.locator(".ci-destinations tbody td:first-child").all_text_contents()
+    check("staging and reopening preserve edits without creating library nodes",
+          staged and kept and not (library / "Agent D collection").exists()
+          and sorted(names) == ["Detail", "Terrain files"], names)
+    await pg.screenshot(path=str(out / "36-category-import-review.png"), full_page=True)
+    await pg.click("#ci-commit")
+    await pg.wait_for_selector(".ci-results", timeout=60000)
+    copied = (library / "Agent D collection/Landscape/Terrain files/Mystery.max").is_file()
+    nested = (library / "Agent D collection/Landscape/Detail/body.stl").is_file()
+    originals = (src / "Terrain/Mystery.max").is_file()
+    check("reviewed import copies grouped unknown formats and nested model folders",
+          copied and nested and originals, (copied, nested, originals))
+    await pg.screenshot(path=str(out / "37-category-import-complete.png"), full_page=True)
+    journals = await api(pg, "journals")
+    entry = next((j for j in journals if j["label"].startswith("Imported 2 models as categories")), None)
+    check("reviewed category import is undoable", bool(entry))
+    if entry:
+        task = await api(pg, "journal_undo", {"id": entry["id"]})
+        status = None
+        for _ in range(100):
+            status = await api(pg, "job", {"id": task["job"]})
+            if status["done"]:
+                break
+            await pg.wait_for_timeout(100)
+        check("category import Undo removes only created categories and keeps originals",
+              status["done"] and status["error"] is None and status["result"]["state"] == "undone"
+              and not (library / "Agent D collection").exists()
+              and (src / "Terrain/Rock.stl").is_file(), status)
+    await pg.locator(".ci-results button").click()
 
 async def main():
     server = start_server()
@@ -1498,6 +1694,9 @@ async def main():
             await import_follow_ups(pg)
             await loose_workspace_checks(pg, check, library, B, api, cube, PNG, out)
             await model_workspace_extract(pg)
+            await card_checks(pg, library, B, out, api, check, PNG, cube)
+            await agent_c_pdf_archive_checks(pg)
+            await agent_d_reviewed_import(pg)
 
             # 3. renaming the library
             await pg.click('.sidebar a[href="#/settings"]')

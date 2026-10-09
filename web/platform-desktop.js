@@ -58,6 +58,7 @@ export async function createPlatform() {
       url: (rel) => libraryUrl + rel.split("/").map(encodeURIComponent).join("/"),
       pickFolder: (title) => invoke("pick_folder", { title }),
       pickFile: (title, extensions) => invoke("pick_file", { title, extensions }),
+      pickFiles: (title) => invoke("pick_files", { title }),
       openPath: (path) => invoke("open_path", { path }),
     },
   };

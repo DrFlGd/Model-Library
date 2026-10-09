@@ -6,7 +6,7 @@ use crate::config::{AppConfig, Prefs};
 use crate::index::Index;
 use crate::library::{self, Library};
 use crate::sort::Session;
-use crate::{archive, dupes, import, mesh, model, relayout, schema, thumb};
+use crate::{archive, category_import, dupes, import, mesh, model, relayout, schema, thumb};
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -457,6 +457,9 @@ impl App {
             )
             .sum();
         let done_bytes = std::sync::atomic::AtomicU64::new(0);
+        // IDs introduced earlier in this import batch are no longer available
+        // to subsequent model sidecars, even if both external models shared an ID.
+        let mut reserved_ids = ids.clone();
         let mut results = vec![];
         for (i, (it, dest)) in items.iter().zip(dests).enumerate() {
             let name = it["name"].as_str().unwrap_or("").to_string();
@@ -482,8 +485,9 @@ impl App {
                 "sidecar_before": if !loose && side.is_file() { model::read_sidecar(&src) } else { Value::Null },
                 "thumb_before": !loose && thumb::has(&src),
             });
-            match import::commit_one(lib, it, dest, schema, mv, force_copy, ids, &p) {
+            match import::commit_one(lib, it, dest, schema, mv, force_copy, &reserved_ids, &p) {
                 Ok(mut v) => {
+                    if let Some(id) = v["id"].as_str() { reserved_ids.insert(id.to_string()); }
                     v["source"] = it["source"].clone();
                     v["name"] = json!(name);
                     v["before"] = before;
@@ -1156,6 +1160,200 @@ impl App {
                     v
                 })
                 .await?),
+            "category_import_scan" => {
+                let paths: Vec<PathBuf> = strings(&args["paths"]).into_iter().map(PathBuf::from).collect();
+                let lib = self.library()?;
+                let r = tokio::task::spawn_blocking(move || category_import::scan(&lib, &paths))
+                    .await.map_err(|e| e.to_string())?.map_err(e2s)?;
+                j(r)
+            }
+            "category_import_plan" => {
+                let proposal = args["proposal"].clone();
+                let r = self.with_index(None, |ix, lib| category_import::plan(lib, ix, &proposal)).await?;
+                j(r.map_err(e2s)?)
+            }
+            "category_import_commit" => {
+                let proposal = args["proposal"].clone();
+                let reviewed = args["reviewed"].clone();
+                // Fault-injection is compiled only for Rust regression tests.
+                #[cfg(test)]
+                let fault = args["test_interrupt"].as_str().map(String::from);
+                #[cfg(not(test))]
+                let fault: Option<String> = None;
+                let mv = args["mode"].as_str() != Some("copy");
+                // Category moves always use checked copies before source cleanup.
+                let force_copy = true;
+                self.library()?.writable().map_err(e2s)?;
+                // Reject conflicts before the job starts. The job plans again,
+                // under the mutation lock, so the review cannot go stale.
+                let checked = self.with_index(None, |ix, lib| category_import::plan(lib, ix, &proposal)).await?
+                    .map_err(e2s)?;
+                if let Some(conflict) = checked["conflicts"].as_array().and_then(|v| v.first()) {
+                    return Err(conflict.as_str().unwrap_or("Resolve the category conflicts.").to_string());
+                }
+                category_import::require_review(&checked, &reviewed, if mv { "move" } else { "copy" }).map_err(e2s)?;
+                j(self.spawn_job("Importing folders as categories", move |app, jid, cancel| {
+                    let lib = app.library().map_err(|e| anyhow!(e))?;
+                    lib.writable()?;
+                    let ix = Index::build(&lib, None, false);
+                    let plan = category_import::plan(&lib, &ix, &proposal)?;
+                    if let Some(conflict) = plan["conflicts"].as_array().and_then(|v| v.first()) {
+                        anyhow::bail!("{}", conflict.as_str().unwrap_or("Resolve the category conflicts."));
+                    }
+                    category_import::require_review(&plan, &reviewed, if mv { "move" } else { "copy" })?;
+                    if cancel.load(Ordering::Relaxed) {
+                        anyhow::bail!("Stopped before making any changes.");
+                    }
+                    // Record all anticipated category nodes, source bytes,
+                    // metadata preimages and model destinations BEFORE making
+                    // any folders or deleting originals.
+                    let drafts = category_import::drafted_schemas(&lib, &plan)?;
+                    let mut journal_moves = vec![];
+                    let planned_items = plan["items"].as_array().cloned().unwrap_or_default();
+                    let mut added = vec![];
+                    for it in &planned_items {
+                        let src = PathBuf::from(it["source"].as_str().unwrap_or(""));
+                        let is_folder = it["files"].as_array().is_none_or(Vec::is_empty);
+                        let before = if is_folder && src.join(model::SIDECAR).is_file() {
+                            model::read_sidecar(&src)
+                        } else { Value::Null };
+                        if let Some(sid) = it["schema"].as_str().and_then(|sid| ix.schema(sid)) {
+                            let dest = PathBuf::from(it["dest"].as_str().unwrap_or(""));
+                            let path = import::place_of(&lib, Some(sid), &dest);
+                            let tree = sid.tree();
+                            if let Some(k) = (1..=path.len()).find(|&k| !schema::in_tree(&tree, &path[..k])) {
+                                let a = json!({ "schema": sid.id, "path": path[..k] });
+                                if !added.contains(&a) { added.push(a); }
+                            }
+                        }
+                        journal_moves.push(json!({ "name": it["name"], "source": it["source"],
+                            "files": it["files"], "to": it["rel"], "mode": if mv { "move" } else { "copy" },
+                            "phase": "planned", "manifest": Value::Null,
+                            "sidecar_before": before, "thumb_before": is_folder && thumb::has(&src),
+                            "source_manifest": category_import::source_manifest(it)? }));
+                    }
+                    let start = json!({ "kind": "import", "category_import": true,
+                        "direction": "apply", "mode": if mv { "move" } else { "copy" },
+                        "label": format!("Importing {} models as categories", journal_moves.len()),
+                        "created_schemas": drafts, "added": added, "moves": journal_moves });
+                    let id = relayout::start(&lib, &start)?;
+                    let mut journal = relayout::read(&lib, &id)?;
+                    if fault.as_deref() == Some("after_journal") {
+                        anyhow::bail!("Simulated interruption after writing the journal");
+                    }
+                    let mut schemas = import::schemas_by_id(&ix);
+                    let mut draft_ids = std::collections::HashMap::new();
+                    for (i, spec) in plan["categories"].as_array().into_iter().flatten().enumerate() {
+                        // The "creating" state is durable even if schema::create
+                        // succeeds but the following journal write is interrupted.
+                        journal["created_schemas"][i]["phase"] = json!("creating");
+                        relayout::write(&lib, &journal)?;
+                        let made = schema::create(&lib, &json!({ "name": spec["name"] }))?;
+                        let expected = journal["created_schemas"][i]["id"].as_str().unwrap_or("");
+                        if made.id != expected {
+                            anyhow::bail!("The category ID changed during creation. Recover the interrupted import from Home.");
+                        }
+                        draft_ids.insert(spec["draft"].as_str().unwrap_or("").to_string(), made.id.clone());
+                        schemas.insert(made.id.clone(), made);
+                        journal["created_schemas"][i]["phase"] = json!("created");
+                        relayout::write(&lib, &journal)?;
+                    }
+                    if fault.as_deref() == Some("after_schema") {
+                        anyhow::bail!("Simulated interruption after creating categories");
+                    }
+                    let mut used = import::ids_in_use(&ix);
+                    let mut results: Vec<Value> = vec![];
+                    let total = planned_items.len();
+                    let mut interrupted = false;
+                    for (i, old) in planned_items.iter().enumerate() {
+                        if cancel.load(Ordering::Relaxed) {
+                            interrupted = true;
+                            results.push(json!({ "name": old["name"], "source": old["source"],
+                                "error": "Stopped before this model. Use Home to put the imported models back." }));
+                            break;
+                        }
+                        let mut item = old.clone();
+                        if let Some(id) = item["schema"].as_str().and_then(|id| draft_ids.get(id)) {
+                            item["schema"] = json!(id);
+                        }
+                        let dest = PathBuf::from(item["dest"].as_str().unwrap_or(""));
+                        app.job_progress(&jid, json!({ "item": i, "items": total, "name": item["name"] }));
+                        journal["moves"][i]["phase"] = json!("publishing");
+                        relayout::write(&lib, &journal)?;
+                        let no_progress = import::Progress { cancel: &cancel, on_bytes: &|_| {} };
+                        let schema = item["schema"].as_str().and_then(|id| schemas.get(id));
+                        let result = (|| -> Result<Value> {
+                            // Publish a checked copy first, without removing the
+                            // only complete original. Journal hashes are persisted
+                            // before destructive cleanup in Move mode.
+                            let r = import::commit_one(&lib, &item, &dest, schema,
+                                false, force_copy, &used, &no_progress)?;
+                            if !thumb::has(&dest) {
+                                if let Err(e) = thumb::make(&dest) {
+                                    eprintln!("preview of {}: {e:#}", dest.display());
+                                }
+                            }
+                            if fault.as_deref() == Some("after_copy") && i == 0 {
+                                anyhow::bail!("Simulated interruption during final destination manifest");
+                            }
+                            let manifest = category_import::destination_manifest(&dest)?;
+                            journal["moves"][i]["manifest"] = manifest;
+                            journal["moves"][i]["phase"] = json!("copied");
+                            relayout::write(&lib, &journal)?;
+                            if fault.as_deref() == Some("after_manifest") && i == 0 {
+                                anyhow::bail!("Simulated interruption after verified manifest");
+                            }
+                            if mv {
+                                journal["moves"][i]["phase"] = json!("cleaning");
+                                relayout::write(&lib, &journal)?;
+                                if fault.as_deref() == Some("during_cleanup") && i == 0 {
+                                    if let Some(first) = journal["moves"][i]["source_manifest"].as_array().and_then(|v| v.first()) {
+                                        std::fs::remove_file(first["path"].as_str().unwrap_or(""))?;
+                                    }
+                                    anyhow::bail!("Simulated interruption during source cleanup");
+                                }
+                                category_import::remove_originals(&journal["moves"][i])?;
+                            }
+                            journal["moves"][i]["phase"] = json!("done");
+                            journal["moves"][i]["id"] = r["id"].clone();
+                            relayout::write(&lib, &journal)?;
+                            Ok(r)
+                        })();
+                        match result {
+                            Ok(mut r) => {
+                                if let Some(id) = r["id"].as_str() { used.insert(id.to_string()); }
+                                r["name"] = item["name"].clone();
+                                r["source"] = item["source"].clone();
+                                results.push(r);
+                                if fault.as_deref() == Some("after_first") && i == 0 {
+                                    anyhow::bail!("Simulated interruption after first model committed");
+                                }
+                            }
+                            Err(e) => {
+                                interrupted = true;
+                                let msg = format!("{e:#}");
+                                journal["moves"][i]["error"] = json!(msg);
+                                journal["error"] = json!(msg);
+                                relayout::write(&lib, &journal)?;
+                                results.push(json!({ "name": item["name"], "source": item["source"],
+                                    "error": msg }));
+                                break; // keep the remaining staged models untouched
+                            }
+                        }
+                    }
+                    journal["state"] = json!(if interrupted { "stopped" } else { "done" });
+                    if !interrupted {
+                        journal["label"] = json!(format!("Imported {} models as categories", total));
+                        journal.as_object_mut().unwrap().remove("error");
+                    }
+                    relayout::write(&lib, &journal)?;
+                    let failed = results.iter().filter(|r| r["error"].is_string()).count();
+                    Ok(json!({ "results": results, "imported": results.len() - failed,
+                        "failed": failed, "mode": if mv { "move" } else { "copy" },
+                        "journal": id, "state": journal["state"],
+                        "categories": journal["created_schemas"] }))
+                }))
+            }
             "import_scan" => {
                 let paths: Vec<PathBuf> = args["paths"]
                     .as_array()
@@ -1222,6 +1420,31 @@ impl App {
                     Ok(json!({ "results": results, "mode": if mv { "move" } else { "copy" } }))
                 }))
             }
+            "archive_plan" => {
+                let r = self.with_index(None, |ix, lib| crate::archive_ops::plan(lib, ix, &args)).await?.map_err(e2s)?;
+                j(r)
+            }
+            "archive_cleanup" => {
+                let lib = self.library()?;
+                lib.writable().map_err(e2s)?;
+                let id = arg(&args, "journal").map_err(e2s)?.to_string();
+                j(self.spawn_job("Recovering original files", move |_, _, cancel| {
+                    crate::archive_ops::cleanup(&lib, &id, &cancel)
+                }))
+            }
+            "archive_execute" => {
+                let lib = self.library()?;
+                lib.writable().map_err(e2s)?;
+                if args["remove_sources"].as_bool() == Some(true) {
+                    return Err("Source cleanup requires a separate decision after the ZIP has been published and verified.".into());
+                }
+                let plan = self.with_index(None, |ix, lib|
+                    crate::archive_ops::reviewed_plan(lib, ix, &args)).await?.map_err(e2s)?;
+                j(self.spawn_job("Working with ZIP", move |app, jid, cancel| {
+                    crate::archive_ops::execute(&lib, &plan, false, &cancel, &|i,n,name|
+                        app.job_progress(&jid, json!({"item":i,"items":n,"name":name})))
+                }))
+            }
             "model_zip" => {
                 let path = self.file_path(&args).await?;
                 j(json!(archive::list(&path).map_err(e2s)?))
@@ -1251,6 +1474,57 @@ impl App {
                     thumb::bytes_at(&path, Some(entry)).map_err(e2s)?,
                 ))
             }
+            "model_pdf_entry" => {
+                // A bounded, single-entry read for PDFs in a ZIP. It never unpacks
+                // anything into the model directory.
+                let path = self.file_path(&args).await?;
+                let entry = arg(&args, "entry").map_err(e2s)?.to_string();
+                if !entry.to_ascii_lowercase().ends_with(".pdf") {
+                    return Err("Choose a PDF document in the ZIP.".into());
+                }
+                let bytes = tokio::task::spawn_blocking(move || archive::read(&path, &entry, 64 << 20))
+                    .await.map_err(|e| e.to_string())?.map_err(e2s)?;
+                if !bytes.windows(5).take(1024).any(|w| w == b"%PDF-") {
+                    return Err("That entry is not a readable PDF document.".into());
+                }
+                Ok(Reply::Bytes(bytes))
+            }
+            "model_external_entry" => {
+                let path = self.file_path(&args).await?;
+                let entry = arg(&args, "entry").map_err(e2s)?.to_string();
+                let cache = self.paths.data_dir.join("external-files");
+                let target = tokio::task::spawn_blocking(move || -> Result<PathBuf> {
+                    use sha2::{Digest, Sha256};
+                    use std::time::{Duration, SystemTime};
+                    // Temporary external copies are retained for 30 days because
+                    // other applications may still have a document open.
+                    std::fs::create_dir_all(&cache)?;
+                    for item in std::fs::read_dir(&cache)?.flatten() {
+                        if item.file_type().is_ok_and(|t| t.is_file())
+                            && item.metadata().ok().and_then(|m| m.modified().ok())
+                                .is_some_and(|m| SystemTime::now().duration_since(m).unwrap_or_default() > Duration::from_secs(30 * 86400)) {
+                            let _ = std::fs::remove_file(item.path());
+                        }
+                    }
+                    let rel = crate::archive::safe_entry(&entry)?;
+                    let name = rel.file_name().ok_or_else(|| anyhow!("Choose a file in the ZIP."))?
+                        .to_string_lossy().to_string();
+                    let meta = std::fs::metadata(&path)?;
+                    let stamp = meta.modified().ok().and_then(|d| d.duration_since(SystemTime::UNIX_EPOCH).ok()).map(|d| d.as_nanos()).unwrap_or(0);
+                    let fingerprint = format!("{}:{}:{stamp}:{entry}", path.display(), meta.len());
+                    let hash = hex::encode(Sha256::digest(fingerprint.as_bytes()));
+                    let target = cache.join(format!("{}-{}", &hash[..24], name));
+                    if !target.is_file() {
+                        let data = archive::read(&path, &entry, 128 << 20)?;
+                        let stage = cache.join(format!(".{}-{}", &hash[..24], std::process::id()));
+                        std::fs::write(&stage, data)?;
+                        if target.exists() { let _ = std::fs::remove_file(&stage); }
+                        else { std::fs::rename(stage, &target)?; }
+                    }
+                    Ok(target)
+                }).await.map_err(|e| e.to_string())?.map_err(e2s)?;
+                j(json!({"path":target,"temporary":true}))
+            }
             "model_doc" => {
                 let path = self.file_path(&args).await?;
                 let file = arg(&args, "file").map_err(e2s)?;
@@ -1264,7 +1538,11 @@ impl App {
                 lib.writable().map_err(e2s)?;
                 let jid = relayout::new_id(&lib).map_err(e2s)?;
                 let mut files = vec![];
-                let cover = match args["snapshot"].as_str() {
+                // An explicit reset removes the sidecar override; it never
+                // deletes a user-supplied image or the last complete file copy.
+                let cover = if args["automatic"] == json!(true) {
+                    Value::Null
+                } else { match args["snapshot"].as_str() {
                     Some(data) => {
                         use base64::Engine;
                         let b64 = data.split_once(',').map(|(_, b)| b).unwrap_or(data);
@@ -1288,12 +1566,12 @@ impl App {
                         json!("_media/cover.png")
                     }
                     None => args["file"].clone(),
-                };
+                }};
                 let name = v["name"].as_str().unwrap_or("");
                 Box::pin(self.call(
                     "model_update",
                     json!({ "id": v["id"], "patch": { "cover": cover }, "journal": jid, "files": files,
-                        "label": if args["snapshot"].is_string() { format!("Used the 3D view as {name}'s cover") } else { format!("Changed {name}'s cover") } }),
+                        "label": if args["automatic"] == json!(true) { format!("Restored {name}'s automatic preview") } else if args["snapshot"].is_string() { format!("Used the 3D view as {name}'s cover") } else { format!("Changed {name}'s cover") } }),
                 ))
                 .await
             }
@@ -1523,6 +1801,43 @@ impl App {
                 lib.set_favourites(&json!(favs)).map_err(e2s)?;
                 j(json!({ "id": id, "favourites": favs }))
             }
+            "model_files_plan" => {
+                let r = self.with_index(None, |ix, lib| crate::fileops::plan(lib, ix, &args)).await?;
+                j(r.map_err(e2s)?)
+            }
+            "model_files_apply" => {
+                let lib = self.library()?;
+                lib.writable().map_err(e2s)?;
+                let action=&args["action"];
+                let review=&args["review"];
+                let plan=self.with_index(None, |ix, lib| crate::fileops::plan(lib, ix, action)).await?.map_err(e2s)?;
+                // Re-check exactly what the user reviewed, not a silently updated manifest.
+                for key in ["files","conflicts","source","target","source_before","target_before","mode","conflict"] {
+                    if plan[key]!=review[key] {return Err("The files or destination changed after review. Please review the operation again.".into());}
+                }
+                j(self.spawn_job("Transferring model files", move |app,jid,cancel| {
+                    crate::fileops::execute(&lib,&plan,&cancel,&|i,n,name|
+                        app.job_progress(&jid,json!({"item":i,"items":n,"name":name})))
+                }))
+            }
+            "models_delete_plan" => {
+                let r=self.with_index(None, |ix,lib| crate::delete::plan(lib,ix,&args)).await?;
+                j(r.map_err(e2s)?)
+            }
+            "models_delete" => {
+                let lib=self.library()?;
+                lib.writable().map_err(e2s)?;
+                let action=&args["action"];
+                let review=&args["review"];
+                let plan=self.with_index(None, |ix,lib| crate::delete::plan(lib,ix,action)).await?.map_err(e2s)?;
+                if plan["models"]!=review["models"] {
+                    return Err("A model changed after review. Please review the deletion again.".into());
+                }
+                j(self.spawn_job("Deleting models into recovery",move |app,jid,cancel| {
+                    crate::delete::execute(&lib,&plan,&cancel,&|i,n,name|
+                        app.job_progress(&jid,json!({"item":i,"items":n,"name":name})))
+                }))
+            }
             "model_extract_plan" => {
                 let r = self.with_index(None, |ix, lib| crate::extract::plan(lib, ix, &args)).await?;
                 j(match r { Ok(p) => p, Err(e) => json!({"error":e.to_string(),"files":[]}) })
@@ -1531,6 +1846,13 @@ impl App {
                 let lib = self.library()?;
                 lib.writable().map_err(e2s)?;
                 let plan = self.with_index(None, |ix, lib| crate::extract::plan(lib, ix, &args)).await?.map_err(e2s)?;
+                if !args["review"].is_null() {
+                    for key in ["files","dest","source","source_id","metadata","schema","values"] {
+                        if plan[key]!=args["review"][key] {
+                            return Err("The selected files or destination changed since review. Preview extraction again.".into());
+                        }
+                    }
+                }
                 let mode = args["mode"].as_str().unwrap_or("move").to_string();
                 j(self.spawn_job("Making a new model", move |app, jid, cancel| {
                     crate::extract::execute(&lib, &plan, &mode, &cancel, &|i,n,name| app.job_progress(&jid,json!({"item":i,"items":n,"name":name})))
@@ -2721,6 +3043,24 @@ mod tests {
         )
         .await;
         assert!(std::fs::read(&cover).unwrap().ends_with(b"one"));
+        // Automatic reset changes only metadata, keeps the image on disk and
+        // journals enough to recover the explicitly selected cover on Undo.
+        let auto = call(
+            &app,
+            "model_cover",
+            json!({ "id": hook, "automatic": true }),
+        )
+        .await;
+        assert!(auto["journal"].is_string(), "{auto}");
+        assert!(model::read_sidecar(&lib.join("Unsorted/Hook"))["cover"].is_null());
+        assert!(cover.is_file());
+        let undo_auto = wait(
+            &app,
+            &call(&app, "journal_undo", json!({ "id": auto["journal"] })).await,
+        )
+        .await;
+        assert_eq!(undo_auto["result"]["state"], "undone", "{undo_auto}");
+        assert_eq!(model::read_sidecar(&lib.join("Unsorted/Hook"))["cover"], "_media/cover.png");
         // Import: undone, the folder goes back as it was and the workspace has it again
         let src = home.join("Share");
         std::fs::create_dir_all(src.join("Bench")).unwrap();
@@ -2975,5 +3315,186 @@ mod tests {
         assert_eq!(r["changed"], false);
         drop(app);
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[tokio::test]
+    async fn reviewed_category_import_commits_and_undoes_without_touching_staged_sources() {
+        let (app, home) = app("category-import");
+        let lib = home.join("Lib");
+        call(&app, "library_open", json!({ "path": lib.display().to_string() })).await;
+        let source = home.join("Collection");
+        std::fs::create_dir_all(source.join("Terrain")).unwrap();
+        std::fs::write(source.join("Terrain/Rock.stl"), b"rock").unwrap();
+        std::fs::write(source.join("Terrain/Picture.png"), b"picture").unwrap();
+        let proposal = call(&app, "category_import_scan", json!({
+            "paths": [source.display().to_string()]
+        })).await;
+        assert_eq!(proposal["roots"][0]["name"], "Collection");
+        assert!(!lib.join("Collection").exists(), "scan must not mutate the library");
+        let mut reviewed = json!({ "roots": proposal["roots"] });
+        // Mark Terrain as a category (by default it holds model-looking files).
+        reviewed["roots"][0]["children"][0]["kind"] = json!("category");
+        let p = call(&app, "category_import_plan", json!({ "proposal": reviewed })).await;
+        assert_eq!(p["models"], 2, "{p}");
+        assert!(p["conflicts"].as_array().unwrap().is_empty(), "{p}");
+        assert!(!lib.join("Collection").exists(), "review must not mutate the library");
+
+        let mut approval = p.clone();
+        approval["reviewed_mode"] = json!("copy");
+        let done = wait(&app, &call(&app, "category_import_commit", json!({
+            "proposal": reviewed, "reviewed": approval, "mode": "copy"
+        })).await).await;
+        assert!(done["error"].is_null(), "{done}");
+        let r = &done["result"];
+        assert_eq!(r["imported"], 2, "{r}");
+        assert_eq!(std::fs::read(source.join("Terrain/Rock.stl")).unwrap(), b"rock");
+        assert_eq!(std::fs::read(lib.join("Collection/Terrain/Rock/Rock.stl")).unwrap(), b"rock");
+        assert!(lib.join("_library/schemas/collection.json").is_file());
+        let jid = r["journal"].as_str().unwrap();
+        let undone = wait(&app, &call(&app, "journal_undo", json!({ "id": jid })).await).await;
+        assert!(undone["error"].is_null(), "{undone}");
+        assert_eq!(undone["result"]["state"], "undone", "{undone}");
+        assert!(!lib.join("Collection").exists());
+        assert!(!lib.join("_library/schemas/collection.json").exists());
+        assert!(source.join("Terrain/Picture.png").is_file());
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+
+    #[tokio::test]
+    async fn reviewed_destinations_must_not_change_after_approval() {
+        let (app, home) = app("category-reviewed-plan");
+        let lib = home.join("Lib");
+        call(&app, "library_open", json!({ "path": lib.display().to_string() })).await;
+        let target = call(&app, "schema_create", json!({ "schema": { "name": "Target" } })).await;
+        let source = home.join("Incoming");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("Rock.stl"), b"rock").unwrap();
+        let scan = call(&app, "category_import_scan", json!({
+            "paths": [source.display().to_string()]
+        })).await;
+        let mut proposed = json!({ "roots": scan["roots"] });
+        proposed["roots"][0]["target"] = json!({ "schema": target["id"], "values": [] });
+        let mut review = call(&app, "category_import_plan", json!({ "proposal": proposed })).await;
+        assert_eq!(review["items"][0]["rel"], "Target/Rock", "{review}");
+        review["reviewed_mode"] = json!("copy");
+        assert!(app.call("category_import_commit", json!({
+            "proposal": proposed, "mode": "move", "reviewed": review
+        })).await.is_err(), "Move requires a new review after Copy is approved");
+        std::fs::create_dir_all(lib.join("Target/Rock")).unwrap();
+        std::fs::write(lib.join("Target/Rock/other.txt"), b"unrelated").unwrap();
+        let r = app.call("category_import_commit", json!({
+            "proposal": proposed, "mode": "copy", "reviewed": review
+        })).await;
+        assert!(r.is_err(), "occupied reviewed destination must be rejected");
+        assert!(!lib.join("Target/Rock (2)").exists());
+        assert!(source.join("Rock.stl").is_file());
+        assert!(call(&app, "journals", json!({})).await.as_array().unwrap().is_empty(),
+            "no mutation journal is created for a stale review");
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[tokio::test]
+    async fn interrupted_category_moves_recover_after_restart_from_each_durable_phase() {
+        for stage in ["after_journal", "after_schema", "after_copy",
+                      "after_manifest", "during_cleanup", "after_first"] {
+            let (app, home) = app(&format!("recover-{stage}"));
+            let lib = home.join("Lib");
+            call(&app, "library_open", json!({ "path": lib.display().to_string() })).await;
+            let source = home.join("Incoming");
+            for file in ["One/a.stl", "Two/b.stl"] {
+                let path = source.join(file);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(&path, file.as_bytes()).unwrap();
+            }
+            let scan = call(&app, "category_import_scan", json!({
+                "paths": [source.display().to_string()]
+            })).await;
+            let proposed = json!({ "roots": scan["roots"] });
+            let mut review = call(&app, "category_import_plan", json!({
+                "proposal": proposed
+            })).await;
+            assert!(review["conflicts"].as_array().unwrap().is_empty(), "{stage}: {review}");
+            review["reviewed_mode"] = json!("move");
+            let start = call(&app, "category_import_commit", json!({
+                "proposal": proposed, "mode": "move", "reviewed": review,
+                "test_interrupt": stage
+            })).await;
+            let done = wait(&app, &start).await;
+            assert!(done["error"].is_string() || done["result"]["state"] == "stopped",
+                "{stage}: {done}");
+            let saved = call(&app, "journals", json!({})).await;
+            assert_eq!(saved.as_array().unwrap().len(), 1, "{stage}: {saved}");
+            let id = saved[0]["id"].as_str().unwrap().to_string();
+            let recovery = relayout::read(&app.library().unwrap(), &id).unwrap();
+            assert_eq!(recovery["category_import"], true, "{stage}");
+            assert_eq!(recovery["moves"].as_array().unwrap().len(), 2, "{stage}");
+            assert_eq!(recovery["created_schemas"].as_array().unwrap().len(), 1, "{stage}");
+            assert!(recovery["moves"][0]["source_manifest"].is_array(), "{stage}");
+            let paths = app.paths.clone();
+            drop(app); // interruption/restart: no old in-memory job or index
+            let again = App::new(paths).unwrap();
+            call(&again, "library_open", json!({ "path": lib.display().to_string() })).await;
+            let undo = wait(&again, &call(&again, "journal_undo", json!({ "id": id })).await).await;
+            assert!(undo["error"].is_null(), "{stage}: {undo}");
+            assert_eq!(undo["result"]["state"], "undone", "{stage}: {undo}");
+            for file in ["One/a.stl", "Two/b.stl"] {
+                assert_eq!(std::fs::read(source.join(file)).unwrap(), file.as_bytes(), "{stage}");
+            }
+            assert!(!lib.join("Incoming").exists(), "{stage}: imported category kept unexpectedly");
+            assert!(!lib.join("_library/schemas/incoming.json").exists(), "{stage}");
+            let _ = std::fs::remove_dir_all(home);
+        }
+    }
+
+    #[tokio::test]
+    async fn unfinished_category_import_journals_survive_history_pruning() {
+        let (app, home) = app("category-history-retention");
+        let lib = home.join("Lib");
+        call(&app, "library_open", json!({ "path": lib.display().to_string() })).await;
+        let library = app.library().unwrap();
+        let id = relayout::start(&library, &json!({
+            "kind": "import", "category_import": true, "mode": "copy",
+            "label": "Interrupted reviewed import", "moves": [], "created_schemas": []
+        })).unwrap();
+        for i in 0..30 {
+            let other = relayout::new_id(&library).unwrap();
+            relayout::record(&library, &other, &json!({
+                "kind": "details", "label": format!("Change {i}"), "models": []
+            })).unwrap();
+        }
+        assert_eq!(relayout::read(&library, &id).unwrap()["state"], "running");
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[tokio::test]
+    async fn reviewed_category_import_keeps_modified_copy_on_conflicting_undo() {
+        let (app, home) = app("category-undo-conflict");
+        let lib = home.join("Lib");
+        call(&app, "library_open", json!({ "path": lib.display().to_string() })).await;
+        let source = home.join("New category");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("part.stl"), b"original").unwrap();
+        let scan = call(&app, "category_import_scan", json!({
+            "paths": [source.display().to_string()]
+        })).await;
+        let reviewed = json!({ "roots": scan["roots"] });
+        let mut approval = call(&app, "category_import_plan", json!({ "proposal": reviewed })).await;
+        approval["reviewed_mode"] = json!("copy");
+        let done = wait(&app, &call(&app, "category_import_commit", json!({
+            "proposal": reviewed, "reviewed": approval, "mode": "copy"
+        })).await).await;
+        assert!(done["error"].is_null(), "{done}");
+        assert_eq!(done["result"]["imported"], 1, "{done}");
+        let path = lib.join("New category/part/part.stl");
+        std::fs::write(&path, b"changed after import").unwrap();
+        let jid = done["result"]["journal"].as_str().unwrap();
+        let undo = wait(&app, &call(&app, "journal_undo", json!({ "id": jid })).await).await;
+        assert!(undo["error"].is_null(), "{undo}");
+        assert!(!undo["result"]["failed"].as_array().unwrap().is_empty(), "{undo}");
+        assert_eq!(std::fs::read(&path).unwrap(), b"changed after import");
+        assert!(source.join("part.stl").is_file());
+        assert!(lib.join("_library/schemas/new-category.json").is_file());
+        let _ = std::fs::remove_dir_all(home);
     }
 }

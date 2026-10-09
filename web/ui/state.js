@@ -26,6 +26,11 @@ export const ui = createStore({
   jobs: [],                // [{ id, label, started, cancel }]
   theme: "system",
   navOpen: false,          // sidebar drawer on small screens
+  navCollapsed: false,     // the desktop navigation ribbon
+  mobilePanel: null,       // at most one narrow Files/Details drawer
+  detailsPanelOpen: false,
+  detailsPanelWidth: 340,
+  workspaceDirty: false,   // uncommitted workspace Details draft
   partsView: "folders",    // a model's files: folders | all | type | grid
   filePanelWidth: 300,
   filePanelOpen: true,
@@ -42,14 +47,14 @@ const LAYOUT_KEY = "ml-ui";
 export function initState(store) {
   prefs = store.prefs;
   const saved = prefs.get(LAYOUT_KEY, {}) || {};
-  ui.set({ favs: prefs.get("ml-favs", []) || [], theme: saved.theme || "system", sort: saved.sort || "name", layout: saved.layout || "grid", open: saved.open || {}, partsView: saved.partsView || "folders", sortView: saved.sortView || "folders", filePanelWidth: Math.max(220, Math.min(480, Number(saved.filePanelWidth) || 300)), filePanelOpen: saved.filePanelOpen !== false, filePanelView: saved.filePanelView || "folders", contentsView: saved.contentsView || "grid", contentsSort: saved.contentsSort || "name" });
+  ui.set({ favs: prefs.get("ml-favs", []) || [], theme: saved.theme || "system", sort: saved.sort || "name", layout: saved.layout || "grid", open: saved.open || {}, partsView: saved.partsView || "folders", sortView: saved.sortView || "folders", filePanelWidth: Math.max(220, Math.min(480, Number(saved.filePanelWidth) || 300)), filePanelOpen: saved.filePanelOpen !== false, navCollapsed: !!saved.navCollapsed, detailsPanelOpen: !!saved.detailsPanelOpen, detailsPanelWidth: Math.max(280, Math.min(460, Number(saved.detailsPanelWidth) || 340)), filePanelView: saved.filePanelView || "folders", contentsView: saved.contentsView || "grid", contentsSort: saved.contentsSort || "name" });
   applyTheme();
   matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", applyTheme);
 }
 
 function savePrefs() {
   const s = ui.get();
-  prefs?.set(LAYOUT_KEY, { theme: s.theme, sort: s.sort, layout: s.layout, open: s.open, partsView: s.partsView, sortView: s.sortView, filePanelWidth: s.filePanelWidth, filePanelOpen: s.filePanelOpen, filePanelView: s.filePanelView, contentsView: s.contentsView, contentsSort: s.contentsSort });
+  prefs?.set(LAYOUT_KEY, { theme: s.theme, sort: s.sort, layout: s.layout, open: s.open, partsView: s.partsView, sortView: s.sortView, filePanelWidth: s.filePanelWidth, filePanelOpen: s.filePanelOpen, navCollapsed: s.navCollapsed, detailsPanelOpen: s.detailsPanelOpen, detailsPanelWidth: s.detailsPanelWidth, filePanelView: s.filePanelView, contentsView: s.contentsView, contentsSort: s.contentsSort });
 }
 
 export function setPref(patch) {

@@ -23,6 +23,17 @@ if ui.exists():
     shutil.rmtree(ui)
 shutil.copytree(ROOT / "web", ui)
 
+# Tauri infers some MIME types from content before considering extensions.
+# Keep the PDF magic marker out of JavaScript, including comments, so WebKitGTK
+# never treats an ES module as application/pdf. Scan the whole small JS asset:
+# a marker crossing a 1 KiB sniff-window boundary must also be caught.
+for script in ui.rglob("*"):
+    if script.is_file() and script.suffix.lower() in (".js", ".mjs") and b"%PDF" in script.read_bytes():
+        raise SystemExit(
+            f"{script.relative_to(ui)} contains the PDF magic marker; "
+            "Tauri can serve this JavaScript module as application/pdf."
+        )
+
 FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/archivo/"
 index = ui / "index.html"
 html = index.read_text(encoding="utf-8")

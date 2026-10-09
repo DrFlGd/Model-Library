@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::UNIX_EPOCH;
 
 pub const UNSORTED: &str = "Unsorted";
-const CACHE_FORMAT: u64 = 1;
+const CACHE_FORMAT: u64 = 2; // Preview summaries include source metadata and explicit cover mode.
 
 #[derive(Clone, Debug)]
 pub struct Model {
@@ -103,6 +103,18 @@ fn read_model(lib: &Library, dir: &Path, schema: Option<&Schema>, cats: &[String
     };
     let files = model::list_files(dir);
     let mut summary = model::summarise(&files, &side);
+    // Each preview URL/cache key includes the underlying file's modification
+    // time, not just the model folder's time (nested edits leave that unchanged).
+    if let Some(previews) = summary["previews"].as_array_mut() {
+        for preview in previews {
+            if let Some(rel) = preview["file"].as_str().map(String::from) {
+                preview["modified"] = json!(model::modified(&dir.join(rel)));
+            }
+        }
+    }
+    if let Some(cover) = summary["explicit_cover"].as_str().map(String::from) {
+        summary["cover_modified"] = json!(model::modified(&dir.join(cover)));
+    }
     if summary["cover"].is_null() && crate::thumb::has(dir) {
         summary["cover"] = json!(crate::thumb::THUMB);
     }

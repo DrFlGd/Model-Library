@@ -23,7 +23,7 @@ pub fn file_kind(name: &str) -> &'static str {
         .unwrap_or_default();
     match ext.as_str() {
         "stl" | "3mf" | "obj" | "step" | "stp" | "ply" | "amf" | "iges" | "igs" | "f3d"
-        | "blend" => "model",
+        | "blend" | "3ds" | "max" => "model",
         "gcode" | "bgcode" | "lys" | "lyt" | "chitubox" | "ctb" | "cbddlp" | "goo" | "prz"
         | "fabbproject" | "3mfproject" | "ufp" => "slicer",
         "jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp" | "avif" => "image",
@@ -115,7 +115,27 @@ pub fn summarise(files: &[(String, u64)], sidecar: &Value) -> Value {
         .map(String::from)
         .or_else(|| images().find(|r| r.starts_with("_media/")).cloned())
         .or_else(|| images().next().cloned());
-    json!({ "kinds": kinds, "exts": exts, "bytes": bytes, "count": files.len(), "cover": cover })
+    // A cover stored in model.json is a user choice, even if its source went
+    // missing. Keep that choice distinct from the legacy suggested image/thumbnail.
+    let explicit_cover = sidecar["cover"].as_str().filter(|c| !c.is_empty());
+    let cover_missing = explicit_cover.is_some_and(|c| !files.iter().any(|(r, _)| r == c));
+
+    // Only paths and small metadata reach the collection grid. Rendering large
+    // meshes is deferred until a card is visible; no full-size assets are decoded
+    // while indexing. Order is stable across scans and never repeats a file.
+    let previewable: Vec<_> = files.iter()
+        .filter(|(rel, size)| file_kind(rel) == "image"
+            || (crate::mesh::readable(rel) && *size <= crate::thumb::MAX_BYTES))
+        .collect();
+    let previews: Vec<Value> = previewable.iter().take(4).map(|(rel, size)| json!({
+        "file": rel, "size": size,
+        "kind": if file_kind(rel) == "image" { "image" } else { "model" }
+    })).collect();
+    json!({
+        "kinds": kinds, "exts": exts, "bytes": bytes, "count": files.len(),
+        "cover": cover, "explicit_cover": explicit_cover, "cover_missing": cover_missing,
+        "previews": previews, "previewable": previewable.len()
+    })
 }
 
 /// The sidecar, or {} when the folder has none (or it isn't valid JSON).
@@ -477,7 +497,50 @@ mod tests {
             summarise(&files, &json!({ "cover": "gone.png" }))["cover"],
             "_media/z.jpg"
         );
+        let auto = summarise(&files, &json!({}));
+        assert_eq!(auto["explicit_cover"], Value::Null);
+        assert_eq!(auto["previewable"], 4);
+        assert_eq!(auto["previews"].as_array().unwrap().len(), 4);
+        assert_eq!(auto["cover_missing"], false);
+        let chosen = summarise(&files, &json!({ "cover": "a.png" }));
+        assert_eq!(chosen["explicit_cover"], "a.png");
+        assert_eq!(chosen["cover_missing"], false);
+        let missing = summarise(&files, &json!({ "cover": "gone.png" }));
+        assert_eq!(missing["explicit_cover"], "gone.png");
+        assert_eq!(missing["cover_missing"], true);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preview_composition_handles_zero_one_two_many_and_unknown_files() {
+        let as_files = |names: &[&str]| -> Vec<(String, u64)> {
+            names.iter().map(|name| (name.to_string(), 42)).collect()
+        };
+        let empty = summarise(&[], &json!({}));
+        assert_eq!(empty["previews"], json!([]));
+        assert_eq!(empty["previewable"], 0);
+
+        let one = summarise(&as_files(&["one.stl", "manual.max"]), &json!({}));
+        assert_eq!(one["count"], 2);
+        assert_eq!(one["previewable"], 1);
+        assert_eq!(one["previews"][0]["file"], "one.stl");
+
+        let two = summarise(&as_files(&["a.png", "b.stl"]), &json!({}));
+        assert_eq!(two["previews"].as_array().unwrap().len(), 2);
+        assert_ne!(two["previews"][0]["file"], two["previews"][1]["file"]);
+
+        let many = summarise(&as_files(&["a.stl", "b.stl", "c.stl", "d.stl", "e.stl", "notes.pdf", "opaque.ext"]), &json!({}));
+        assert_eq!(many["previewable"], 5);
+        assert_eq!(many["previews"].as_array().unwrap().len(), 4);
+        assert_eq!(many["count"], 7);
+        let paths: std::collections::HashSet<_> = many["previews"].as_array().unwrap()
+            .iter().filter_map(|v| v["file"].as_str()).collect();
+        assert_eq!(paths.len(), 4, "each preview is a different file");
+
+        let none = summarise(&as_files(&["a.pdf", "notes.7z", "opaque.xyz"]), &json!({}));
+        assert_eq!(none["previewable"], 0);
+        assert_eq!(none["count"], 3);
+        assert_eq!(none["previews"], json!([]));
     }
 
     #[test]
