@@ -359,6 +359,7 @@ pub fn summary(plan: &Value) -> Value {
         "models": moves.len(),
         "moving": moving.len(),
         "clashes": clashes,
+        "node_mappings": plan["node_mappings"],
         "nodes": plan["nodes"],
         "files": plan["files"],
         "bytes": plan["bytes"],
