@@ -1171,7 +1171,8 @@ impl App {
             "category_import_commit" => {
                 let proposal = args["proposal"].clone();
                 let mv = args["mode"].as_str() != Some("copy");
-                let force_copy = args["force_copy"] == true;
+                // Category moves always use checked copies before source cleanup.
+                let force_copy = true;
                 self.library()?.writable().map_err(e2s)?;
                 // Reject conflicts before the job starts. The job plans again,
                 // under the mutation lock, so the review cannot go stale.
@@ -1202,8 +1203,9 @@ impl App {
                             }
                             Err(e) => {
                                 for s in created.iter().rev() {
-                                    let _ = schema::remove(&lib, &s.id);
-                                    let _ = std::fs::remove_dir(lib.root().join(&s.folder));
+                                    if std::fs::remove_dir(lib.root().join(&s.folder)).is_ok() {
+                                        let _ = schema::remove(&lib, &s.id);
+                                    }
                                 }
                                 return Err(e);
                             }
@@ -1253,8 +1255,15 @@ impl App {
                         if successful_schemas.contains(&s.id) {
                             kept.push(json!({ "id": s.id, "folder": s.folder }));
                         } else {
-                            let _ = schema::remove(&lib, &s.id);
-                            let _ = std::fs::remove_dir(lib.root().join(&s.folder));
+                            if std::fs::remove_dir(lib.root().join(&s.folder)).is_ok() {
+                                let _ = schema::remove(&lib, &s.id);
+                            } else {
+                                // Do not orphan unexpectedly present content.
+                                kept.push(json!({ "id": s.id, "folder": s.folder }));
+                                if let Some(r) = results.iter_mut().find(|r| r["error"].is_string()) {
+                                    r["error"] = json!(format!("{}; created category kept for recovery", r["error"].as_str().unwrap_or("Import failed")));
+                                }
+                            }
                         }
                     }
                     let journal = if moves.is_empty() {
@@ -3125,7 +3134,7 @@ mod tests {
         let r = &done["result"];
         assert_eq!(r["imported"], 2, "{r}");
         assert_eq!(std::fs::read(source.join("Terrain/Rock.stl")).unwrap(), b"rock");
-        assert_eq!(std::fs::read(lib.join("Collection/Terrain/Rock/Rock.stl")).unwrap(), b"rock");
+        assert_eq!(std::fs::read(lib.join("Collection/Terrain/rock/Rock.stl")).unwrap(), b"rock");
         assert!(lib.join("_library/schemas/collection.json").is_file());
         let jid = r["journal"].as_str().unwrap();
         let undone = wait(&app, &call(&app, "journal_undo", json!({ "id": jid })).await).await;
