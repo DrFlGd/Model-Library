@@ -6,7 +6,7 @@ import { ui } from "./state.js";
 import { typing } from "./actions.js";
 import { size } from "./details.js";
 import { TypeTag, fileType } from "./filetypes.js";
-import { isDesktop, openModelFile } from "./library.js";
+import { isDesktop, openModelFile, openArchiveEntry } from "./library.js";
 import { MESH, Stage3D, Pictures, Documents, Videos } from "./parts.js";
 import { fileSel, keyParts, pick } from "./filesel.js";
 import { Contents, Breadcrumb, parentKey, parentPath, isFolderKey, useArchive, childrenOf, sortChildren } from "./contents.js";
@@ -46,7 +46,7 @@ export function WorkspaceStage({ src, model, files, contextActions }) {
       : picture ? html`<${Pictures} key=${shown} src=${src} model=${model} pictures=${[current]} current=${current} setCurrent=${() => {}} />`
       : document ? html`<${Documents} key=${shown} src=${src} model=${model} docs=${[current]} current=${current} setCurrent=${() => {}} />`
       : video ? html`<${Videos} key=${shown} src=${src} model=${model} videos=${[current]} current=${current} setCurrent=${() => {}} />`
-      : html`<div class="workspace-no-view"><h2>${name.split("/").pop()}</h2><p><${TypeTag} name=${name} /> · ${size(f?.size || 0)}</p>${isDesktop() && !p.entry ? html`<button type="button" class="ghost" onClick=${() => openModelFile(model, p.file)}>Open externally</button>` : html`<p class="muted">No in-app viewer for this file.</p>`}</div>`}
+      : html`<div class="workspace-no-view"><h2>${name.split("/").pop()}</h2><p><${TypeTag} name=${name} /> · ${size(f?.size || 0)}</p>${isDesktop() ? html`<button type="button" class="ghost" onClick=${() => p.entry ? openArchiveEntry(src, p.file, p.entry) : openModelFile(model, p.file)}>Open externally</button>` : html`<p class="muted">No in-app viewer for this file.</p>`}</div>`}
     ${!container && siblings.length > 1 ? html`<div class="workspace-step"><button type="button" class="ghost" aria-label="Previous file" title="Previous file (←)" onClick=${() => step(-1)}>‹ Previous</button><button type="button" class="ghost" aria-label="Next file" title="Next file (→)" onClick=${() => step(1)}>Next ›</button></div>` : null}
   </section>`;
 }
