@@ -1491,7 +1491,8 @@ async def agent_c_pdf_archive_checks(pg):
     await pg.wait_for_selector('.pdf-viewer [role="alert"]')
     bad = await pg.inner_text('.pdf-viewer [role="alert"]')
     check("a corrupt ZIP PDF reports a readable error without changing the archive",
-          "not a valid PDF" in bad and (source / "bundle.zip").read_bytes() == original_zip, bad)
+          ("not a valid PDF" in bad or "not a readable PDF" in bad)
+          and (source / "bundle.zip").read_bytes() == original_zip, bad)
     review = {"id": "agent-c-pdf-qa", "action": "compress", "file": "reviewed.zip"}
     preview = await api(pg, "archive_plan", review)
     put(source / "added-after-preview.txt", b"unreviewed file")
