@@ -7,14 +7,15 @@ Branch: agent-c/pdf-archives-external. Not merged.
 
 C1: PDF stage controls (page, zoom, fit), ordinary PDFs over the library protocol, PDF ZIP entries via bounded 64 MiB reads and cached browser Blob URLs. Loading and errors are visible. Embedded PDF renderer may handle page/zoom URL fragments differently on WebView2 and WebKitGTK.
 
-C2: Model-level Compress to ZIP and Extract archive actions provide preview of paths, bytes and SHA-256 sources. Writes stage before publication; all resulting uncompressed content is reopened and hash-verified. An opt-in cleanup moves verified source files to the existing journal recovery directory. The usual journal_undo restores sources and rejects changed outputs; interrupted journals are recoverable. The live model.json and _thumbs remain outside compression; an explanatory _model-library/archive-manifest.json lives inside the ZIP but is skipped during extraction. Model identity/category are unchanged.
+C2: Model-level Compress to ZIP and Extract archive actions provide preview of paths, bytes and SHA-256 sources. Writes stage before publication; all resulting uncompressed content is reopened and hash-verified. After verification a separate, opt-in cleanup job moves exact source files to the existing journal recovery directory. The usual journal_undo restores sources and rejects changed outputs; interrupted journals are recoverable. The live model.json and _thumbs remain outside compression; an explanatory _model-library/archive-manifest.json lives inside the ZIP but is skipped during extraction. Model identity/category are unchanged.
 
 C3: Recognise .3ds and .max as model files; .7z is already recognised as an archive for import and external opening, but is NOT unpacked in-app. Explicit Open externally uses platform OS association; ZIP entries are temporary, bounded copies and users are told external edits do not update archives.
 
 ## Contracts and shared edits
 
 - archive_plan: {id,action:compress|extract,file} -> file manifest, SHA-256, outputs and required space.
-- archive_execute: {id,action,file,remove_sources} -> background job with verified outputs, recovery journal and affected model ID.
+- archive_execute: {id,action,file,remove_sources:false} -> background job with verified outputs, recovery journal and affected model ID.
+- archive_cleanup: {journal} -> a separate, only-after-verification job moving exact original files to recovery.
 - model_pdf_entry: {id|sort,file,entry} -> bounded PDF bytes.
 - model_external_entry: {id|sort,file,entry} -> managed {path,temporary:true}.
 - Journal kind: archive-op; recovery path under _library/journal/ID/sources.
@@ -27,4 +28,4 @@ ZIP only in-app; no nested archive traversal. Bound size to 8 GiB expanded and 2
 
 The system PDF engine, rather than vendored PDF.js, is used. Platform viewing support and screenshot evidence must be checked on Windows/Linux. Agent A's resizing and Agent B's mutation/journal contracts require integration review; F can optionally consume PDF thumbnails, and D owns arbitrary-extension explicit import UI.
 
-Dedicated Rust tests cover verified ZIP round-trip, optional cleanup/undo, cancellation, corrupt/malicious archives and changed output conflicts. Review CI test results before integration. No releases or main merges performed.
+Dedicated Rust unit tests cover verified ZIP round-trip, optional cleanup/undo, cancellation, corrupt/malicious archives and changed output conflicts. Review CI test results before integration. No releases or main merges performed.
