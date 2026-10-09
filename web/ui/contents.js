@@ -100,7 +100,7 @@ export function Contents({ src, model, files, shown, archive, entries, error, co
   const p = keyParts(shown), folder = archive ? p.entry || "" : p.file;
   const rows = sortChildren(childrenOf(archive ? entries : files, folder, archive), prefs[0]);
   const order = rows.map((r) => r.key);
-  const scopeKey = archive ? (folder ? "z:" + archive + "!" + folder.replace(/\\/$/, "") + "/" : null) : "d:" + folder;
+  const scopeKey = archive ? (folder ? "z:" + archive + "!" + (folder.endsWith("/") ? folder : folder + "/") : null) : "d:" + folder;
   const open = (row) => {
     pick(row.key);
     if (!row.folder && !row.entry && !viewable(row.name) && isDesktop()) openModelFile(model, row.file);
