@@ -1226,6 +1226,14 @@ impl App {
                 let r = self.with_index(None, |ix, lib| crate::archive_ops::plan(lib, ix, &args)).await?.map_err(e2s)?;
                 j(r)
             }
+            "archive_cleanup" => {
+                let lib = self.library()?;
+                lib.writable().map_err(e2s)?;
+                let id = arg(&args, "journal").map_err(e2s)?.to_string();
+                j(self.spawn_job("Recovering original files", move |_, _, cancel| {
+                    crate::archive_ops::cleanup(&lib, &id, &cancel)
+                }))
+            }
             "archive_execute" => {
                 let lib = self.library()?;
                 lib.writable().map_err(e2s)?;
