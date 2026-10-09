@@ -17,16 +17,19 @@ function cached(key) {
 }
 
 function remember(key, bytes) {
+  // Tauri's raw byte IPC returns ArrayBuffer, while browser shims may provide
+  // Uint8Array. Normalize both without copying the payload.
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   // A native frame does not reliably fire onError for invalid PDF bytes.
   // Reject a clearly corrupt entry before handing it to the system renderer.
   const signature = [37, 80, 68, 70, 45]; // %PDF-
-  if (bytes.byteLength < signature.length || signature.some((b, i) => bytes[i] !== b)) {
+  if (data.byteLength < signature.length || signature.some((b, i) => data[i] !== b)) {
     throw new Error("The selected ZIP entry is not a valid PDF (missing PDF signature).");
   }
-  const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
-  if (bytes.byteLength <= MAX_CACHE_BYTES) {
-    cache.set(key, { url, size: bytes.byteLength });
-    cachedBytes += bytes.byteLength;
+  const url = URL.createObjectURL(new Blob([data], { type: "application/pdf" }));
+  if (data.byteLength <= MAX_CACHE_BYTES) {
+    cache.set(key, { url, size: data.byteLength });
+    cachedBytes += data.byteLength;
     while (cache.size > CACHE_LIMIT || cachedBytes > MAX_CACHE_BYTES) {
       const first = cache.keys().next().value;
       const old = cache.get(first);
