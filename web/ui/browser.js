@@ -80,9 +80,11 @@ function Card({ m, selected, fav, items, onMenu }) {
     <${Cover} model=${m} />
     <${Tick} m=${m} on=${selected} items=${items} />
     ${fav ? html`<span class="card-fav" title="Starred">${Icon.star(14, true)}</span>` : null}
-    <span class="card-name">${m.name}</span>
-    <span class="card-sub">${m.authors.join(", ") || " "}</span>
-    <span class="card-sub">${m.path.join(" › ") || (m.schema ? "" : "Unsorted")}</span>
+    <span class="card-name" title=${m.name}>${m.name}</span>
+    <span class="card-meta">
+      ${m.authors?.length ? html`<span class="card-author" title=${m.authors.join(", ")}>${m.authors.join(", ")}</span>` : null}
+      ${m.path?.length || !m.schema ? html`<span class="card-location" title=${m.path?.join(" › ") || "Unsorted"}>${m.path?.join(" › ") || "Unsorted"}</span>` : null}
+    </span>
   </div>`;
 }
 
