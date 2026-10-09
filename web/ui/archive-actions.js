@@ -90,9 +90,9 @@ export function ArchiveDialog({ request }) {
       </ul></details>
       <p class="muted">Original content remains available when this operation finishes. After complete verification, you can choose to move exact originals into journal recovery.</p>
     </div>` : null}
-    ${{verified ? html`<section class="archive-verified" role="status">
-      <p><strong>Verification complete.</strong> All published content passed SHA-256 checks. ${{cleaned ? "Original files have been moved into recoverable journal storage." : "Original files have been retained."}</p>
-      ${{!cleaned ? html`<button type="button" class="ghost" id="archive-cleanup" disabled=${{busy || readOnly} onClick=${{cleanup}>${{action === "compress" ? "Remove verified original files…" : "Remove verified source ZIP…"}</button>` : null}
+    ${verified ? html`<section class="archive-verified" role="status">
+      <p><strong>Verification complete.</strong> All published content passed SHA-256 checks. ${cleaned ? "Original files have been moved into recoverable journal storage." : "Original files have been retained."}</p>
+      ${!cleaned ? html`<button type="button" class="ghost" id="archive-cleanup" disabled=${busy || readOnly} onClick=${cleanup}>${action === "compress" ? "Remove verified original files…" : "Remove verified source ZIP…"}</button>` : null}
       <p class="muted">Choose Finish to keep the verified result. Undo is available through Recent changes.</p>
     </section>` : null}
   <//>`;
