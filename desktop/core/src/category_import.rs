@@ -57,11 +57,6 @@ fn descend(p: &Path, depth: usize, count: &mut usize, root: bool) -> Result<Valu
         .with_context(|| format!("Cannot read {}.", p.display()))?
         .map(|r| r.map(|e| e.path())).collect::<std::io::Result<_>>()?;
     entries.sort_by_key(|p| import::file_name(p).to_lowercase());
-    // Never create models from app/system control folders found in an automatic scan.
-    entries.retain(|p| {
-        let n = import::file_name(p);
-        !n.starts_with('.') && n != "_library" && n != "_media"
-    });
     let mut children = Vec::with_capacity(entries.len());
     let mut bytes = 0u64;
     let mut has_main = false;
@@ -81,7 +76,7 @@ fn descend(p: &Path, depth: usize, count: &mut usize, root: bool) -> Result<Valu
     }
     let kind = if !root && (sidecar || (has_main && !has_dir)) { "model" } else { "category" };
     Ok(json!({ "source": source, "name": name, "kind": kind,
-        "include": true, "group": false, "group_name": format!("{} files", name),
+        "include": root || (!name.starts_with('.') && name != "_library"), "group": false, "group_name": format!("{} files", name),
         "target": Value::Null, "map_to": Value::Null, "bytes": bytes, "children": children }))
 }
 
@@ -127,7 +122,7 @@ fn label(name: &str) -> Result<String> {
 fn model_name(name: &str) -> Result<String> {
     let n = name.trim();
     if n.is_empty() || n.starts_with('_') || n == "." || n == ".."
-        || n.contains(['/', '\\\\']) || n.chars().any(char::is_control) {
+        || n.contains('/') || n.contains('\\\\') || n.chars().any(char::is_control) {
         bail!("Give every model a valid name.");
     }
     Ok(n.to_string())
@@ -214,6 +209,9 @@ impl Planner<'_> {
         };
         let explicit = root || node["map_to"].is_array();
         if !root {
+            if !explicit && self.schemas.get(schema_id).is_some_and(|sc| schema::in_tree(&sc.tree(), &here)) {
+                self.conflicts.push(format!("{} already exists. Map it explicitly to that subcategory, or rename it.", here.join(" › ")));
+            }
             self.place(schema_id, &here, explicit);
             self.subcategories.push(json!({ "schema": schema_id, "path": here, "existing": explicit }));
         }
