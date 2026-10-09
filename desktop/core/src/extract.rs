@@ -171,10 +171,20 @@ pub fn execute(lib: &Library, plan: &Value, mode: &str, cancel: &AtomicBool, pro
             model::update(&src,&json!({}),&plan["metadata"])?;
             if !cover.is_empty() && !src.join(&cover).is_file() { model::update(&src,&json!({"cover":null}),&plan["metadata"])?; }
             for f in files { let path=src.join(s(f,"file")); let mut p=path.parent(); while let Some(d)=p { if d==src || std::fs::remove_dir(d).is_err() {break;} p=d.parent(); } }
-            let _=std::fs::remove_file(src.join(thumb::THUMB)); let _=thumb::make(&src);
+            if model::list_files(&src).is_empty() {
+                // Move the obsolete model folder to the journal. Its metadata and
+                // empty directory structure remain available for exact Undo.
+                j["retired"]=json!(true);
+                j["retired_hashes"]=hashes(&src)?;
+                relayout::write(lib,&j)?;
+                std::fs::rename(&src,keep.join("retired"))?;
+            } else {
+                let _=std::fs::remove_file(src.join(thumb::THUMB)); let _=thumb::make(&src);
+            }
         }
         let _=thumb::make(&dest);
-        j["sidecar_after"]=model::read_sidecar(&src); j["dest_hashes"]=hashes(&dest)?; j["source_sidecar_hash"]=json!(hash(&src.join(model::SIDECAR)).ok()); j["state"]=json!("done"); j["finished"]=json!(crate::library::now()); relayout::write(lib,&j)?;
+        let metadata_dir=if j["retired"]==true {keep.join("retired")} else {src.clone()};
+        j["sidecar_after"]=model::read_sidecar(&metadata_dir); j["dest_hashes"]=hashes(&dest)?; j["source_sidecar_hash"]=json!(hash(&metadata_dir.join(model::SIDECAR)).ok()); j["state"]=json!("done"); j["finished"]=json!(crate::library::now()); relayout::write(lib,&j)?;
         Ok(json!({"id":side["id"],"rel":plan["dest"],"journal":id,"refresh":[plan["source_id"]]}))
     })();
     if let Err(error)=result {
@@ -208,9 +218,17 @@ fn rollback(lib:&Library,j:&Value, strict:bool)->Result<()> {
     let files=j["files"].as_array().unwrap();
     let owns_dest=dest.is_dir() && !j["new_sidecar_after"]["id"].is_null() && model::read_sidecar(&dest)["id"]==j["new_sidecar_after"]["id"];
     if dest.exists() && !owns_dest { bail!("The destination belongs to another model. Nothing was removed."); }
+    let retired=keep.join("retired");
     if strict {
         if !owns_dest || hashes(&dest)? != j["dest_hashes"] { bail!("The new model changed outside the app. Restore it before undoing."); }
-        if json!(hash(&src.join(model::SIDECAR)).ok()) != j["source_sidecar_hash"] { bail!("The source model's details changed. Restore them before undoing."); }
+        if j["retired"]==true {
+            if src.exists() || !retired.is_dir() || hashes(&retired)? != j["retired_hashes"] { bail!("The former model location or its recovery files changed. Resolve this before undoing."); }
+        } else if json!(hash(&src.join(model::SIDECAR)).ok()) != j["source_sidecar_hash"] { bail!("The source model's details changed. Restore them before undoing."); }
+    }
+    if j["retired"]==true && retired.is_dir() {
+        if src.exists() { bail!("The former model location was reused. Move it aside before recovery."); }
+        std::fs::create_dir_all(src.parent().unwrap())?;
+        std::fs::rename(&retired,&src)?;
     }
     if j["mode"]=="move" {
         if strict { for f in files { if f["entry"].is_null() && checked(&src,s(f,"file"))?.exists() && hash(&checked(&src,s(f,"file"))?)? != j["original_hashes"][s(f,"to")].as_str().unwrap_or("") { bail!("A file is back at {}. Move it aside before undoing.",s(f,"file")); } } }
