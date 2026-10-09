@@ -44,6 +44,18 @@ async def panel_workspace_checks(pg, check):
     check('file search filters the panel', await pg.locator('#part-tree [data-file]').count() == 0)
     await search.fill('')
 
+    # Agent B: filtered selection must be explicit; whole-model extraction is allowed.
+    await pg.click("#select-visible-files")
+    check("Select visible files chooses only filtered files", await pg.locator("#extract-model").is_enabled())
+    await pg.click("#select-whole-model")
+    check("Select entire model enables extraction without excluding complete selections", await pg.locator("#extract-model").is_enabled())
+    check("Add files is discoverable on a model", await pg.locator("#mp-add-files").count() == 1)
+    await pg.click("#send-model-files")
+    await pg.wait_for_selector("#send-files-dialog")
+    check("Send to another model has a searchable destination review", await pg.locator("#send-search").count() == 1)
+    await pg.keyboard.press("Escape")
+    await pg.wait_for_selector("#send-files-dialog", state="detached")
+    await pg.locator("#file-panel").click(position={"x":20,"y":15})
     await pg.set_viewport_size({'width': 700, 'height': 800})
     await pg.wait_for_selector('#files-drawer-button')
     check('the narrow file drawer starts closed', not await pg.locator('#file-panel').is_visible())
