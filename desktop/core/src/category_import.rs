@@ -23,6 +23,10 @@ fn strings(v: &Value) -> Vec<String> {
     v.as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect()
 }
 fn path_text(p: &Path) -> String { p.display().to_string() }
+fn file_count(node: &Value) -> u64 {
+    if node["hash"].is_string() { 1 }
+    else { node["children"].as_array().into_iter().flatten().map(file_count).sum() }
+}
 
 fn digest(path: &Path) -> Result<String> {
     let mut f = std::fs::File::open(path)?;
@@ -172,10 +176,12 @@ impl Planner<'_> {
             self.conflicts.push(format!("Two models would have the same destination, ignoring letter case: {}.", dest.display()));
         }
         self.taken.insert(dest.clone());
+        let count = if files.is_empty() { file_count(node) } else { files.len() as u64 };
         self.items.push(json!({
             "source": node["source"], "files": files, "name": name, "author": "", "tags": "",
             "schema": schema_id, "values": path, "dest": path_text(&dest),
             "rel": self.lib.relative(&dest), "bytes": node["bytes"],
+            "file_count": count,
             "collision": collision, "planned_name": actual
         }));
         Ok(())
@@ -188,8 +194,9 @@ impl Planner<'_> {
         }
         if kind == "file" {
             if root { bail!("Choose a folder, not a file."); }
-            let name = import::stem(&string(node, "name"));
-            self.add_model(node, schema_id, at, vec![string(node, "source")], &name)?;
+            let filename = string(node, "name");
+            let name = Path::new(&filename).file_stem().and_then(|s| s.to_str()).unwrap_or(&filename);
+            self.add_model(node, schema_id, at, vec![string(node, "source")], name)?;
             return Ok(());
         }
         if kind == "model" {
@@ -302,6 +309,7 @@ pub fn plan(lib: &Library, ix: &Index, proposal: &Value) -> Result<Value> {
     if p.items.is_empty() { p.conflicts.push("No included model or file is ready to import.".into()); }
     Ok(json!({ "items": p.items, "categories": p.categories, "subcategories": p.subcategories,
         "conflicts": p.conflicts, "models": p.items.len(),
+        "file_count": p.items.iter().map(|i| i["file_count"].as_u64().unwrap_or(0)).sum::<u64>(),
         "bytes": p.items.iter().map(|i| i["bytes"].as_u64().unwrap_or(0)).sum::<u64>() }))
 }
 
