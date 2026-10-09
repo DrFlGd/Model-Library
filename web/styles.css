@@ -816,3 +816,10 @@ body:has(.sw-go) .toast { bottom: 92px; }
 .pdf-external { align-self:flex-start; margin:8px; }
 .workspace-stage .pdf-viewer { flex:1; min-height:0; }
 .workspace-stage .pdf-frame { min-height:360px; }
+
+/* Agent C: archive review retains path/size information without overflowing dialogs. */
+.archive-plan { max-height:min(55vh,480px); overflow:auto; display:grid; gap:8px; }
+.archive-plan p { margin:0; }
+.archive-plan ul { list-style:disc; margin:8px 0; padding:0 0 0 20px; max-height:180px; overflow:auto; }
+.archive-plan li { padding:3px 0; overflow-wrap:anywhere; }
+.archive-cleanup { display:flex; gap:8px; align-items:flex-start; margin:10px 0; font-weight:600; }
