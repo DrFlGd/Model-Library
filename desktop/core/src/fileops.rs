@@ -192,9 +192,11 @@ fn publish(from:&Path,to:&Path,jid:&str,expected:&str)->Result<()> {
     std::fs::create_dir_all(to.parent().unwrap())?;
     let name=to.file_name().unwrap().to_string_lossy();
     let tmp=to.with_file_name(format!(".model-transfer-{jid}-{name}"));
+    let mut created=false;
     let result=(||->Result<()> {
         // Never overwrite a temporary filename left by another interrupted process.
         let mut out=std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        created=true;
         let mut input=std::fs::File::open(from)?;
         std::io::copy(&mut input,&mut out)?;
         out.sync_all()?;
@@ -204,7 +206,7 @@ fn publish(from:&Path,to:&Path,jid:&str,expected:&str)->Result<()> {
         if extract::hash(to)? != expected {bail!("The destination failed verification.");}
         Ok(())
     })();
-    let _=std::fs::remove_file(tmp);
+    if created {let _=std::fs::remove_file(tmp);}
     result
 }
 fn dirs(root:&Path)->Result<Vec<String>> {
