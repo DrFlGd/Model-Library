@@ -6,6 +6,14 @@ next to the existing acceptance evidence. No mocks or model-render shortcuts.
 import json
 
 
+async def wait_for_app(pg):
+    """A reload resolves at document load, before the asynchronous app bootstrap."""
+    await pg.wait_for_function(
+        "() => typeof window.__modlib?.platform?.api === 'function'",
+        timeout=30000,
+    )
+
+
 async def card_checks(pg, library, base, out, api, check, png, cube):
     def add(rel, files):
         root = library / rel
@@ -58,6 +66,7 @@ async def card_checks(pg, library, base, out, api, check, png, cube):
            and shapes["F card chosen"]["explicit_cover"] == "chosen.png"), shapes)
     await pg.goto(base + "#/browse/all")
     await pg.reload()
+    await wait_for_app(pg)
     await pg.evaluate("""async () => {
       const {ui, setPref} = await import('/ui/state.js');
       ui.set({q: ''});
@@ -169,7 +178,9 @@ async def card_checks(pg, library, base, out, api, check, png, cube):
     (chosen / "chosen.png").rename(moved_cover)
     await api(pg, "library_scan", {"full": True})
     await pg.reload()
+    await wait_for_app(pg)
     selected = pg.locator('.card:has(.card-name:text-is("F card chosen"))')
+    await selected.locator(".cover-composed .cover-warning").wait_for(state="visible")
     missing_source = await api(pg, "model_get", {"id": "agent-f-chosen"})
     check("Agent F a missing explicitly chosen cover shows an automatic fallback",
           missing_source["files"]["cover_missing"]
@@ -177,7 +188,9 @@ async def card_checks(pg, library, base, out, api, check, png, cube):
     moved_cover.rename(chosen / "chosen.png")
     await api(pg, "library_scan", {"full": True})
     await pg.reload()
+    await wait_for_app(pg)
     selected = pg.locator('.card:has(.card-name:text-is("F card chosen"))')
+    await selected.locator(".thumb > img").wait_for(state="visible")
     restored_source = await api(pg, "model_get", {"id": "agent-f-chosen"})
     check("Agent F restoring a missing source restores the user's chosen cover",
           restored_source["files"]["explicit_cover"] == "chosen.png"
