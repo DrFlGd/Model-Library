@@ -1251,6 +1251,57 @@ impl App {
                     thumb::bytes_at(&path, Some(entry)).map_err(e2s)?,
                 ))
             }
+            "model_pdf_entry" => {
+                // A bounded, single-entry read for PDFs in a ZIP. It never unpacks
+                // anything into the model directory.
+                let path = self.file_path(&args).await?;
+                let entry = arg(&args, "entry").map_err(e2s)?.to_string();
+                if !entry.to_ascii_lowercase().ends_with(".pdf") {
+                    return Err("Choose a PDF document in the ZIP.".into());
+                }
+                let bytes = tokio::task::spawn_blocking(move || archive::read(&path, &entry, 64 << 20))
+                    .await.map_err(|e| e.to_string())?.map_err(e2s)?;
+                if !bytes.windows(5).take(1024).any(|w| w == b"%PDF-") {
+                    return Err("That entry is not a readable PDF document.".into());
+                }
+                Ok(Reply::Bytes(bytes))
+            }
+            "model_external_entry" => {
+                let path = self.file_path(&args).await?;
+                let entry = arg(&args, "entry").map_err(e2s)?.to_string();
+                let cache = self.paths.data_dir.join("external-files");
+                let target = tokio::task::spawn_blocking(move || -> Result<PathBuf> {
+                    use sha2::{Digest, Sha256};
+                    use std::time::{Duration, SystemTime};
+                    // Temporary external copies are retained for 30 days because
+                    // other applications may still have a document open.
+                    std::fs::create_dir_all(&cache)?;
+                    for item in std::fs::read_dir(&cache)?.flatten() {
+                        if item.file_type().is_ok_and(|t| t.is_file())
+                            && item.metadata().ok().and_then(|m| m.modified().ok())
+                                .is_some_and(|m| SystemTime::now().duration_since(m).unwrap_or_default() > Duration::from_secs(30 * 86400)) {
+                            let _ = std::fs::remove_file(item.path());
+                        }
+                    }
+                    let rel = crate::archive::safe_entry(&entry)?;
+                    let name = rel.file_name().ok_or_else(|| anyhow!("Choose a file in the ZIP."))?
+                        .to_string_lossy().to_string();
+                    let meta = std::fs::metadata(&path)?;
+                    let stamp = meta.modified().ok().and_then(|d| d.duration_since(SystemTime::UNIX_EPOCH).ok()).map(|d| d.as_nanos()).unwrap_or(0);
+                    let fingerprint = format!("{}:{}:{stamp}:{entry}", path.display(), meta.len());
+                    let hash = hex::encode(Sha256::digest(fingerprint.as_bytes()));
+                    let target = cache.join(format!("{}-{}", &hash[..24], name));
+                    if !target.is_file() {
+                        let data = archive::read(&path, &entry, 128 << 20)?;
+                        let stage = cache.join(format!(".{}-{}", &hash[..24], std::process::id()));
+                        std::fs::write(&stage, data)?;
+                        if target.exists() { let _ = std::fs::remove_file(&stage); }
+                        else { std::fs::rename(stage, &target)?; }
+                    }
+                    Ok(target)
+                }).await.map_err(|e| e.to_string())?.map_err(e2s)?;
+                j(json!({"path":target,"temporary":true}))
+            }
             "model_doc" => {
                 let path = self.file_path(&args).await?;
                 let file = arg(&args, "file").map_err(e2s)?;
