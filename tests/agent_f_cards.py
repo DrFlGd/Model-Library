@@ -19,6 +19,8 @@ async def card_checks(pg, library, base, out, api, check, png, cube):
     add("Unsorted/F card two", {"body.stl": cube(7), "angle.png": png})
     add("Unsorted/F card five", {f"part{i}.stl": cube(5 + i) for i in range(5)})
     add("Unsorted/F card unknown", {"instructions.xyz": "custom", "archive.7z": "unknown"})
+    add("Unsorted/F card mixed kinds", {"part.stl": cube(6), "guide.pdf": "%PDF", "intro.mp4": "sample"})
+    add("Unsorted/F card all kinds", {"guide.pdf": "%PDF", "archive.7z": "sample", "custom.xyz": "sample"})
     chosen = add("Unsorted/F card chosen", {
         "chosen.png": png, "alternative.png": png, "body.stl": cube(8),
         "model.json": json.dumps({"id": "agent-f-chosen", "name": "F card chosen",
@@ -41,7 +43,7 @@ async def card_checks(pg, library, base, out, api, check, png, cube):
     models = (await api(pg, "models_query", {"scope": "all", "limit": 2000}))["items"]
     by_name = {m["name"]: m for m in models}
     shapes = {name: by_name[name]["files"] for name in
-              ("F card one", "F card two", "F card five", "F card unknown", "F card chosen", "F card missing")}
+              ("F card one", "F card two", "F card five", "F card unknown", "F card mixed kinds", "F card all kinds", "F card chosen", "F card missing")}
     check("Agent F preview index is deterministic for one, two, five and unknown files",
           (shapes["F card one"]["previewable"] == 1
            and len(shapes["F card one"]["previews"]) == 1
@@ -50,6 +52,8 @@ async def card_checks(pg, library, base, out, api, check, png, cube):
            and shapes["F card five"]["previewable"] == 5
            and len(shapes["F card five"]["previews"]) == 4
            and shapes["F card unknown"]["previewable"] == 0
+           and shapes["F card mixed kinds"]["previewable"] == 1
+           and shapes["F card all kinds"]["previewable"] == 0
            and shapes["F card missing"]["cover_missing"]
            and shapes["F card chosen"]["explicit_cover"] == "chosen.png"), shapes)
     await pg.goto(base + "#/browse/all")
@@ -65,13 +69,35 @@ async def card_checks(pg, library, base, out, api, check, png, cube):
     five = pg.locator('.card:has(.card-name:text-is("F card five"))')
     unknown = pg.locator('.card:has(.card-name:text-is("F card unknown"))')
     missing = pg.locator('.card:has(.card-name:text-is("F card missing"))')
-    check("Agent F mixed and fallback cards show all represented file kinds",
+    # Scroll first, then require *actual loaded* mesh and image previews, not
+    # transient placeholders while the lazy render queue is still working.
+    await two.scroll_into_view_if_needed()
+    await pg.wait_for_function("""id => {
+      const card = document.querySelector('[data-model="' + id + '"]');
+      const images = [...(card?.querySelectorAll('.cover-file img') || [])];
+      return images.length === 2 && images.every(img => img.complete && img.naturalWidth > 0);
+    }""", arg=by_name["F card two"]["id"], timeout=60000)
+    await five.scroll_into_view_if_needed()
+    await pg.wait_for_function("""id => {
+      const card = document.querySelector('[data-model="' + id + '"]');
+      const imgs = [...(card?.querySelectorAll('.cover-file img') || [])];
+      return imgs.length === 4 && imgs.every(img => img.complete && img.naturalWidth > 0);
+    }""", arg=by_name["F card five"]["id"], timeout=60000)
+
+    mixed = pg.locator('.card:has(.card-name:text-is("F card mixed kinds"))')
+    all_kinds = pg.locator('.card:has(.card-name:text-is("F card all kinds"))')
+    mixed_tiles = await mixed.locator(".cover-kind").all_text_contents()
+    all_kind_tiles = await all_kinds.locator(".cover-kind").all_text_contents()
+    check("Agent F mixed file types have accurate labels and counts",
           await one.locator(".cover-tiles-2 .cover-kind").count() == 1
           and await two.locator(".cover-tiles-2 .cover-file").count() == 2
           and await five.locator(".cover-tiles-4 .cover-file").count() == 4
           and await five.locator(".cover-count").inner_text() == "+1"
-          and await unknown.locator(".cover-kind").count() >= 1
-          and await missing.locator(".cover-warning").inner_text() == "Cover missing")
+          and sorted(t.strip() for t in mixed_tiles) == ["Document", "Video"]
+          and sorted(t.strip() for t in all_kind_tiles) == ["Archive", "File", "Document"]
+          and await unknown.locator(".cover-kind").count() == 2
+          and await missing.locator(".cover-warning").inner_text() == "Cover missing",
+          (mixed_tiles, all_kind_tiles))
 
     long = pg.locator('.card:has(.card-name:text-is("A very long named model for card testing"))')
     await long.scroll_into_view_if_needed()
@@ -106,7 +132,7 @@ async def card_checks(pg, library, base, out, api, check, png, cube):
           await selected.locator(".thumb > img").count() == 1
           and await selected.locator(".cover-composed").count() == 0)
     # Adding another file does not change the explicit override.
-    (chosen / "later.stl").write_bytes(cube(12))
+    (chosen / "later.stl").write_text(cube(12))
     await api(pg, "library_scan", {"full": True})
     still = await api(pg, "model_get", {"id": "agent-f-chosen"})
     check("Agent F a file addition preserves the chosen cover",
@@ -129,12 +155,23 @@ async def card_checks(pg, library, base, out, api, check, png, cube):
     check("Agent F Undo restores the explicit cover", restored["files"]["explicit_cover"] == "chosen.png")
     await pg.screenshot(path=str(out / "agent-f-cover-restored.png"))
 
-    # There are many cards but only the tiles actually visible should ask for
-    # heavy mesh renders. Scrolling loads further previews on demand.
+    # Many cards, but the last one cannot have triggered a heavy render until
+    # we scroll it into view; after scrolling it must receive a real image.
     await pg.goto(base + "#/browse/unsorted")
     await pg.wait_for_selector('.card:has(.card-name:text-is("F scrolling 59"))')
+    first_scroll = pg.locator('.card:has(.card-name:text-is("F scrolling 00"))')
+    last_scroll = pg.locator('.card:has(.card-name:text-is("F scrolling 59"))')
+    await first_scroll.scroll_into_view_if_needed()
+    await pg.wait_for_function("""() => {
+      const c = [...document.querySelectorAll('.card')].find(e => e.querySelector('.card-name')?.textContent === 'F scrolling 00');
+      return [...(c?.querySelectorAll('.cover-file img') || [])].some(i => i.complete && i.naturalWidth > 0);
+    }""", timeout=60000)
+    before = await last_scroll.locator(".cover-file img").count()
     total_cards = await pg.locator(".results .card").count()
-    loaded_images = await pg.locator(".results .cover-file img").count()
-    check("Agent F large grids defer off-screen mesh preview decoding",
-          total_cards >= 60 and loaded_images < total_cards // 2,
-          (total_cards, loaded_images))
+    await last_scroll.scroll_into_view_if_needed()
+    await pg.wait_for_function("""() => {
+      const c = [...document.querySelectorAll('.card')].find(e => e.querySelector('.card-name')?.textContent === 'F scrolling 59');
+      return [...(c?.querySelectorAll('.cover-file img') || [])].some(i => i.complete && i.naturalWidth > 0);
+    }""", timeout=60000)
+    check("Agent F large grids lazily load off-screen meshes after scrolling",
+          total_cards >= 60 and before == 0, (total_cards, before))
