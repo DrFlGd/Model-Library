@@ -17,6 +17,7 @@
 
 pub mod api;
 pub mod archive;
+pub mod archive_ops;
 pub mod config;
 pub mod docs;
 pub mod dupes;
