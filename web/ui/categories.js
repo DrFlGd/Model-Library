@@ -79,6 +79,8 @@ export function ChangePreview({ change, onPlan }) {
       It can be undone.</p>
     ${plan.nodes != null ? html`<p class="muted">Affected subcategories: ${plan.nodes}; files: ${plan.files ?? 0}; bytes: ${(plan.bytes ?? 0).toLocaleString()}.</p>` : null}
     ${plan.child_collisions ? html`<p class="warn-note">${plan.child_collisions} overlapping child names use your selected mapping.</p>` : null}
+    ${plan.node_mappings?.length ? html`<details class="muted"><summary>Review ${plan.node_mappings.length} category path mappings</summary>
+      <ul class="move-sample" style="max-height:220px;overflow:auto">${plan.node_mappings.map((m, i) => html`<li key=${i}><span class="preview-path">${m.from}</span> → <span class="preview-path">${m.to}</span></li>`)}</ul></details>` : null}
     ${plan.sample.length ? html`<ul class="move-sample">${plan.sample.map((m) => html`<li key=${m.from}><span class="preview-path">${m.from}</span><span class="muted"> → </span><span class="preview-path">${m.to}</span></li>`)}
       ${plan.moving > plan.sample.length ? html`<li class="muted">and ${plan.moving - plan.sample.length} more</li>` : null}</ul>` : null}
   </div>`;
