@@ -280,8 +280,10 @@ pub fn execute(lib:&Library,plan:&Value,cancel:&AtomicBool,progress:&dyn Fn(usiz
             progress(files.len()+i,files.len()*3,s(f,"to"));stop(cancel)?;
             if conflicts_with_disk(&target,s(f,"to"))? {bail!("A destination was taken during transfer.");}
             let dest=extract::checked(&target,s(f,"to"))?;
+            j["publishing"]=json!(i);relayout::write(lib,&j)?;
             publish(&stage.join(i.to_string()),&dest,&jid,s(f,"sha256"))?;
-            j["written"].as_array_mut().unwrap().push(json!(i));relayout::write(lib,&j)?;
+            j["written"].as_array_mut().unwrap().push(json!(i));
+            j["publishing"]=Value::Null;relayout::write(lib,&j)?;
         }
         if s(plan,"mode")=="move" {
             let src=source.as_ref().unwrap();
@@ -358,8 +360,16 @@ fn rollback(lib:&Library,j:&Value,strict:bool)->Result<()> {
             }
         }
     }
+    // A stopped operation may have staged files without publishing them.
+    // Never delete an unowned destination merely because its bytes happen to match.
+    let published:HashSet<usize>=j["written"].as_array().into_iter().flatten().filter_map(Value::as_u64).map(|n|n as usize).collect();
+    let maybe_publishing=j["publishing"].as_u64().map(|n|n as usize);
+    if !strict && maybe_publishing.is_some() {
+        bail!("Publishing was interrupted. Review the uncertain destination before recovery; no file was overwritten.");
+    }
     // Check ALL restore and removal locations before making changes.
     for (i,f) in files.iter().enumerate() {
+        if !strict && !published.contains(&i) { continue; }
         let output=extract::checked(&dest,s(f,"to"))?;
         if output.exists() && extract::hash(&output)?!=s(f,"sha256") {
             bail!("{} was changed after transfer; nothing was overwritten.",s(f,"to"));
@@ -403,8 +413,9 @@ fn rollback(lib:&Library,j:&Value,strict:bool)->Result<()> {
             std::fs::create_dir_all(extract::checked(src,d)?)?;
         }
     }
-    // Only the files created by this operation may be removed.
-    for f in files {
+    // Only the files demonstrably published by this operation may be removed.
+    for (i,f) in files.iter().enumerate() {
+        if !strict && !published.contains(&i) { continue; }
         let output=extract::checked(&dest,s(f,"to"))?;
         if output.exists() {
             if extract::hash(&output)?!=s(f,"sha256") {bail!("The destination changed during recovery.");}
