@@ -99,7 +99,7 @@ export function ExtractDialog({ model, keys }) {
     if (busy || !plan?.files?.length || plan.error || readOnly || !args.name) return;
     setBusy(true); setError("");
     try {
-      const { job } = await api("model_extract", { ...args, mode });
+      const { job } = await api("model_extract", { ...args, mode, review: plan });
       const done = await followJob(job, `Making ${args.name} a new model`);
       if (done.error) throw new Error(done.error);
       const result = done.result;
