@@ -17,6 +17,12 @@ function cached(key) {
 }
 
 function remember(key, bytes) {
+  // A native frame does not reliably fire onError for invalid PDF bytes.
+  // Reject a clearly corrupt entry before handing it to the system renderer.
+  const signature = [37, 80, 68, 70, 45]; // %PDF-
+  if (bytes.byteLength < signature.length || signature.some((b, i) => bytes[i] !== b)) {
+    throw new Error("The selected ZIP entry is not a valid PDF (missing PDF signature).");
+  }
   const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
   if (bytes.byteLength <= MAX_CACHE_BYTES) {
     cache.set(key, { url, size: bytes.byteLength });
@@ -59,9 +65,11 @@ export function PdfDocument({ src, doc, model }) {
         apiBytes("model_pdf_entry", { [src.kind === "sort" ? "sort" : "id"]: src.id, file: doc.file, entry: doc.entry })
           .then((bytes) => {
             if (!live) return;
-            const item = remember(key, bytes);
-            ephemeral = item.ephemeral ? item.url : "";
-            setView({ url: item.url, error: "", busy: false });
+            try {
+              const item = remember(key, bytes);
+              ephemeral = item.ephemeral ? item.url : "";
+              setView({ url: item.url, error: "", busy: false });
+            } catch (e) { setView({ url: "", error: errorText(e), busy: false }); }
           }, (e) => { if (live) setView({ url: "", error: errorText(e), busy: false }); });
       }
     }
