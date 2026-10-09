@@ -899,7 +899,7 @@ fn undo_import(
                 .and_then(|path| crate::category_import::destination_manifest(&path))
                 .map(|now| now == m["manifest"])
         } else { Ok(true) };
-        if safe != Ok(true) {
+        if !matches!(safe, Ok(true)) {
             failed.push(json!({ "name": name, "error": "This model changed after import. Resolve its files before undoing." }));
             continue;
         }
