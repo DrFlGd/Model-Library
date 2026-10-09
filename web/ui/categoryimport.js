@@ -168,6 +168,7 @@ function Results({ results, onReset }) {
   return html`<section class="ci-results" role="status"><h2>${plural(good.length, "model")} imported</h2>
     ${bad.length ? html`<p class="form-error">${plural(bad.length, "model")} could not be imported.</p>
       <ul>${bad.map((r,i) => html`<li key=${i}>${r.name}: ${r.error}</li>`)}</ul>` : null}
+    ${results.state !== "done" ? html`<p class="warn-note" role="alert">The import stopped partway through. <a href=${routeHash("home")}>Open Home's Recent changes</a> to put imported models back safely before starting another import.</p>` : null}
     <p><a href=${routeHash("browse:all")}>See imported models</a> · <button type="button" class="ghost" onClick=${onReset}>Start a new category import</button></p>
   </section>`;
 }
@@ -188,8 +189,9 @@ export function CategoryImport() {
       if (done.error) throw new Error(done.error);
       const results = done.result;
       categoryStage.set({ results, plan: null });
-      if (results.journal) undoable(`Imported ${plural(results.imported, "model")} as categories.`,
+      if (results.journal && results.state === "done") undoable(`Imported ${plural(results.imported, "model")} as categories.`,
         async () => { await undoChange(results.journal); categoryStage.set({ results: null }); await loadOverview(); });
+      if (results.state !== "done") toast("Import stopped partway through. Recover it from Home › Recent changes.", 10000);
       await loadOverview();
     } finally { categoryStage.set({ job: null }); }
   });
