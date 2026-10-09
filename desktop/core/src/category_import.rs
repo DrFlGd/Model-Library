@@ -1,0 +1,278 @@
+//! Reviewed folder-to-category imports (Agent D).
+//! Scans are read-only. The client may edit names, classification and exclusions,
+//! but source manifests and destination paths are rebuilt and checked before commit.
+use crate::import;
+use crate::index::Index;
+use crate::library::Library;
+use crate::model::{file_kind, SIDECAR};
+use crate::schema::{self, Schema};
+use anyhow::{anyhow, bail, Context, Result};
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
+use std::io::Read;
+use std::path::{Path, PathBuf};
+
+const MAX_DEPTH: usize = 32;
+const MAX_ENTRIES: usize = 20_000;
+
+fn string(v: &Value, key: &str) -> String {
+    v[key].as_str().unwrap_or("").to_string()
+}
+fn strings(v: &Value) -> Vec<String> {
+    v.as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect()
+}
+fn path_text(p: &Path) -> String { p.display().to_string() }
+
+fn digest(path: &Path) -> Result<String> {
+    let mut f = std::fs::File::open(path)?;
+    let mut hash = Sha256::new();
+    let mut buf = [0u8; 65536];
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 { break; }
+        hash.update(&buf[..n]);
+    }
+    Ok(format!("{:x}", hash.finalize()))
+}
+fn control(name: &str) -> bool {
+    name.starts_with('.') || matches!(name.to_ascii_lowercase().as_str(),
+        "thumbs.db" | "desktop.ini" | "model.json" | "folder.jpg")
+}
+fn descend(p: &Path, depth: usize, count: &mut usize, root: bool) -> Result<Value> {
+    if depth > MAX_DEPTH { bail!("The folder tree is more than {MAX_DEPTH} levels deep."); }
+    *count += 1;
+    if *count > MAX_ENTRIES { bail!("This tree has more than {MAX_ENTRIES} entries. Choose a smaller folder."); }
+    let meta = std::fs::symlink_metadata(p)?;
+    if meta.file_type().is_symlink() { bail!("Symlinks cannot be imported as categories: {}.", p.display()); }
+    let name = import::file_name(p);
+    let source = path_text(p);
+    if meta.is_file() {
+        let bytes = meta.len();
+        return Ok(json!({ "source": source, "name": name, "kind": "file", "include": !control(&name),
+            "bytes": bytes, "hash": digest(p)?, "children": [] }));
+    }
+    if !meta.is_dir() { bail!("{} is not a regular file or folder.", p.display()); }
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(p)
+        .with_context(|| format!("Cannot read {}.", p.display()))?
+        .map(|r| r.map(|e| e.path())).collect::<std::io::Result<_>>()?;
+    entries.sort_by_key(|p| import::file_name(p).to_lowercase());
+    // Never create models from app/system control folders found in an automatic scan.
+    entries.retain(|p| {
+        let n = import::file_name(p);
+        !n.starts_with('.') && n != "_library" && n != "_media"
+    });
+    let mut children = Vec::with_capacity(entries.len());
+    let mut bytes = 0u64;
+    let mut has_main = false;
+    let mut has_dir = false;
+    let mut sidecar = false;
+    for entry in entries {
+        let child = descend(&entry, depth + 1, count, false)?;
+        let n = string(&child, "name");
+        if child["kind"] == "file" {
+            has_main |= matches!(file_kind(&n), "model" | "archive" | "slicer");
+            sidecar |= n == SIDECAR;
+        } else {
+            has_dir = true;
+        }
+        bytes = bytes.saturating_add(child["bytes"].as_u64().unwrap_or(0));
+        children.push(child);
+    }
+    let kind = if !root && (sidecar || (has_main && !has_dir)) { "model" } else { "category" };
+    Ok(json!({ "source": source, "name": name, "kind": kind,
+        "include": true, "group": false, "group_name": format!("{} files", name),
+        "target": Value::Null, "map_to": Value::Null, "bytes": bytes, "children": children }))
+}
+
+/// Scan selected roots, without writing category files or altering imported data.
+pub fn scan(lib: &Library, paths: &[PathBuf]) -> Result<Value> {
+    if paths.is_empty() { bail!("Choose at least one folder."); }
+    let mut roots = vec![];
+    let mut count = 0;
+    let mut taken: Vec<PathBuf> = vec![];
+    for p in paths {
+        import::check_source(lib, p)?;
+        let real = p.canonicalize()?;
+        if !real.is_dir() { bail!("{} is not a folder.", p.display()); }
+        if taken.iter().any(|a| real.starts_with(a) || a.starts_with(&real)) {
+            bail!("Select non-overlapping folders to avoid importing anything twice.");
+        }
+        taken.push(real.clone());
+        roots.push(descend(&real, 0, &mut count, true)?);
+    }
+    Ok(json!({ "roots": roots, "entries": count }))
+}
+
+/// Compare the immutable source manifest only. All presentation and mapping
+/// fields can be edited, but not a file, a hash or the structure of the source.
+fn unchanged(old: &Value, fresh: &Value) -> Result<()> {
+    if old["source"] != fresh["source"] || old["bytes"] != fresh["bytes"]
+        || old["hash"] != fresh["hash"] {
+        bail!("The source changed since it was staged: {}. Scan it again.", string(old, "source"));
+    }
+    let a = old["children"].as_array().ok_or_else(|| anyhow!("Invalid staging tree."))?;
+    let b = fresh["children"].as_array().ok_or_else(|| anyhow!("Invalid source tree."))?;
+    if a.len() != b.len() {
+        bail!("Files were added or removed in {}. Scan it again.", string(old, "source"));
+    }
+    for (x, y) in a.iter().zip(b) { unchanged(x, y)?; }
+    Ok(())
+}
+fn label(name: &str) -> Result<String> {
+    let n = schema::subcategory_name(name)?;
+    if n != name.trim() { bail!("Rename {name} to a valid folder name before importing."); }
+    Ok(n)
+}
+fn model_name(name: &str) -> Result<String> {
+    let n = name.trim();
+    if n.is_empty() || n.starts_with('_') || n == "." || n == ".."
+        || n.contains(['/', '\\\\']) || n.chars().any(char::is_control) {
+        bail!("Give every model a valid name.");
+    }
+    Ok(n.to_string())
+}
+fn selected(node: &Value) -> bool { node["include"] != false }
+fn as_children(node: &Value) -> Result<&Vec<Value>> {
+    node["children"].as_array().ok_or_else(|| anyhow!("Invalid folder tree."))
+}
+fn virtual_schema(id: &str, name: &str) -> Schema {
+    Schema {
+        id: id.into(), name: name.into(), folder: name.into(),
+        model_folder: "{name} ({author})".into(), levels: vec![],
+        raw: json!({ "id": id, "name": name, "folder": name, "model_folder": "{name} ({author})" }),
+    }
+}
+struct Planner<'a> {
+    lib: &'a Library,
+    ix: &'a Index,
+    schemas: HashMap<String, Schema>,
+    categories: Vec<Value>,
+    subcategories: Vec<Value>,
+    items: Vec<Value>,
+    conflicts: Vec<String>,
+    taken: HashSet<PathBuf>,
+    places: HashSet<String>,
+}
+impl Planner<'_> {
+    fn place(&mut self, id: &str, path: &[String], explicit: bool) {
+        let k = format!("{}:{}", id.to_lowercase(), path.join("/").to_lowercase());
+        if !explicit && !self.places.insert(k) {
+            self.conflicts.push(format!("Two proposed category folders use {}.", path.join(" › ")));
+        }
+    }
+    fn add_model(&mut self, node: &Value, schema_id: &str, path: &[String], files: Vec<String>, name: &str) -> Result<()> {
+        let name = model_name(name)?;
+        let s = self.schemas.get(schema_id).ok_or_else(|| anyhow!("The category is no longer available."))?;
+        let folder = import::folder_name(&s.model_folder, &name, "");
+        let dest = import::destination(self.lib, Some(s), path, &folder, None, &self.taken)?;
+        let actual = import::file_name(&dest);
+        let collision = actual != folder && !actual.eq_ignore_ascii_case(&folder);
+        self.taken.insert(dest.clone());
+        self.items.push(json!({
+            "source": node["source"], "files": files, "name": name, "author": "", "tags": "",
+            "schema": schema_id, "values": path, "dest": path_text(&dest),
+            "rel": self.lib.relative(&dest), "bytes": node["bytes"],
+            "collision": collision, "planned_name": actual
+        }));
+        Ok(())
+    }
+    fn walk(&mut self, node: &Value, schema_id: &str, at: &[String], root: bool) -> Result<()> {
+        if !selected(node) { return Ok(()); }
+        let kind = node["kind"].as_str().ok_or_else(|| anyhow!("Choose a folder type."))?;
+        if kind == "file" {
+            if root { bail!("Choose a folder, not a file."); }
+            let name = import::stem(&string(node, "name"));
+            self.add_model(node, schema_id, at, vec![string(node, "source")], &name)?;
+            return Ok(());
+        }
+        if kind == "model" {
+            if root { bail!("The selected root must be a category. Choose a subfolder to group as a model."); }
+            // Folder-as-model preserves the whole nested folder. Do not pretend to
+            // support exclusions below a model that would need a different copy plan.
+            fn all_in(n: &Value) -> bool {
+                n["children"].as_array().is_some_and(|v| v.iter().all(|c| selected(c) || control(&string(c, "name"))) && v.iter().all(all_in))
+            }
+            if !all_in(node) { bail!("A model folder imports all of its contents. Split it into categories to exclude files."); }
+            self.add_model(node, schema_id, at, vec![], &string(node, "name"))?;
+            return Ok(());
+        }
+        if kind != "category" { bail!("Invalid folder classification."); }
+        let here = if root {
+            at.to_vec()
+        } else if node["map_to"].is_array() {
+            let mapped = strings(&node["map_to"]);
+            let sc = self.schemas.get(schema_id).unwrap();
+            if !schema::in_tree(&sc.tree(), &mapped) {
+                bail!("Map {} to an existing subcategory or leave it as new.", string(node, "name"));
+            }
+            mapped
+        } else {
+            let mut p = at.to_vec();
+            p.push(label(&string(node, "name"))?);
+            p
+        };
+        let explicit = root || node["map_to"].is_array();
+        if !root {
+            self.place(schema_id, &here, explicit);
+            self.subcategories.push(json!({ "schema": schema_id, "path": here, "existing": explicit }));
+        }
+        let mut grouped = vec![];
+        for child in as_children(node)? {
+            if !selected(child) || child["kind"] != "file" { continue; }
+            if node["group"] == true { grouped.push(string(child, "source")); }
+        }
+        if !grouped.is_empty() {
+            self.add_model(node, schema_id, &here, grouped, &string(node, "group_name"))?;
+        }
+        for child in as_children(node)? {
+            if node["group"] == true && child["kind"] == "file" { continue; }
+            self.walk(child, schema_id, &here, false)?;
+        }
+        Ok(())
+    }
+}
+
+/// Dry-run the complete destination tree; neither this nor scan writes to the
+/// library. Every request rehashes its source manifest, catching changed files.
+pub fn plan(lib: &Library, ix: &Index, proposal: &Value) -> Result<Value> {
+    let roots = proposal["roots"].as_array().ok_or_else(|| anyhow!("No staged folders."))?;
+    let paths: Vec<PathBuf> = roots.iter().map(|r| PathBuf::from(string(r, "source"))).collect();
+    let fresh = scan(lib, &paths)?;
+    for (a, b) in roots.iter().zip(fresh["roots"].as_array().unwrap()) { unchanged(a, b)?; }
+    let mut p = Planner {
+        lib, ix, schemas: ix.schemas.iter().map(|s| (s.id.clone(), s.clone())).collect(),
+        categories: vec![], subcategories: vec![], items: vec![], conflicts: vec![],
+        taken: HashSet::new(), places: HashSet::new(),
+    };
+    let mut new_names = HashSet::new();
+    for (i, root) in roots.iter().enumerate() {
+        if !selected(root) { continue; }
+        if root["kind"] != "category" { bail!("Selected roots must remain category folders."); }
+        let (sid, at) = if root["target"].is_object() {
+            let sid = string(&root["target"], "schema");
+            let values = strings(&root["target"]["values"]);
+            let s = p.schemas.get(&sid).ok_or_else(|| anyhow!("The destination category no longer exists."))?;
+            if !values.is_empty() && !schema::in_tree(&s.tree(), &values) {
+                bail!("Choose an existing destination subcategory for {}.", string(root, "name"));
+            }
+            (sid, values)
+        } else {
+            let name = label(&string(root, "name"))?;
+            if name.eq_ignore_ascii_case("Unsorted") || !new_names.insert(name.to_lowercase())
+                || p.schemas.values().any(|s| s.folder.eq_ignore_ascii_case(&name))
+                || p.lib.root().join(&name).exists() {
+                p.conflicts.push(format!("The category {} already exists. Rename it or explicitly map to the existing one.", name));
+            }
+            let draft = format!("draft-{i}");
+            p.schemas.insert(draft.clone(), virtual_schema(&draft, &name));
+            p.categories.push(json!({ "draft": draft, "name": name, "folder": name }));
+            (draft, vec![])
+        };
+        p.walk(root, &sid, &at, true)?;
+    }
+    if p.items.is_empty() { p.conflicts.push("No included model or file is ready to import.".into()); }
+    Ok(json!({ "items": p.items, "categories": p.categories, "subcategories": p.subcategories,
+        "conflicts": p.conflicts, "models": p.items.len(),
+        "bytes": p.items.iter().map(|i| i["bytes"].as_u64().unwrap_or(0)).sum::<u64>() }))
+}
