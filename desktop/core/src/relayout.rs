@@ -746,6 +746,8 @@ pub fn undo(
     match j["kind"].as_str() {
         Some("details") => return undo_details(lib, j),
         Some("extract") => return crate::extract::undo(lib, j),
+        Some("file_transfer") => return crate::fileops::undo(lib, j),
+        Some("model_delete") => return crate::delete::undo(lib, j),
         Some("wrap_loose") => return model::undo_loose(lib, id, cancel),
         Some("import") => return undo_import(lib, j, cancel, on_item),
         _ => {}
