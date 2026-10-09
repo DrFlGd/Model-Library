@@ -65,6 +65,7 @@ The UI pass in `docs/PLAN.md` ("UI pass design") is done: actions (0.5.1), undo 
 
 ## Unreleased
 
+- Agent A review A-1: Preserve a separate Details-edit baseline so clean editor values refresh on dialog edits, watcher changes and Undo. Keep genuine drafts on concurrent changes; require an explicit rebase or reload before Save, preflight live metadata and retain unrelated newer values. Add browser regression checks for clean/dirty refresh and conflicts.
 - Agent A: Make the model workspace fill the resized window; dock Files directly beside collapsible navigation; add the resizable, persistent right-side Details ribbon with Save/Cancel and draft safeguards; preview Unsorted models’ folders, ZIPs and supported files beside the collection. Includes automated layout/selection checks and screenshot hooks.
 - Document the published 0.5.5 workspace and its validated screenshots.
 
