@@ -138,6 +138,9 @@ export function WorkspaceDetails({ model, onModelChange }) {
       const result = await saveDetails(fresh, patch);
       const saved = detailsSnapshot(result);
       setEditor({ ...saved, baseline: saved, modelId: result.id });
+      // Saving can give a legacy model its first persistent ID. Clear the
+      // navigation guard before the existing follow-IDs route replacement.
+      ui.set({ workspaceDirty: false });
       onModelChange?.(result);
       recorded(`Saved ${result.name}'s details.`, result.journal);
     } catch (e) {
