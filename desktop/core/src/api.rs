@@ -1156,6 +1156,124 @@ impl App {
                     v
                 })
                 .await?),
+            "category_import_scan" => {
+                let paths: Vec<PathBuf> = strings(&args["paths"]).into_iter().map(PathBuf::from).collect();
+                let lib = self.library()?;
+                let r = tokio::task::spawn_blocking(move || category_import::scan(&lib, &paths))
+                    .await.map_err(|e| e.to_string())?.map_err(e2s)?;
+                j(r)
+            }
+            "category_import_plan" => {
+                let proposal = args["proposal"].clone();
+                let r = self.with_index(None, |ix, lib| category_import::plan(lib, ix, &proposal)).await?;
+                j(r.map_err(e2s)?)
+            }
+            "category_import_commit" => {
+                let proposal = args["proposal"].clone();
+                let mv = args["mode"].as_str() != Some("copy");
+                let force_copy = args["force_copy"] == true;
+                self.library()?.writable().map_err(e2s)?;
+                // Reject conflicts before the job starts. The job plans again,
+                // under the mutation lock, so the review cannot go stale.
+                let checked = self.with_index(None, |ix, lib| category_import::plan(lib, ix, &proposal)).await?
+                    .map_err(e2s)?;
+                if let Some(conflict) = checked["conflicts"].as_array().and_then(|v| v.first()) {
+                    return Err(conflict.as_str().unwrap_or("Resolve the category conflicts.").to_string());
+                }
+                j(self.spawn_job("Importing folders as categories", move |app, jid, cancel| {
+                    let lib = app.library().map_err(|e| anyhow!(e))?;
+                    lib.writable()?;
+                    let ix = Index::build(&lib, None, false);
+                    let plan = category_import::plan(&lib, &ix, &proposal)?;
+                    if let Some(conflict) = plan["conflicts"].as_array().and_then(|v| v.first()) {
+                        anyhow::bail!("{}", conflict.as_str().unwrap_or("Resolve the category conflicts."));
+                    }
+                    if cancel.load(Ordering::Relaxed) {
+                        anyhow::bail!("Stopped before making any changes.");
+                    }
+                    let mut created: Vec<schema::Schema> = vec![];
+                    let mut draft_ids = std::collections::HashMap::new();
+                    for spec in plan["categories"].as_array().into_iter().flatten() {
+                        let name = spec["name"].as_str().unwrap_or("");
+                        match schema::create(&lib, &json!({ "name": name })) {
+                            Ok(s) => {
+                                draft_ids.insert(spec["draft"].as_str().unwrap_or("").to_string(), s.id.clone());
+                                created.push(s);
+                            }
+                            Err(e) => {
+                                for s in created.iter().rev() {
+                                    let _ = schema::remove(&lib, &s.id);
+                                    let _ = std::fs::remove_dir(lib.root().join(&s.folder));
+                                }
+                                return Err(e);
+                            }
+                        }
+                    }
+                    let mut schemas = import::schemas_by_id(&ix);
+                    for s in &created { schemas.insert(s.id.clone(), s.clone()); }
+                    let mut items = plan["items"].as_array().cloned().unwrap_or_default();
+                    for item in &mut items {
+                        if let Some(s) = item["schema"].as_str().and_then(|id| draft_ids.get(id)) {
+                            item["schema"] = json!(s);
+                        }
+                    }
+                    let dests: Vec<PathBuf> = items.iter().map(|it|
+                        PathBuf::from(it["dest"].as_str().unwrap_or(""))).collect();
+                    let used = import::ids_in_use(&ix);
+                    let mut results = app.run_import(&jid, &cancel, &lib, &items, &dests, &schemas, &used, mv, force_copy);
+                    let mut moves = vec![];
+                    let mut added: Vec<Value> = vec![];
+                    let mut successful_schemas = std::collections::HashSet::new();
+                    for ((r, it), dest) in results.iter_mut().zip(&items).zip(&dests) {
+                        let before = r.as_object_mut().and_then(|o| o.shift_remove("before"));
+                        if r["error"].is_string() { continue; }
+                        if let Some(sid) = it["schema"].as_str() {
+                            successful_schemas.insert(sid.to_string());
+                            // For existing categories, Undo removes only paths this
+                            // operation introduced, never previously existing nodes.
+                            if let Some(s) = ix.schema(sid) {
+                                let path = import::place_of(&lib, Some(s), dest);
+                                let tree = s.tree();
+                                if let Some(k) = (1..=path.len()).find(|&k| !schema::in_tree(&tree, &path[..k])) {
+                                    let a = json!({ "schema": sid, "path": path[..k] });
+                                    if !added.contains(&a) { added.push(a); }
+                                }
+                            }
+                        }
+                        let before = before.unwrap_or_default();
+                        moves.push(json!({ "name": r["name"], "id": r["id"], "to": r["rel"],
+                            "source": it["source"], "files": it["files"],
+                            "sidecar_before": before["sidecar_before"], "thumb_before": before["thumb_before"] }));
+                    }
+                    // Discard categories created by a failed/skipped branch, without
+                    // touching any existing category or a directory with contents.
+                    let mut kept = vec![];
+                    for s in &created {
+                        if successful_schemas.contains(&s.id) {
+                            kept.push(json!({ "id": s.id, "folder": s.folder }));
+                        } else {
+                            let _ = schema::remove(&lib, &s.id);
+                            let _ = std::fs::remove_dir(lib.root().join(&s.folder));
+                        }
+                    }
+                    let journal = if moves.is_empty() {
+                        Value::Null
+                    } else {
+                        let id = relayout::new_id(&lib)?;
+                        let n = moves.len();
+                        relayout::record(&lib, &id, &json!({
+                            "kind": "import", "mode": if mv { "move" } else { "copy" },
+                            "label": format!("Imported {n} models as categories"),
+                            "added": added, "created_schemas": kept, "moves": moves
+                        }))?;
+                        json!(id)
+                    };
+                    let failed = results.iter().filter(|r| r["error"].is_string()).count();
+                    Ok(json!({ "results": results, "imported": results.len() - failed,
+                        "failed": failed, "mode": if mv { "move" } else { "copy" },
+                        "journal": journal, "categories": kept }))
+                }))
+            }
             "import_scan" => {
                 let paths: Vec<PathBuf> = args["paths"]
                     .as_array()
