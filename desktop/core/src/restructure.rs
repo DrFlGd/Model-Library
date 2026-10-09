@@ -375,12 +375,12 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
                         }
                         _ => bail!("Child subcategory {} already exists in the target. Choose Merge matching names or Rename incoming children.", wanted.join(" › ")),
                     }
-                } else {
-                    let folder = after[&target_id]["folder"].as_str().unwrap_or("");
-                    let known = old.get(&target_id).map(schema::subcategories).unwrap_or_default();
-                    validate_destination_node(lib, folder, &known, &paths, &wanted)?;
-                    paths.push(wanted.clone());
-                }
+                } else { paths.push(wanted.clone()); }
+                // Apply the same disk-ownership check to matched and explicitly
+                // renamed nodes, not just to names newly inserted into the tree.
+                let folder = after[&target_id]["folder"].as_str().unwrap_or("");
+                let known = old.get(&target_id).map(schema::subcategories).unwrap_or_default();
+                validate_destination_node(lib, folder, &known, &paths, &wanted)?;
                 validate_tree(&paths)?;
                 schema::set_subcategories(after.get_mut(&target_id).unwrap(), &paths);
                 local.push((p, wanted));
