@@ -3134,7 +3134,7 @@ mod tests {
         let r = &done["result"];
         assert_eq!(r["imported"], 2, "{r}");
         assert_eq!(std::fs::read(source.join("Terrain/Rock.stl")).unwrap(), b"rock");
-        assert_eq!(std::fs::read(lib.join("Collection/Terrain/rock/Rock.stl")).unwrap(), b"rock");
+        assert_eq!(std::fs::read(lib.join("Collection/Terrain/Rock/Rock.stl")).unwrap(), b"rock");
         assert!(lib.join("_library/schemas/collection.json").is_file());
         let jid = r["journal"].as_str().unwrap();
         let undone = wait(&app, &call(&app, "journal_undo", json!({ "id": jid })).await).await;
