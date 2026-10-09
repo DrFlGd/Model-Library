@@ -22,6 +22,8 @@ pub mod docs;
 pub mod dupes;
 pub mod import;
 pub mod extract;
+pub mod fileops;
+pub mod delete;
 pub mod index;
 pub mod library;
 pub mod mesh;
