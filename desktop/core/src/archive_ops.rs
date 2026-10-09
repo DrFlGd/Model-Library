@@ -420,7 +420,10 @@ pub fn undo(lib: &Library, mut journal: Value) -> Result<Value> {
         }
     }
     let recovery = relayout::kept_dir(lib,&id).join("sources");
-    let plan = &journal["plan"];
+    // Own the reviewed manifest: updating the journal's recovery state below
+    // must not invalidate the source hashes needed for final verification.
+    let owned_plan = journal["plan"].clone();
+    let plan = &owned_plan;
     let sources: Vec<String> = if plan["action"] == "compress" {
         plan["files"].as_array().into_iter().flatten().map(|x|field(x,"path").to_string()).collect()
     } else { vec![field(plan,"file").to_string()] };
