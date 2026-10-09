@@ -172,6 +172,7 @@ async def details_refresh_checks(pg, check, out=None):
           await pg.input_value('#workspace-edit-notes') == 'Agent A local notes draft')
     await pg.click('#workspace-details-form button[type=submit]')
     await pg.wait_for_function("""() =>
+      document.querySelector('#workspace-edit-tags')?.disabled === false &&
       document.querySelector('#workspace-details-form button[type=submit]')?.disabled &&
       !document.querySelector('#details-concurrent')
     """)
