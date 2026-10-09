@@ -179,6 +179,19 @@ pub fn plan(lib: &Library, ix: &Index, args: &Value) -> Result<Value> {
         "metadata": "Content files only; model.json and generated previews remain outside the ZIP. A separate archive-manifest.json records the original model and file checksums."
     }))
 }
+/// Reject execution unless the entire current source/destination manifest is
+/// identical to the plan the user saw, including hashes and output paths.
+pub fn reviewed_plan(lib: &Library, ix: &Index, args: &Value) -> Result<Value> {
+    let reviewed = &args["reviewed_plan"];
+    if !reviewed.is_object() {
+        bail!("Review the ZIP file paths and hashes before starting this operation.");
+    }
+    let current = plan(lib,ix,args)?;
+    if &current != reviewed {
+        bail!("The ZIP plan changed after review (files, hashes or destinations). Review it again before proceeding.");
+    }
+    Ok(current)
+}
 fn validate(lib: &Library, plan: &Value) -> Result<PathBuf> {
     let root = lib.resolve(field(plan,"model"))?;
     if !root.is_dir() { bail!("The source model moved. Review the plan again."); }
@@ -533,6 +546,40 @@ mod tests {
         relayout::undo(&lib,field(&r,"journal"),&AtomicBool::new(false),&|_,_,_|{}).unwrap();
         assert_eq!(fs::read(root.join("Parts/body.stl")).unwrap(),b"mesh bytes");
         assert!(!root.join("Kit.zip").exists());
+    }
+    #[test]
+    fn reviewed_plan_rejects_added_or_changed_sources() {
+        let (lib,ix,id)=setup("archive-review-compress");
+        let root=lib.root().join("Unsorted/Kit");
+        let request=json!({"id":id,"action":"compress","file":"Kit.zip"});
+        let reviewed=plan(&lib,&ix,&request).unwrap();
+        let args=json!({"id":id,"action":"compress","file":"Kit.zip","reviewed_plan":reviewed});
+        assert!(reviewed_plan(&lib,&ix,&args).is_ok());
+        fs::write(root.join("README.pdf"),b"changed after review").unwrap();
+        assert!(reviewed_plan(&lib,&ix,&args).is_err());
+        let updated=plan(&lib,&ix,&request).unwrap();
+        let args=json!({"id":id,"action":"compress","file":"Kit.zip","reviewed_plan":updated});
+        fs::write(root.join("new-file.txt"),b"appeared after review").unwrap();
+        assert!(reviewed_plan(&lib,&ix,&args).is_err());
+    }
+    #[test]
+    fn reviewed_plan_rejects_replaced_zip() {
+        let (lib,ix,id)=setup("archive-review-extract");
+        let root=lib.root().join("Unsorted/Kit");
+        let archive_path=root.join("data.zip");
+        let create=|name:&str, bytes:&[u8]| {
+            let mut writer=zip::ZipWriter::new(File::create(&archive_path).unwrap());
+            writer.start_file(name,zip::write::SimpleFileOptions::default()).unwrap();
+            writer.write_all(bytes).unwrap();
+            writer.finish().unwrap();
+        };
+        create("one.txt",b"old bytes");
+        let args=json!({"id":id,"action":"extract","file":"data.zip"});
+        let reviewed=plan(&lib,&ix,&args).unwrap();
+        let approved=json!({"id":id,"action":"extract","file":"data.zip","reviewed_plan":reviewed});
+        assert!(reviewed_plan(&lib,&ix,&approved).is_ok());
+        create("two.txt",b"new bytes");
+        assert!(reviewed_plan(&lib,&ix,&approved).is_err());
     }
     #[test]
     fn malicious_paths_and_corrupt_zip_preserve_sources() {
