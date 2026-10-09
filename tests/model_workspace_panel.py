@@ -1,6 +1,6 @@
 """Package A acceptance checks; call on an open model with several files."""
 
-async def panel_workspace_checks(pg, check):
+async def panel_workspace_checks(pg, check, out=None):
     await pg.wait_for_selector('#file-panel-close')
     original_viewport = pg.viewport_size
     await pg.click('#parts-views [data-view="folders"]')
@@ -53,3 +53,51 @@ async def panel_workspace_checks(pg, check):
     await pg.click('#file-panel-close')
     await pg.set_viewport_size(original_viewport or {'width': 1280, 'height': 900})
     await pg.wait_for_selector('#file-panel-close')
+
+    # The navigation and both workspace ribbons are independent.
+    await pg.wait_for_selector('#details-panel-open')
+    before = await pg.locator('#file-panel').bounding_box()
+    await pg.click('.nav-burger')
+    after = await pg.locator('#file-panel').bounding_box()
+    check('collapsing navigation moves Files with its attached edge',
+          after['x'] < before['x'] and after['x'] >= 45, (before, after))
+    await pg.click('.nav-burger')
+
+    await pg.click('#details-panel-open')
+    await pg.wait_for_selector('#workspace-edit-name')
+    initial = await pg.input_value('#workspace-edit-name')
+    await pg.fill('#workspace-edit-name', initial + ' draft')
+    await pg.click('#details-panel-close')
+    await pg.click('#details-panel-open')
+    check('draft stays intact after collapsing Details',
+          await pg.input_value('#workspace-edit-name') == initial + ' draft')
+    await pg.click('.workspace-details-actions button[type=button]')
+    check('Cancel leaves the model name unchanged',
+          await pg.input_value('#workspace-edit-name') == initial)
+    panel = await pg.locator('#file-panel').bounding_box()
+    stage = await pg.locator('.workspace-viewing-area').bounding_box()
+    details = await pg.locator('#workspace-details-panel').bounding_box()
+    check('Files, stage and Details are docked in order',
+          panel['x'] + panel['width'] <= stage['x'] + 2 and
+          stage['x'] + stage['width'] <= details['x'] + 2)
+
+    await pg.set_viewport_size({'width': 1920, 'height': 1080})
+    wide = await pg.locator('.workspace-viewing-area').bounding_box()
+    await pg.set_viewport_size({'width': 1024, 'height': 768})
+    restored = await pg.locator('.workspace-viewing-area').bounding_box()
+    check('workspace responds to maximise, restore and panel widths',
+          wide['width'] > restored['width'] and
+          restored['width'] > 100 and restored['height'] > 100,
+          (wide, restored))
+    await pg.click('#details-panel-close')
+    await pg.set_viewport_size({'width': 800, 'height': 600})
+    await pg.click('#details-drawer-button')
+    check('Details remains reachable at 800 by 600',
+          await pg.locator('#workspace-details-panel.drawer').is_visible())
+    await pg.click('#details-panel-close')
+    if out is not None:
+        await pg.set_viewport_size({'width': 1280, 'height': 800})
+        await pg.click('#details-panel-open')
+        await pg.screenshot(path=str(out / 'agent-a-docked-workspace.png'))
+        await pg.click('#details-panel-close')
+    await pg.set_viewport_size(original_viewport or {'width': 1280, 'height': 900})
