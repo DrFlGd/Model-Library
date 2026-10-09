@@ -1,7 +1,7 @@
 // PDF viewing in the file workspace. Archive entries are read on demand, without
 // adding extracted files to the library. Blob URLs are bounded and reused.
 import { html, useEffect, useState } from "../lib/html.js";
-import { apiBytes, isDesktop, libraryUrl, openModelFile } from "./library.js";
+import { apiBytes, isDesktop, libraryUrl, openModelFile, openArchiveEntry } from "./library.js";
 
 const CACHE_LIMIT = 4;
 const MAX_CACHE_BYTES = 96 * 1024 * 1024;
@@ -68,7 +68,7 @@ export function PdfDocument({ src, doc, model }) {
     return () => { live = false; if (ephemeral) URL.revokeObjectURL(ephemeral); };
   }, [key]);
   const move = (n) => setPage((p) => Math.max(1, Math.min(99999, p + n)));
-  const fragment = zoom === "fit-page" ? "view=Fit" : "zoom=" + zoom;
+  const fragment = zoom === "fit-page" ? "view=Fit" : zoom === "page-width" ? "view=FitH" : "zoom=" + zoom;
   const address = view.url ? view.url + "#toolbar=0&navpanes=0&page=" + page + "&" + fragment : "";
   return html`<div class="pdf-viewer" aria-label="PDF document">
     <div class="pdf-controls" role="toolbar" aria-label="PDF controls">
@@ -85,7 +85,7 @@ export function PdfDocument({ src, doc, model }) {
     ${view.busy ? html`<p role="status" class="stage-note muted">Opening the PDF…</p>` : null}
     ${view.error ? html`<p role="alert" class="form-error">This PDF could not be opened: ${view.error}. The archive has not been changed.</p>` : null}
     ${address ? html`<iframe class="doc-frame pdf-frame" key=${address} title=${doc.entry || doc.file} src=${address} onError=${() => setView((v) => ({ ...v, error: "The system PDF viewer could not display this file." }))}></iframe>` : null}
-    ${doc.entry ? html`<p class="pdf-temporary-note muted">This PDF is read from the ZIP without changing the archive. Page display depends on the system PDF viewer.</p>` : null}
-    ${!doc.entry && isDesktop() && model ? html`<button type="button" class="ghost pdf-external" onClick=${() => openModelFile(model, doc.file)}>Open externally</button>` : null}
+    ${doc.entry ? html`<p class="pdf-temporary-note muted">This PDF is read from the ZIP without changing the archive. Page display depends on the system PDF viewer. If the page is blank, use Open externally.</p>` : null}
+    ${isDesktop() && (doc.entry || model) ? html`<button type="button" class="ghost pdf-external" onClick=${() => doc.entry ? openArchiveEntry(src, doc.file, doc.entry) : openModelFile(model, doc.file)}>Open externally</button>` : null}
   </div>`;
 }
