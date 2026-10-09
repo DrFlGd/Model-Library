@@ -144,6 +144,9 @@ async def card_checks(pg, library, base, out, api, check, png, cube):
     await pg.evaluate("document.documentElement.dataset.theme = 'dark'")
     await pg.screenshot(path=str(out / "agent-f-card-grid-dark.png"))
     await pg.evaluate("document.documentElement.dataset.theme = 'light'")
+    await pg.evaluate("document.documentElement.style.fontSize = '125%'")
+    await pg.screenshot(path=str(out / "agent-f-card-grid-large-text.png"))
+    await pg.evaluate("document.documentElement.style.fontSize = ''")
 
     await pg.goto(base + "#/browse/unsorted")
     await pg.wait_for_selector('.card:has(.card-name:text-is("F card chosen"))')
@@ -160,8 +163,26 @@ async def card_checks(pg, library, base, out, api, check, png, cube):
     check("Agent F a file addition preserves the chosen cover",
           still["files"]["explicit_cover"] == "chosen.png"
           and still["files"]["previewable"] == 4)
+    # An external removal must show a deterministic warning without discarding
+    # the explicit choice. Returning the file restores the chosen image.
+    moved_cover = chosen / "chosen.png.missing"
+    (chosen / "chosen.png").rename(moved_cover)
+    await api(pg, "library_scan", {"full": True})
     await pg.reload()
     selected = pg.locator('.card:has(.card-name:text-is("F card chosen"))')
+    missing_source = await api(pg, "model_get", {"id": "agent-f-chosen"})
+    check("Agent F a missing explicitly chosen cover shows an automatic fallback",
+          missing_source["files"]["cover_missing"]
+          and await selected.locator(".cover-composed .cover-warning").count() == 1)
+    moved_cover.rename(chosen / "chosen.png")
+    await api(pg, "library_scan", {"full": True})
+    await pg.reload()
+    selected = pg.locator('.card:has(.card-name:text-is("F card chosen"))')
+    restored_source = await api(pg, "model_get", {"id": "agent-f-chosen"})
+    check("Agent F restoring a missing source restores the user's chosen cover",
+          restored_source["files"]["explicit_cover"] == "chosen.png"
+          and not restored_source["files"]["cover_missing"]
+          and await selected.locator(".thumb > img").count() == 1)
     await selected.click()
     await pg.wait_for_selector("#details-more")
     await pg.click("#details-more")
