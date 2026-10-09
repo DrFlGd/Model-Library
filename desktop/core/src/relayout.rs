@@ -68,6 +68,9 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
     if change["kind"] == "move" {
         return plan_move(lib, ix, change);
     }
+    if change["kind"] == "restructure" {
+        return crate::restructure::plan(lib, ix, change);
+    }
     let sid = change["schema"].as_str().unwrap_or("");
     let old = ix
         .schema(sid)
@@ -284,7 +287,7 @@ fn plan_move(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
 
 /// Whether a change edits a category, and so saves its file when done or undone.
 fn edits_schema(j: &Value) -> bool {
-    matches!(j["kind"].as_str(), Some("category" | "schema" | "delete"))
+    matches!(j["kind"].as_str(), Some("category" | "schema" | "delete" | "restructure"))
 }
 
 /// Take away the subcategories a change made, unless something has gone into them
@@ -356,6 +359,11 @@ pub fn summary(plan: &Value) -> Value {
         "models": moves.len(),
         "moving": moving.len(),
         "clashes": clashes,
+        "nodes": plan["nodes"],
+        "files": plan["files"],
+        "bytes": plan["bytes"],
+        "child_collisions": plan["child_collisions"],
+        "target_path": plan["target_path"],
         "folder_before": folder_before,
         "folder_after": plan["schema_after"]["folder"],
         "sample": moving.iter().take(30).map(|m| json!({ "name": m["name"], "from": m["from"], "to": m["to"] })).collect::<Vec<_>>(),
@@ -590,8 +598,38 @@ fn place(lib: &Library, from: &str, to: &str, m: &Value, side: &str, p: &Progres
     Ok(())
 }
 
+/// Persist all changed schemas only after the model folders have been relocated.
+/// The same snapshots are used in reverse for Undo and interrupted-job recovery.
+fn restore_restructure_schemas(lib: &Library, j: &Value, side: &str, other: &str) -> Result<()> {
+    let entries = j["schemas"].as_array().ok_or_else(|| anyhow!("Category journal has no hierarchy snapshots."))?;
+    // Mutation jobs are serialised, and an interrupted journal stays recoverable.
+    for entry in entries {
+        let id = entry["id"].as_str().ok_or_else(|| anyhow!("Invalid category snapshot."))?;
+        if entry[side].is_null() {
+            schema::remove(lib, id)?;
+        } else {
+            schema::save(lib, &entry[side])?;
+        }
+    }
+    for entry in entries {
+        sync_folders(lib, &entry[side], &entry[other])?;
+        let before = entry[other]["folder"].as_str();
+        let after = entry[side]["folder"].as_str();
+        if let Some(folder) = before.filter(|b| Some(*b) != after) {
+            let _ = std::fs::remove_dir(lib.root().join(folder)); // never remove non-empty user folders
+        }
+        if let Some(folder) = after {
+            std::fs::create_dir_all(lib.root().join(folder))?;
+        }
+    }
+    Ok(())
+}
+
 /// A finished change's categories: the schema saved (or removed) and its folders made.
 fn apply_schema(lib: &Library, j: &Value) -> Result<()> {
+    if j["kind"] == "restructure" {
+        return restore_restructure_schemas(lib, j, "after", "before");
+    }
     match &j["schema_after"] {
         Value::Null => schema::remove(lib, j["schema"].as_str().unwrap_or(""))?,
         v => schema::save(lib, v)?,
@@ -612,6 +650,9 @@ fn apply_schema(lib: &Library, j: &Value) -> Result<()> {
 
 /// An undone change's categories: the schema as it was, and its folders.
 fn undo_schema(lib: &Library, j: &Value) -> Result<()> {
+    if j["kind"] == "restructure" {
+        return restore_restructure_schemas(lib, j, "before", "after");
+    }
     schema::save(lib, &j["schema_before"])?;
     sync_folders(lib, &j["schema_before"], &j["schema_after"])?;
     let (before, after) = (
