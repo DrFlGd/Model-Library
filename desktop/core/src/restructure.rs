@@ -290,7 +290,7 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
         mapped.push((s.schema.clone(), s.path.clone(), target_path.clone()));
     }
     let node_mappings: Vec<Value> = if operation == "remove-unsorted" {
-        vec![json!({ "from": [sources[0].schema.clone(), sources[0].path.join(" › ")], "to": "Unsorted" })]
+        vec![json!({ "from": format!("{} › {}", sources[0].schema, sources[0].path.join(" › ")), "to": "Unsorted" })]
     } else {
         mapped.iter().map(|(sid, from, to)| json!({
             "from": format!("{} › {}", sid, from.join(" › ")),
