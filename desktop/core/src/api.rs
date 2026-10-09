@@ -1342,7 +1342,10 @@ impl App {
                         }
                     }
                     journal["state"] = json!(if interrupted { "stopped" } else { "done" });
-                    if !interrupted { journal.as_object_mut().unwrap().remove("error"); }
+                    if !interrupted {
+                        journal["label"] = json!(format!("Imported {} models as categories", total));
+                        journal.as_object_mut().unwrap().remove("error");
+                    }
                     relayout::write(&lib, &journal)?;
                     let failed = results.iter().filter(|r| r["error"].is_string()).count();
                     Ok(json!({ "results": results, "imported": results.len() - failed,
