@@ -20,7 +20,7 @@ export function TopButtons() {
       ui.set({ navOpen: !ui.get().navOpen, mobilePanel: null });
     else setPref({ navCollapsed: !ui.get().navCollapsed });
   };
-  return html`<button type="button" class="topicon nav-burger" aria-label=${nav.collapsed ? "Expand navigation" : "Toggle navigation"} aria-expanded=${nav.open ? "true" : "false"} title="Expand or collapse navigation" onClick=${toggleNav}>${Icon.menu(18)}</button>
+  return html`<button type="button" class="topicon nav-burger" aria-label=${matchMedia("(max-width: 900px)").matches ? "Menu" : nav.collapsed ? "Expand navigation" : "Collapse navigation"} aria-expanded=${nav.open ? "true" : "false"} title="Expand or collapse navigation" onClick=${toggleNav}>${Icon.menu(18)}</button>
     <button type="button" class="topicon" id="theme-toggle" data-theme=${theme} aria-label=${`Theme: ${now}. Switch to ${themeName(next)}`} title=${`Theme: ${now}. Click for ${themeName(next)}.`}
       onClick=${cycleTheme}>${icon}</button>`;
 }
