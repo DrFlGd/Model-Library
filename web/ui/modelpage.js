@@ -12,6 +12,7 @@ import { FilePanel } from "./filepanel.js";
 import { WorkspaceStage } from "./stage.js";
 import { fileSel, reset, clear } from "./filesel.js";
 import { ExtractionBar, extractionAction, installExtractKeys } from "./extract.js";
+import { sendFilesAction } from "./fileops.js";
 import { ActionRow, MODEL_ACTIONS, usePageKeys, runKey, letter, editDetails, writable, typing } from "./actions.js";
 import { PageHead } from "./layout.js";
 import { PlaceLinks } from "./details.js";
@@ -92,7 +93,7 @@ function ModelWorkspace({ model, names, narrow, drawer, setDrawer }) {
     addEventListener("keydown", key);
     return () => removeEventListener("keydown", key);
   });
-  const contextActions = () => [extractionAction(src, model)];
+  const contextActions = () => [extractionAction(src, model), sendFilesAction(model)];
   return html`<div class="model-workspace">
     ${narrow && open ? html`<button type="button" class="file-panel-shade" aria-label="Close files" onClick=${toggle}></button>` : null}
     <${FilePanel} src=${src} model=${model} files=${files} variants=${variants} variant=${chosen} setVariant=${setVariant} open=${open} toggle=${toggle} narrow=${narrow} contextActions=${contextActions} />
