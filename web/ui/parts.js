@@ -20,7 +20,7 @@ import { size } from "./details.js";
 import { openMenu, typing } from "./actions.js";
 import { fileSel, pick, pickEvent, show, clear } from "./filesel.js";
 import { TypeTag } from "./filetypes.js";
-import { PdfDocument } from "./pdf.js";
+import { PdfDocument } from "./document-viewer.js";
 
 export const MESH = /\.(stl|obj|3mf)$/i;
 const MD = /\.(md|markdown|txt)$/i;
