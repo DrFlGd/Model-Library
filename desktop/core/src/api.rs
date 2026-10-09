@@ -457,6 +457,9 @@ impl App {
             )
             .sum();
         let done_bytes = std::sync::atomic::AtomicU64::new(0);
+        // IDs introduced earlier in this import batch are no longer available
+        // to subsequent model sidecars, even if both external models shared an ID.
+        let mut reserved_ids = ids.clone();
         let mut results = vec![];
         for (i, (it, dest)) in items.iter().zip(dests).enumerate() {
             let name = it["name"].as_str().unwrap_or("").to_string();
@@ -482,8 +485,9 @@ impl App {
                 "sidecar_before": if !loose && side.is_file() { model::read_sidecar(&src) } else { Value::Null },
                 "thumb_before": !loose && thumb::has(&src),
             });
-            match import::commit_one(lib, it, dest, schema, mv, force_copy, ids, &p) {
+            match import::commit_one(lib, it, dest, schema, mv, force_copy, &reserved_ids, &p) {
                 Ok(mut v) => {
+                    if let Some(id) = v["id"].as_str() { reserved_ids.insert(id.to_string()); }
                     v["source"] = it["source"].clone();
                     v["name"] = json!(name);
                     v["before"] = before;
