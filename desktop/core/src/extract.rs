@@ -18,7 +18,7 @@ fn checked(root: &Path, rel: &str) -> Result<PathBuf> {
     Ok(at)
 }
 fn walk(root: &Path, rel: &str, out: &mut BTreeMap<String, Option<String>>) -> Result<()> {
-    let p = checked(root, rel)?;
+    let p = if rel.is_empty() { root.to_path_buf() } else { checked(root, rel)? };
     if p.is_dir() {
         for e in std::fs::read_dir(p)? {
             let e = e?;
@@ -142,9 +142,16 @@ pub fn execute(lib: &Library, plan: &Value, mode: &str, cancel: &AtomicBool, pro
             }
         }
         stop(cancel)?;
-        let mut side = json!({"format":1,"id":model::new_id(),"name":plan["name"],"split_from":plan["source_id"],"added":crate::library::now()});
-        for k in ["authors","tags","source","released"] { if !plan["metadata"][k].is_null() { side[k]=plan["metadata"][k].clone(); } }
-        if !plan["schema"].is_null() { side["schema"]=plan["schema"].clone(); side["path"]=plan["values"].clone(); }
+        // Copy portable descriptive metadata, including unfamiliar custom fields, not identity.
+        let mut side = if j["sidecar_before"].is_object() { j["sidecar_before"].clone() } else { json!({}) };
+        for k in ["authors","tags","source","released"] {
+            if side[k].is_null() && !plan["metadata"][k].is_null() { side[k]=plan["metadata"][k].clone(); }
+        }
+        side["format"]=json!(1); side["id"]=json!(model::new_id());
+        side["name"]=plan["name"].clone(); side["split_from"]=plan["source_id"].clone();
+        side["added"]=json!(crate::library::now());
+        side["schema"]=plan["schema"].clone(); side["path"]=plan["values"].clone();
+        if let Some(cover)=side["cover"].as_str() { if !stage.join(cover).is_file() {side["cover"]=Value::Null;} }
         config::write_json(&stage.join(model::SIDECAR),&side)?;
         j["new_sidecar_after"]=side.clone(); j["original_hashes"]=hashes(&stage)?; relayout::write(lib,&j)?;
         std::fs::create_dir_all(dest.parent().unwrap())?;
