@@ -11,7 +11,8 @@ export class Viewer {
   constructor(canvas) {
     this.canvas = canvas;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this._pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+    this.renderer.setPixelRatio(this._pixelRatio);
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(35, 1, 0.5, 20000);
     this.camera.up.set(0, 0, 1);
@@ -52,6 +53,9 @@ export class Viewer {
     this.controls.addEventListener("start", this.redraw);
     this._observer = new ResizeObserver(() => this.resize());
     this._observer.observe(canvas.parentElement);
+    this._onWindowResize = () => this.resize();
+    window.addEventListener("resize", this._onWindowResize);
+    window.visualViewport?.addEventListener("resize", this._onWindowResize);
     this.resize();
   }
 
@@ -59,6 +63,8 @@ export class Viewer {
     const el = this.canvas.parentElement;
     const w = el.clientWidth, h = el.clientHeight;
     if (!w || !h) return;
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    if (ratio !== this._pixelRatio) { this._pixelRatio = ratio; this.renderer.setPixelRatio(ratio); }
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
@@ -125,6 +131,8 @@ export class Viewer {
   dispose() {
     cancelAnimationFrame(this._raf);
     this._observer.disconnect();
+    window.removeEventListener("resize", this._onWindowResize);
+    window.visualViewport?.removeEventListener("resize", this._onWindowResize);
     this.clear();
     this.controls.dispose();
     this.renderer.dispose();
