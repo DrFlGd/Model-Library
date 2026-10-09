@@ -18,7 +18,7 @@ fn list_selected(root:&Path,rel:&str,out:&mut BTreeMap<String,Value>)->Result<()
         for e in std::fs::read_dir(p)? {
             let e=e?;
             let name=e.file_name().to_string_lossy().to_string();
-            let child=if rel.is_empty(){name}else{format!("{rel}/{name}")};
+            let child=if rel.is_empty(){name.clone()}else{format!("{rel}/{name}")};
             if child==model::SIDECAR || child=="_thumbs" || child.starts_with("_thumbs/") {continue;}
             if name.starts_with('.') {continue;}
             list_selected(root,&child,out)?;
