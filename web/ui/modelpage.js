@@ -58,11 +58,11 @@ export function ModelPage({ id }) {
       ${narrow ? html`<button type="button" class="ghost" id="files-drawer-button" aria-controls="file-panel" aria-expanded=${mobilePanel === "files"} onClick=${() => ui.set({ mobilePanel: ui.get().mobilePanel === "files" ? null : "files", navOpen: false })}>Files</button><button type="button" class="ghost" id="details-drawer-button" aria-controls="workspace-details-panel" aria-expanded=${mobilePanel === "details"} onClick=${() => ui.set({ mobilePanel: ui.get().mobilePanel === "details" ? null : "details", navOpen: false })}>Details</button>` : null}
       <${ActionRow} targets=${[m]} ctx=${CTX} idPrefix="mp" />
     </${PageHead}>
-    <${ModelWorkspace} key=${m.id} model=${m} names=${s.names} narrow=${narrow} />
+    <${ModelWorkspace} key=${m.id} model=${m} names=${s.names} narrow=${narrow} onModelChange=${setM} />
   </div>`;
 }
 
-function ModelWorkspace({ model, names, narrow }) {
+function ModelWorkspace({ model, names, narrow, onModelChange }) {
   const prefs = useStore(ui);
   const [variant, setVariant] = useState(undefined);
   const src = { kind: "model", id: model.id, rel: model.rel, model };
@@ -114,7 +114,7 @@ function ModelWorkspace({ model, names, narrow }) {
     <aside id="workspace-details-panel" class=${`details-panel${detailsOpen ? "" : " collapsed"}${narrow ? " drawer" : ""}`} style=${{ width: detailsOpen ? `${detailWidth}px` : "36px" }} aria-label="Model details">
       ${!detailsOpen ? html`<button type="button" class="ghost details-panel-tab" id="details-panel-open" title="Open Details" aria-label="Open Details" onClick=${toggleDetails}>Details</button>` :
         html`<header class="details-panel-head"><strong>Details</strong><button type="button" class="ghost" id="details-panel-close" title="Collapse Details" aria-label="Collapse Details" onClick=${toggleDetails}>›</button></header>`}
-      <div class="details-body" aria-hidden=${!detailsOpen}><${WorkspaceDetails} model=${model} /></div>
+      <div class="details-body" aria-hidden=${!detailsOpen}><${WorkspaceDetails} model=${model} onModelChange=${onModelChange} /></div>
       ${detailsOpen && !narrow ? html`<div class="details-panel-resize" role="separator" aria-label="Details panel width" aria-orientation="vertical" aria-valuemin="280" aria-valuemax="460" aria-valuenow=${detailWidth} tabIndex="0" onPointerDown=${beginDetailsResize} onKeyDown=${(e) => { if (["ArrowLeft", "ArrowRight"].includes(e.key)) { e.preventDefault(); setPref({ detailsPanelWidth: Math.max(280, Math.min(460, detailWidth + (e.key === "ArrowLeft" ? 20 : -20))) }); } }}></div>` : null}
     </aside>
   </div>`;
