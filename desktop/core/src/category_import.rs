@@ -327,3 +327,93 @@ pub fn destination_manifest(dir: &Path) -> Result<Value> {
     walk(dir, dir, &mut v)?;
     Ok(json!(v))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture(name: &str) -> (Library, PathBuf, PathBuf) {
+        let home = std::env::temp_dir().join(format!("modlib-category-import-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let lib = Library::open(home.join("Lib")).unwrap();
+        let src = home.join("Collection");
+        (lib, home, src)
+    }
+    fn put(path: &Path, bytes: &[u8]) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn read_only_scan_and_editable_nested_plan_preserve_files() {
+        let (lib, home, src) = fixture("nested");
+        put(&src.join("Terrain/Rock.stl"), b"stl");
+        put(&src.join("Terrain/Rock.png"), b"picture");
+        put(&src.join("Terrain/readme.anything"), b"unknown");
+        put(&src.join("Terrain/Detail/body.stl"), b"body");
+        put(&src.join("Terrain/Detail/photo.jpg"), b"picture 2");
+        put(&src.join("Terrain/Detail/photos/another.jpg"), b"more");
+        let ix = Index::build(&lib, None, false);
+        let mut proposal = scan(&lib, std::slice::from_ref(&src)).unwrap();
+        assert_eq!(proposal["roots"][0]["kind"], "category");
+        assert_eq!(proposal["roots"][0]["children"][0]["kind"], "category");
+        let detail = proposal["roots"][0]["children"][0]["children"].as_array().unwrap().iter()
+            .find(|v| v["name"] == "Detail").unwrap();
+        assert_eq!(detail["kind"], "model", "a recognisable model may have companion folders");
+        let original = plan(&lib, &ix, &proposal).unwrap();
+        assert_eq!(original["models"], 4, "{original}");
+        assert_eq!(original["categories"][0]["name"], "Collection");
+        assert!(original["items"].as_array().unwrap().iter().any(|i| i["name"] == "readme"));
+        assert!(!lib.root().join("Collection").exists(), "planning may not create a category folder");
+        assert!(schema::list(&lib).is_empty(), "planning may not write a category file");
+
+        proposal["roots"][0]["children"][0]["group"] = json!(true);
+        proposal["roots"][0]["children"][0]["group_name"] = json!("Terrain kit");
+        let grouped = plan(&lib, &ix, &proposal).unwrap();
+        assert_eq!(grouped["models"], 2, "{grouped}");
+        assert_eq!(grouped["items"][0]["name"], "Terrain kit");
+        assert_eq!(grouped["items"][0]["files"].as_array().unwrap().len(), 3);
+        assert!(!lib.root().join("Collection").exists());
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn map_to_existing_requires_explicit_choice_and_detects_changed_sources() {
+        let (lib, home, src) = fixture("existing");
+        put(&src.join("Terrain/Rock.stl"), b"first");
+        let existing = schema::create(&lib, &json!({ "name": "Collection" })).unwrap();
+        let ix = Index::build(&lib, None, false);
+        let mut proposal = scan(&lib, std::slice::from_ref(&src)).unwrap();
+        let collision = plan(&lib, &ix, &proposal).unwrap();
+        assert!(!collision["conflicts"].as_array().unwrap().is_empty(), "{collision}");
+        proposal["roots"][0]["target"] = json!({ "schema": existing.id, "values": [] });
+        let plan_ok = plan(&lib, &ix, &proposal).unwrap();
+        assert!(plan_ok["conflicts"].as_array().unwrap().is_empty(), "{plan_ok}");
+        assert!(plan_ok["categories"].as_array().unwrap().is_empty());
+        // A missing file, added file or changed bytes invalidates the review.
+        put(&src.join("Terrain/Rock.stl"), b"second");
+        assert!(plan(&lib, &ix, &proposal).is_err());
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn exclusions_and_unsafe_symlinks_are_not_silent() {
+        let (lib, home, src) = fixture("exclude");
+        put(&src.join("Terrain/Rock.stl"), b"rock");
+        put(&src.join("Terrain/Secret.abc"), b"secret");
+        let ix = Index::build(&lib, None, false);
+        let mut staged = scan(&lib, std::slice::from_ref(&src)).unwrap();
+        staged["roots"][0]["children"][0]["kind"] = json!("category");
+        for child in staged["roots"][0]["children"][0]["children"].as_array_mut().unwrap() {
+            if child["name"] == "Secret.abc" { child["include"] = json!(false); }
+        }
+        let p = plan(&lib, &ix, &staged).unwrap();
+        assert_eq!(p["models"], 1);
+        assert!(!p["items"].as_array().unwrap().iter().any(|i| i["name"] == "Secret"));
+        // A folder-as-model imports its entire contents; a staged exclusion may
+        // not accidentally be ignored when classifying it as a model.
+        staged["roots"][0]["children"][0]["kind"] = json!("model");
+        assert!(plan(&lib, &ix, &staged).is_err());
+        let _ = std::fs::remove_dir_all(home);
+    }
+}
