@@ -636,6 +636,128 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+
+    /// Occupied destinations must never be silently reinterpreted as category
+    /// containers, regardless of how the app discovered their contents.
+    fn occupied_destination(root: &Path, rel: &str, kind: &str) {
+        let dir = root.join(rel);
+        std::fs::create_dir_all(&dir).unwrap();
+        match kind {
+            "sidecar" => {
+                file(root, &format!("{rel}/part.stl"));
+                std::fs::write(dir.join(crate::model::SIDECAR),
+                    r#"{"name":"Existing model","id":"existing-model"}"#).unwrap();
+            }
+            "no-sidecar" => file(root, &format!("{rel}/part.stl")),
+            "unmanaged" | "case-alias" => {}
+            _ => panic!("unknown fixture"),
+        }
+    }
+
+    #[test]
+    fn incoming_merge_children_cannot_occupy_models_unmanaged_dirs_or_case_aliases() {
+        for kind in ["sidecar", "no-sidecar", "unmanaged", "case-alias"] {
+            let root = temp_dir(&format!("merge-occupied-{kind}"));
+            let lib = Library::open(&root).unwrap();
+            schema::create(&lib,&json!({"name":"Target"})).unwrap();
+            schema::create(&lib,&json!({"name":"Source","subcategories":[
+                {"name":"Terrain","subcategories":[{"name":"Rocks"}]}]})).unwrap();
+            schema::create(&lib,&json!({"name":"Extra"})).unwrap();
+            file(&root,"Source/Terrain/Rocks/Boulder/rock.stl");
+            let occupied = if kind == "case-alias" { "Target/terrain" } else { "Target/Terrain" };
+            occupied_destination(&root, occupied, kind);
+            let before_tree = schema::list(&lib).iter().map(|x| (x.id.clone(), x.tree())).collect::<Vec<_>>();
+            let before_models = Index::build(&lib, None, true);
+            let source_id = before_models.models.iter().find(|m|
+                m.rel() == "Source/Terrain/Rocks/Boulder").unwrap().id().to_string();
+            let change = json!({"operation":"merge","sources":[
+                {"schema":"source","path":[]},{"schema":"extra","path":[]}],
+                "target":{"schema":"target","path":[]},"child_conflicts":"merge"});
+            let error = plan(&lib, &before_models, &change).unwrap_err().to_string();
+            assert!(error.contains("occupied") || error.contains("model"), "{kind}: {error}");
+            assert!(root.join("Source/Terrain/Rocks/Boulder/rock.stl").is_file());
+            assert!(!root.join("Target/Terrain/Rocks/Boulder").exists());
+            assert_eq!(before_tree, schema::list(&lib).iter().map(|x| (x.id.clone(), x.tree())).collect::<Vec<_>>());
+            assert!(Index::build(&lib,None,true).models.iter().any(|m|
+                m.id() == source_id && m.rel() == "Source/Terrain/Rocks/Boulder"));
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn reparented_children_cannot_occupy_models_unmanaged_dirs_or_case_aliases() {
+        for kind in ["sidecar", "no-sidecar", "unmanaged", "case-alias"] {
+            let root = temp_dir(&format!("remove-up-occupied-{kind}"));
+            let lib = Library::open(&root).unwrap();
+            schema::create(&lib,&json!({"name":"Items","subcategories":[
+                {"name":"A","subcategories":[{"name":"Remove","subcategories":[
+                    {"name":"Terrain","subcategories":[{"name":"Rocks"}]}]}]}]})).unwrap();
+            file(&root,"Items/A/Remove/Terrain/Rocks/Boulder/rock.stl");
+            let occupied = if kind == "case-alias" { "Items/A/terrain" } else { "Items/A/Terrain" };
+            occupied_destination(&root, occupied, kind);
+            let before = schema::list(&lib)[0].tree();
+            let ix = Index::build(&lib,None,true);
+            let change = json!({"operation":"remove-up", "source":{"schema":"items","path":["A","Remove"]}});
+            let error = plan(&lib,&ix,&change).unwrap_err().to_string();
+            assert!(error.contains("occupied") || error.contains("model"), "{kind}: {error}");
+            assert_eq!(schema::list(&lib)[0].tree(), before);
+            assert!(root.join("Items/A/Remove/Terrain/Rocks/Boulder/rock.stl").exists());
+            assert!(!root.join("Items/A/Terrain/Rocks/Boulder").exists());
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn matching_children_at_several_depths_use_existing_target_case_and_undo() {
+        let root = temp_dir("canonical-child-case");
+        let lib = Library::open(&root).unwrap();
+        schema::create(&lib,&json!({"name":"Target","subcategories":[
+            {"name":"Terrain","subcategories":[{"name":"Rocks"}]}]})).unwrap();
+        schema::create(&lib,&json!({"name":"Source","subcategories":[
+            {"name":"terrain","subcategories":[{"name":"rocks","subcategories":[
+                {"name":"Deep"}]}]}]}]})).unwrap();
+        file(&root,"Source/terrain/rocks/Deep/Boulder/rock.stl");
+        file(&root,"Target/Terrain/Rocks/Existing/ex.stl");
+        let c = json!({"operation":"merge","sources":[
+            {"schema":"source","path":[]},{"schema":"target","path":[]}],
+            "target":{"schema":"target","path":[]},"child_conflicts":"merge"});
+        let ix = Index::build(&lib,None,true);
+        let preview = plan(&lib,&ix,&c).unwrap();
+        assert!(preview["moves"].as_array().unwrap().iter().any(|m|
+            m["to"] == "Target/Terrain/Rocks/Deep/Boulder"));
+        let id = execute(&lib,c);
+        assert!(root.join("Target/Terrain/Rocks/Deep/Boulder/rock.stl").is_file());
+        assert!(!root.join("Target/terrain").exists());
+        let side = model::read_sidecar(&root.join("Target/Terrain/Rocks/Deep/Boulder"));
+        assert_eq!(side["path"],json!(["Terrain","Rocks","Deep"]));
+        let tree = schema::list(&lib)[0].tree();
+        assert!(tree.contains(&vec!["Terrain".into(),"Rocks".into(),"Deep".into()]));
+        assert!(!tree.iter().any(|p| p.first().is_some_and(|n| n == "terrain")));
+        relayout::undo(&lib,&id,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert!(root.join("Source/terrain/rocks/Deep/Boulder/rock.stl").is_file());
+        assert!(root.join("Target/Terrain/Rocks/Existing/ex.stl").is_file());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn existing_target_selection_adopts_canonical_path_case() {
+        let root = temp_dir("canonical-target-path");
+        let lib = Library::open(&root).unwrap();
+        schema::create(&lib,&json!({"name":"Target","subcategories":[{"name":"Office"}]})).unwrap();
+        schema::create(&lib,&json!({"name":"Source"})).unwrap();
+        schema::create(&lib,&json!({"name":"Extra"})).unwrap();
+        file(&root,"Source/Boulder/rock.stl");
+        let change = json!({"operation":"merge","sources":[
+            {"schema":"source","path":[]},{"schema":"extra","path":[]}],
+            "target":{"schema":"target","path":["office"]},"child_conflicts":"merge"});
+        let id = execute(&lib,change);
+        assert!(root.join("Target/Office/Boulder/rock.stl").is_file());
+        assert!(!root.join("Target/office").exists());
+        relayout::undo(&lib,&id,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert!(root.join("Source/Boulder/rock.stl").is_file());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn reject_cycles_and_ancestor_sources_without_mutation() {
         let root=temp_dir("bad-restructure");
