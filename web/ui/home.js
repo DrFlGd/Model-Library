@@ -37,7 +37,7 @@ function libraryItems(lib) {
   ];
 }
 
-const STATES = { done: "", undone: "undone", running: "interrupted", undoing: "interrupted while undoing", stopped: "stopped partway", emptied: "copies deleted" };
+const STATES = { done: "", undone: "undone", running: "interrupted", undoing: "interrupted while undoing", interrupted: "needs recovery", stopped: "stopped partway", emptied: "copies deleted" };
 
 /** Changes recorded in the library (categories, moves, imports, details): undo one
  *  (changes that move folders newest first; details while nothing newer touched the
@@ -52,13 +52,15 @@ function RecentChanges({ lib, rev }) {
     try { await fn(id); toast(what); } catch (e) { toast(e.message || String(e), 8000); } finally { setBusy(false); }
   };
   const first = list.find((j) => j.undo === true);
-  const broken = list.find((j) => ["running", "undoing", "stopped"].includes(j.state));
+  const broken = list.find((j) => ["running", "undoing", "stopped"].includes(j.state) || (j.kind === "archive-op" && j.state === "interrupted"));
   const when = (t) => (t || "").replace("T", " ").slice(0, 16);
   return html`<section class="home-card home-wide" id="recent-changes">
     <h2>Recent changes</h2>
     ${broken && !lib.read_only ? html`<div class="warn-note" role="alert" id="change-broken">
-      <p>${broken.label} didn't finish${broken.error ? `: ${broken.error}` : "."} Some folders may have moved and others not.</p>
-      ${broken.direction === "undo"
+      <p>${broken.label} didn't finish${broken.error ? `: ${broken.error}` : "."} ${broken.kind === "archive-op" ? "Verified outputs are preserved until the original contents can be recovered." : "Some folders may have moved and others not."}</p>
+      ${broken.kind === "archive-op"
+        ? html`<div class="home-actions"><button type="button" class="primary" id="archive-recover" disabled=${busy || broken.undo !== true} title=${broken.undo !== true ? broken.undo || "Undo the newer change first." : "Verify originals before removing any ZIP outputs"} onClick=${() => act(undoChange, broken.id, "Archive operation safely undone.")}>Undo partial ZIP operation</button></div>`
+        : broken.direction === "undo"
         ? html`<div class="home-actions"><button type="button" class="primary" id="finish-change" disabled=${busy} onClick=${() => act(undoChange, broken.id, "Undone: the folders are back where they were.")}>Finish undoing it</button>
           <button type="button" class="ghost" id="putback-change" disabled=${busy} onClick=${() => act(finishChange, broken.id, "The change is made again.")}>Make the change again</button></div>`
         : html`<div class="home-actions"><button type="button" class="primary" id="finish-change" disabled=${busy} onClick=${() => act(finishChange, broken.id, "Finished.")}>Finish it</button>
