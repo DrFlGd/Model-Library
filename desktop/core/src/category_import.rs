@@ -74,7 +74,12 @@ fn descend(p: &Path, depth: usize, count: &mut usize, root: bool) -> Result<Valu
         bytes = bytes.saturating_add(child["bytes"].as_u64().unwrap_or(0));
         children.push(child);
     }
-    let kind = if !root && (sidecar || (has_main && !has_dir)) { "model" } else { "category" };
+    // A recognisable model can have internal picture/document folders. If a
+    // child already looks like a model, retain the parent as a category.
+    let has_model_child = children.iter().any(|c| c["kind"] == "model");
+    let kind = if !root && (sidecar || (has_main && (!has_dir || !has_model_child))) {
+        "model"
+    } else { "category" };
     Ok(json!({ "source": source, "name": name, "kind": kind,
         "include": root || (!name.starts_with('.') && name != "_library"), "group": false, "group_name": format!("{} files", name),
         "target": Value::Null, "map_to": Value::Null, "bytes": bytes, "children": children }))
@@ -140,7 +145,6 @@ fn virtual_schema(id: &str, name: &str) -> Schema {
 }
 struct Planner<'a> {
     lib: &'a Library,
-    ix: &'a Index,
     schemas: HashMap<String, Schema>,
     categories: Vec<Value>,
     subcategories: Vec<Value>,
@@ -247,10 +251,11 @@ impl Planner<'_> {
 pub fn plan(lib: &Library, ix: &Index, proposal: &Value) -> Result<Value> {
     let roots = proposal["roots"].as_array().ok_or_else(|| anyhow!("No staged folders."))?;
     let paths: Vec<PathBuf> = roots.iter().map(|r| PathBuf::from(string(r, "source"))).collect();
+    if paths.is_empty() { bail!("Choose at least one folder."); }
     let fresh = scan(lib, &paths)?;
     for (a, b) in roots.iter().zip(fresh["roots"].as_array().unwrap()) { unchanged(a, b)?; }
     let mut p = Planner {
-        lib, ix, schemas: ix.schemas.iter().map(|s| (s.id.clone(), s.clone())).collect(),
+        lib, schemas: ix.schemas.iter().map(|s| (s.id.clone(), s.clone())).collect(),
         categories: vec![], subcategories: vec![], items: vec![], conflicts: vec![],
         taken: HashSet::new(), places: HashSet::new(),
     };
