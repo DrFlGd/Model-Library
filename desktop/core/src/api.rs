@@ -1222,6 +1222,20 @@ impl App {
                     Ok(json!({ "results": results, "mode": if mv { "move" } else { "copy" } }))
                 }))
             }
+            "archive_plan" => {
+                let r = self.with_index(None, |ix, lib| crate::archive_ops::plan(lib, ix, &args)).await?.map_err(e2s)?;
+                j(r)
+            }
+            "archive_execute" => {
+                let lib = self.library()?;
+                lib.writable().map_err(e2s)?;
+                let plan = self.with_index(None, |ix, lib| crate::archive_ops::plan(lib, ix, &args)).await?.map_err(e2s)?;
+                let remove_sources = args["remove_sources"].as_bool() == Some(true);
+                j(self.spawn_job("Working with ZIP", move |app, jid, cancel| {
+                    crate::archive_ops::execute(&lib, &plan, remove_sources, &cancel, &|i,n,name|
+                        app.job_progress(&jid, json!({"item":i,"items":n,"name":name})))
+                }))
+            }
             "model_zip" => {
                 let path = self.file_path(&args).await?;
                 j(json!(archive::list(&path).map_err(e2s)?))
