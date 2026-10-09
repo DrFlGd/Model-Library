@@ -1199,96 +1199,130 @@ impl App {
                     if cancel.load(Ordering::Relaxed) {
                         anyhow::bail!("Stopped before making any changes.");
                     }
-                    let mut created: Vec<schema::Schema> = vec![];
+                    // Record all anticipated category nodes, source bytes,
+                    // metadata preimages and model destinations BEFORE making
+                    // any folders or deleting originals.
+                    let drafts = category_import::drafted_schemas(&lib, &plan)?;
+                    let mut journal_moves = vec![];
+                    let planned_items = plan["items"].as_array().cloned().unwrap_or_default();
+                    let mut added = vec![];
+                    for it in &planned_items {
+                        let src = PathBuf::from(it["source"].as_str().unwrap_or(""));
+                        let is_folder = it["files"].as_array().is_none_or(Vec::is_empty);
+                        let before = if is_folder && src.join(model::SIDECAR).is_file() {
+                            model::read_sidecar(&src)
+                        } else { Value::Null };
+                        if let Some(sid) = it["schema"].as_str().and_then(|sid| ix.schema(sid)) {
+                            let dest = PathBuf::from(it["dest"].as_str().unwrap_or(""));
+                            let path = import::place_of(&lib, Some(sid), &dest);
+                            let tree = sid.tree();
+                            if let Some(k) = (1..=path.len()).find(|&k| !schema::in_tree(&tree, &path[..k])) {
+                                let a = json!({ "schema": sid.id, "path": path[..k] });
+                                if !added.contains(&a) { added.push(a); }
+                            }
+                        }
+                        journal_moves.push(json!({ "name": it["name"], "source": it["source"],
+                            "files": it["files"], "to": it["rel"], "mode": if mv { "move" } else { "copy" },
+                            "phase": "planned", "manifest": Value::Null,
+                            "sidecar_before": before, "thumb_before": is_folder && thumb::has(&src),
+                            "source_manifest": category_import::source_manifest(it)? }));
+                    }
+                    let start = json!({ "kind": "import", "category_import": true,
+                        "direction": "apply", "mode": if mv { "move" } else { "copy" },
+                        "label": format!("Importing {} models as categories", journal_moves.len()),
+                        "created_schemas": drafts, "added": added, "moves": journal_moves });
+                    let id = relayout::start(&lib, &start)?;
+                    let mut journal = relayout::read(&lib, &id)?;
+                    let mut schemas = import::schemas_by_id(&ix);
                     let mut draft_ids = std::collections::HashMap::new();
-                    for spec in plan["categories"].as_array().into_iter().flatten() {
-                        let name = spec["name"].as_str().unwrap_or("");
-                        match schema::create(&lib, &json!({ "name": name })) {
-                            Ok(s) => {
-                                draft_ids.insert(spec["draft"].as_str().unwrap_or("").to_string(), s.id.clone());
-                                created.push(s);
+                    for (i, spec) in plan["categories"].as_array().into_iter().flatten().enumerate() {
+                        // The "creating" state is durable even if schema::create
+                        // succeeds but the following journal write is interrupted.
+                        journal["created_schemas"][i]["phase"] = json!("creating");
+                        relayout::write(&lib, &journal)?;
+                        let made = schema::create(&lib, &json!({ "name": spec["name"] }))?;
+                        let expected = journal["created_schemas"][i]["id"].as_str().unwrap_or("");
+                        if made.id != expected {
+                            anyhow::bail!("The category ID changed during creation. Recover the interrupted import from Home.");
+                        }
+                        draft_ids.insert(spec["draft"].as_str().unwrap_or("").to_string(), made.id.clone());
+                        schemas.insert(made.id.clone(), made);
+                        journal["created_schemas"][i]["phase"] = json!("created");
+                        relayout::write(&lib, &journal)?;
+                    }
+                    let mut used = import::ids_in_use(&ix);
+                    let mut results: Vec<Value> = vec![];
+                    let total = planned_items.len();
+                    let mut interrupted = false;
+                    for (i, old) in planned_items.iter().enumerate() {
+                        if cancel.load(Ordering::Relaxed) {
+                            interrupted = true;
+                            results.push(json!({ "name": old["name"], "source": old["source"],
+                                "error": "Stopped before this model. Use Home to put the imported models back." }));
+                            break;
+                        }
+                        let mut item = old.clone();
+                        if let Some(id) = item["schema"].as_str().and_then(|id| draft_ids.get(id)) {
+                            item["schema"] = json!(id);
+                        }
+                        let dest = PathBuf::from(item["dest"].as_str().unwrap_or(""));
+                        app.job_progress(&jid, json!({ "item": i, "items": total, "name": item["name"] }));
+                        journal["moves"][i]["phase"] = json!("publishing");
+                        relayout::write(&lib, &journal)?;
+                        let no_progress = import::Progress { cancel: &cancel, on_bytes: &|_| {} };
+                        let schema = item["schema"].as_str().and_then(|id| schemas.get(id));
+                        let result = (|| -> Result<Value> {
+                            // Publish a checked copy first, without removing the
+                            // only complete original. Journal hashes are persisted
+                            // before destructive cleanup in Move mode.
+                            let r = import::commit_one(&lib, &item, &dest, schema,
+                                false, force_copy, &used, &no_progress)?;
+                            if !thumb::has(&dest) {
+                                if let Err(e) = thumb::make(&dest) {
+                                    eprintln!("preview of {}: {e:#}", dest.display());
+                                }
+                            }
+                            let manifest = category_import::destination_manifest(&dest)?;
+                            journal["moves"][i]["manifest"] = manifest;
+                            journal["moves"][i]["phase"] = json!("copied");
+                            relayout::write(&lib, &journal)?;
+                            if mv {
+                                journal["moves"][i]["phase"] = json!("cleaning");
+                                relayout::write(&lib, &journal)?;
+                                category_import::remove_originals(&journal["moves"][i])?;
+                            }
+                            journal["moves"][i]["phase"] = json!("done");
+                            journal["moves"][i]["id"] = r["id"].clone();
+                            relayout::write(&lib, &journal)?;
+                            Ok(r)
+                        })();
+                        match result {
+                            Ok(mut r) => {
+                                if let Some(id) = r["id"].as_str() { used.insert(id.to_string()); }
+                                r["name"] = item["name"].clone();
+                                r["source"] = item["source"].clone();
+                                results.push(r);
                             }
                             Err(e) => {
-                                for s in created.iter().rev() {
-                                    if std::fs::remove_dir(lib.root().join(&s.folder)).is_ok() {
-                                        let _ = schema::remove(&lib, &s.id);
-                                    }
-                                }
-                                return Err(e);
+                                interrupted = true;
+                                let msg = format!("{e:#}");
+                                journal["moves"][i]["error"] = json!(msg);
+                                journal["error"] = json!(msg);
+                                relayout::write(&lib, &journal)?;
+                                results.push(json!({ "name": item["name"], "source": item["source"],
+                                    "error": msg }));
+                                break; // keep the remaining staged models untouched
                             }
                         }
                     }
-                    let mut schemas = import::schemas_by_id(&ix);
-                    for s in &created { schemas.insert(s.id.clone(), s.clone()); }
-                    let mut items = plan["items"].as_array().cloned().unwrap_or_default();
-                    for item in &mut items {
-                        if let Some(s) = item["schema"].as_str().and_then(|id| draft_ids.get(id)) {
-                            item["schema"] = json!(s);
-                        }
-                    }
-                    let dests: Vec<PathBuf> = items.iter().map(|it|
-                        PathBuf::from(it["dest"].as_str().unwrap_or(""))).collect();
-                    let used = import::ids_in_use(&ix);
-                    let mut results = app.run_import(&jid, &cancel, &lib, &items, &dests, &schemas, &used, mv, force_copy);
-                    let mut moves = vec![];
-                    let mut added: Vec<Value> = vec![];
-                    let mut successful_schemas = std::collections::HashSet::new();
-                    for ((r, it), dest) in results.iter_mut().zip(&items).zip(&dests) {
-                        let before = r.as_object_mut().and_then(|o| o.shift_remove("before"));
-                        if r["error"].is_string() { continue; }
-                        if let Some(sid) = it["schema"].as_str() {
-                            successful_schemas.insert(sid.to_string());
-                            // For existing categories, Undo removes only paths this
-                            // operation introduced, never previously existing nodes.
-                            if let Some(s) = ix.schema(sid) {
-                                let path = import::place_of(&lib, Some(s), dest);
-                                let tree = s.tree();
-                                if let Some(k) = (1..=path.len()).find(|&k| !schema::in_tree(&tree, &path[..k])) {
-                                    let a = json!({ "schema": sid, "path": path[..k] });
-                                    if !added.contains(&a) { added.push(a); }
-                                }
-                            }
-                        }
-                        let before = before.unwrap_or_default();
-                        let manifest = category_import::destination_manifest(dest)?;
-                        moves.push(json!({ "name": r["name"], "id": r["id"], "to": r["rel"],
-                            "source": it["source"], "files": it["files"], "manifest": manifest,
-                            "sidecar_before": before["sidecar_before"], "thumb_before": before["thumb_before"] }));
-                    }
-                    // Discard categories created by a failed/skipped branch, without
-                    // touching any existing category or a directory with contents.
-                    let mut kept = vec![];
-                    for s in &created {
-                        if successful_schemas.contains(&s.id) {
-                            kept.push(json!({ "id": s.id, "folder": s.folder }));
-                        } else {
-                            if std::fs::remove_dir(lib.root().join(&s.folder)).is_ok() {
-                                let _ = schema::remove(&lib, &s.id);
-                            } else {
-                                // Do not orphan unexpectedly present content.
-                                kept.push(json!({ "id": s.id, "folder": s.folder }));
-                                if let Some(r) = results.iter_mut().find(|r| r["error"].is_string()) {
-                                    r["error"] = json!(format!("{}; created category kept for recovery", r["error"].as_str().unwrap_or("Import failed")));
-                                }
-                            }
-                        }
-                    }
-                    let journal = if moves.is_empty() {
-                        Value::Null
-                    } else {
-                        let id = relayout::new_id(&lib)?;
-                        let n = moves.len();
-                        relayout::record(&lib, &id, &json!({
-                            "kind": "import", "mode": if mv { "move" } else { "copy" },
-                            "label": format!("Imported {n} models as categories"),
-                            "added": added, "created_schemas": kept, "moves": moves
-                        }))?;
-                        json!(id)
-                    };
+                    journal["state"] = json!(if interrupted { "stopped" } else { "done" });
+                    if !interrupted { journal.as_object_mut().unwrap().remove("error"); }
+                    relayout::write(&lib, &journal)?;
                     let failed = results.iter().filter(|r| r["error"].is_string()).count();
                     Ok(json!({ "results": results, "imported": results.len() - failed,
                         "failed": failed, "mode": if mv { "move" } else { "copy" },
-                        "journal": journal, "categories": kept }))
+                        "journal": id, "state": journal["state"],
+                        "categories": journal["created_schemas"] }))
                 }))
             }
             "import_scan" => {
