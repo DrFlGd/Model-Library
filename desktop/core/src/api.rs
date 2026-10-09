@@ -3194,8 +3194,10 @@ mod tests {
         assert!(p["conflicts"].as_array().unwrap().is_empty(), "{p}");
         assert!(!lib.join("Collection").exists(), "review must not mutate the library");
 
+        let mut approval = p.clone();
+        approval["reviewed_mode"] = json!("copy");
         let done = wait(&app, &call(&app, "category_import_commit", json!({
-            "proposal": reviewed, "mode": "copy"
+            "proposal": reviewed, "reviewed": approval, "mode": "copy"
         })).await).await;
         assert!(done["error"].is_null(), "{done}");
         let r = &done["result"];
@@ -3225,8 +3227,10 @@ mod tests {
             "paths": [source.display().to_string()]
         })).await;
         let reviewed = json!({ "roots": scan["roots"] });
+        let mut approval = call(&app, "category_import_plan", json!({ "proposal": reviewed })).await;
+        approval["reviewed_mode"] = json!("copy");
         let done = wait(&app, &call(&app, "category_import_commit", json!({
-            "proposal": reviewed, "mode": "copy"
+            "proposal": reviewed, "reviewed": approval, "mode": "copy"
         })).await).await;
         assert!(done["error"].is_null(), "{done}");
         assert_eq!(done["result"]["imported"], 1, "{done}");
