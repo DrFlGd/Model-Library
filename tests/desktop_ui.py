@@ -87,6 +87,30 @@ def wait(js, timeout=60, what=""):
             print("module probe:", module, flush=True)
         except Exception as e:
             print("module probe unavailable:", str(e)[:500], flush=True)
+        # Isolate MIME failures in the static module graph. A bare TypeError
+        # does not tell us which import URL WebKitGTK rejected.
+        try:
+            probes = d.execute_async_script("""
+                const done = arguments[arguments.length - 1];
+                const urls = [
+                    'app.js', 'platform.js', 'ui/context.js', 'ui/shell.js',
+                    'ui/parts.js', 'ui/document-viewer.js', 'ui/library.js',
+                    'ui/archive-actions.js', 'lib/html.js',
+                    'vendor/preact/src/index.js', 'vendor/htm/index.mjs'
+                ];
+                Promise.all(urls.map(async path => {
+                    const url = new URL(path, location.href + '/').href;
+                    try {
+                        const r = await fetch(url);
+                        const text = await r.text();
+                        return {path, status:r.status, type:r.headers.get('content-type'),
+                            bytes:text.length, prefix:text.slice(0, 35)};
+                    } catch(e) { return {path, error:String(e)}; }
+                })).then(done, e => done([{error:String(e)}]));
+            """)
+            print("module MIME responses:", probes, flush=True)
+        except Exception as e:
+            print("module MIME probe unavailable:", str(e)[:500], flush=True)
     except Exception as e:
         print("couldn't inspect the page:", e, flush=True)
     return False
