@@ -194,6 +194,8 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
                 }
                 p.push(name);
                 if contains(&existing, &p) { bail!("Target already exists; select it instead."); }
+                let target_folder = p.iter().fold(lib.root().join(v["folder"].as_str().unwrap_or("")), |d, n| d.join(n));
+                if target_folder.exists() { bail!("A folder already occupies the proposed new target; choose or rename it explicitly."); }
                 schema::check_path(lib, v["folder"].as_str().unwrap_or(""), &existing, &p)?;
                 target_path = p;
                 let mut new_paths = existing;
@@ -287,6 +289,14 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
         schema::set_subcategories(after.get_mut(&s.schema).unwrap(), &paths);
         mapped.push((s.schema.clone(), s.path.clone(), target_path.clone()));
     }
+    let node_mappings: Vec<Value> = if operation == "remove-unsorted" {
+        vec![json!({ "from": [sources[0].schema.clone(), sources[0].path.join(" › ")], "to": "Unsorted" })]
+    } else {
+        mapped.iter().map(|(sid, from, to)| json!({
+            "from": format!("{} › {}", sid, from.join(" › ")),
+            "to": format!("{} › {}", target_id, to.join(" › "))
+        })).collect()
+    };
     let mut moves = vec![];
     let mut taken: HashSet<PathBuf> = HashSet::new();
     for m in &ix.models {
@@ -338,7 +348,7 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
         "schema": target_id, "schema_before": null, "schema_after": null,
         "operation": operation, "schemas": schemas, "moves": moves, "nodes": nodes,
         "files": sizes.0, "bytes": sizes.1, "child_collisions": node_collisions,
-        "target_path": target_path }))
+        "target_path": target_path, "node_mappings": node_mappings }))
 }
 
 #[cfg(test)]
