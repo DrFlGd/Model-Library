@@ -139,6 +139,50 @@ mod tests {
     use super::*;
     use crate::library::tests::temp_dir;
     #[test]
+    fn deletion_remains_restorable_after_more_than_twenty_changes() {
+        let root = temp_dir("model-delete-retention");
+        let lib = Library::open(&root).unwrap();
+        let dir = root.join("Unsorted/Recover Me");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("unique.part"), b"the only copy").unwrap();
+        std::fs::write(
+            dir.join("model.json"),
+            r#"{"name":"Recover Me","id":"recover-me"}"#,
+        ).unwrap();
+        let ix = Index::build(&lib, None, true);
+        let model_id = ix.models[0].id();
+        let reviewed = plan(&lib, &ix, &json!({"ids": [model_id]})).unwrap();
+        let result = execute(&lib, &reviewed, &AtomicBool::new(false), &|_, _, _| {}).unwrap();
+        let jid = s(&result, "journal").to_owned();
+        let saved = relayout::kept_dir(&lib, &jid).join("models/0/unique.part");
+        assert!(!dir.exists());
+        assert_eq!(std::fs::read(&saved).unwrap(), b"the only copy");
+
+        // Ordinary later changes used to evict the journal and recursively
+        // erase the only copy. Unrelated newer changes must not block restore.
+        for n in 0..26 {
+            let next = relayout::new_id(&lib).unwrap();
+            relayout::record(
+                &lib,
+                &next,
+                &json!({"kind":"move","label":format!("unrelated change {n}"),"moves":[]}),
+            ).unwrap();
+        }
+        assert_eq!(relayout::read(&lib, &jid).unwrap()["state"], "done");
+        assert_eq!(std::fs::read(&saved).unwrap(), b"the only copy");
+        let brief = relayout::briefs(&lib)
+            .into_iter()
+            .find(|j| j["id"] == jid)
+            .expect("delete must stay in recoverable history");
+        assert_eq!(brief["undo"], true, "restore was blocked: {brief}");
+
+        relayout::undo(&lib, &jid, &AtomicBool::new(false), &|_, _, _| {}).unwrap();
+        assert_eq!(std::fs::read(dir.join("unique.part")).unwrap(), b"the only copy");
+        assert_eq!(Index::build(&lib, None, true).models.len(), 1);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn delete_and_restore_two_models_without_deleting_category() {
         let root=temp_dir("model-delete");
         let lib=Library::open(&root).unwrap();
