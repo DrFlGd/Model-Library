@@ -153,12 +153,12 @@ function Review({ plan, mode }) {
   return html`<section class="ci-review" aria-label="Category import review">
     <h2>Final review</h2>
     <p>${plural(plan.categories.length, "new category")}, ${plural(plan.subcategories.filter((x) => !x.existing).length, "proposed subcategory")},
-      ${plural(plan.models, "model")} · ${size(plan.bytes)} · ${mode === "copy" ? "Copy (originals stay)" : "Move (originals removed only after a checked transfer)"}.</p>
+      ${plural(plan.models, "model")} · ${plural(plan.file_count || 0, "file")} · ${size(plan.bytes)} · ${mode === "copy" ? "Copy (originals stay)" : "Move (originals removed only after a checked transfer)"}.</p>
     ${conflicts.length ? html`<div role="alert" class="form-error"><strong>Resolve these conflicts before importing:</strong>
       <ul>${conflicts.map((x,i) => html`<li key=${i}>${x}</li>`)}</ul></div>` : null}
-    <div class="ci-destinations"><table><thead><tr><th>Model</th><th>Source</th><th>Destination</th><th>Size</th></tr></thead><tbody>
+    <div class="ci-destinations"><table><thead><tr><th>Model</th><th>Source</th><th>Destination</th><th>Files</th><th>Size</th></tr></thead><tbody>
       ${plan.items.map((it,i) => html`<tr key=${i}><td>${it.name}${it.collision ? html` <span class="muted">(Keep both)</span>` : null}</td>
-        <td title=${it.source}>${it.source}</td><td title=${it.dest}>${it.rel}</td><td>${size(it.bytes || 0)}</td></tr>`)}
+        <td title=${it.source}>${it.source}</td><td title=${it.dest}>${it.rel}</td><td>${it.file_count}</td><td>${size(it.bytes || 0)}</td></tr>`)}
     </tbody></table></div>
   </section>`;
 }
