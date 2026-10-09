@@ -20,7 +20,12 @@ fn checked(root: &Path, rel: &str) -> Result<PathBuf> {
 fn walk(root: &Path, rel: &str, out: &mut BTreeMap<String, Option<String>>) -> Result<()> {
     let p = checked(root, rel)?;
     if p.is_dir() {
-        for e in std::fs::read_dir(p)? { let e = e?; walk(root, &format!("{rel}/{}", e.file_name().to_string_lossy()), out)?; }
+        for e in std::fs::read_dir(p)? {
+            let e = e?;
+            let child = if rel.is_empty() { e.file_name().to_string_lossy().to_string() } else { format!("{rel}/{}",e.file_name().to_string_lossy()) };
+            if child == model::SIDECAR || child == "_thumbs" || child.starts_with("_thumbs/") { continue; }
+            walk(root, &child, out)?;
+        }
     } else if p.is_file() {
         if rel == model::SIDECAR || rel.starts_with("_thumbs/") { bail!("The model's details and preview stay with it."); }
         out.insert(rel.to_string(), None);
@@ -35,8 +40,13 @@ pub fn plan(lib: &Library, ix: &Index, args: &Value) -> Result<Value> {
     let mut anchors = vec![];
     for f in args["files"].as_array().into_iter().flatten() {
         let f = f.as_str().ok_or_else(|| anyhow!("Choose files inside the model."))?;
-        anchors.push(safe(f)?.parent().unwrap_or(Path::new("")).to_path_buf());
-        walk(&root, f, &mut selected)?;
+        if f.is_empty() {
+            anchors.push(PathBuf::new());
+            walk(&root, "", &mut selected)?;
+        } else {
+            anchors.push(safe(f)?.parent().unwrap_or(Path::new("")).to_path_buf());
+            walk(&root, f, &mut selected)?;
+        }
     }
     for e in args["entries"].as_array().into_iter().flatten() {
         let (file, entry) = (s(e,"file"), s(e,"entry"));
@@ -53,8 +63,6 @@ pub fn plan(lib: &Library, ix: &Index, args: &Value) -> Result<Value> {
         if !found { bail!("{entry} is no longer in the archive."); }
     }
     if selected.is_empty() { bail!("Choose files to make a new model."); }
-    let all = model::list_files(&root);
-    if !all.is_empty() && all.iter().filter(|(f,_)| !f.starts_with("_thumbs/")).all(|(f,_)| selected.contains_key(f)) { bail!("That's the whole model: use Move to category instead."); }
     let mut base = anchors.first().cloned().unwrap_or_default();
     for p in &anchors { while !p.starts_with(&base) { if !base.pop() { break; } } }
     let name = s(args,"name").trim();
