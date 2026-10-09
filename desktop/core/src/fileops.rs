@@ -193,7 +193,12 @@ fn publish(from:&Path,to:&Path,jid:&str,expected:&str)->Result<()> {
     let name=to.file_name().unwrap().to_string_lossy();
     let tmp=to.with_file_name(format!(".model-transfer-{jid}-{name}"));
     let result=(||->Result<()> {
-        copy_checked(from,&tmp,expected)?;
+        // Never overwrite a temporary filename left by another interrupted process.
+        let mut out=std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        let mut input=std::fs::File::open(from)?;
+        std::io::copy(&mut input,&mut out)?;
+        out.sync_all()?;
+        if extract::hash(&tmp)?!=expected {bail!("Temporary output failed SHA-256 verification.");}
         // An atomic no-overwrite publish: hard_link fails if another writer won the race.
         std::fs::hard_link(&tmp,to)?;
         if extract::hash(to)? != expected {bail!("The destination failed verification.");}
