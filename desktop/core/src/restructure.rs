@@ -210,16 +210,18 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
             }
         }
         for s in &sources {
-            if s.schema == target_id && schema::starts_with(&target_path, &s.path) {
-                bail!("A merge target can't be a source or inside a source.");
+            if s.schema == target_id && schema::starts_with(&target_path, &s.path)
+                && !same(&target_path, &s.path) {
+                bail!("A merge target can't be inside a source subtree.");
             }
         }
     } else if operation == "remove-up" {
         target_path = parent(&sources[0].path);
     }
-    // Remove the selected nodes from their original schema snapshots. The
-    // chosen target keeps its identity; only other whole schemas disappear.
+    // Remove selected sources other than a chosen existing target. That target
+    // remains intact, keeping both its identity and existing child hierarchy.
     for s in &sources {
+        if merging && s.schema == target_id && same(&s.path, &target_path) { continue; }
         let v = after.get_mut(&s.schema).unwrap();
         let tree = schema::subcategories(v);
         nodes += tree.iter().filter(|p| schema::starts_with(p, &s.path)).count() as u64;
@@ -234,6 +236,7 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
         let policy = change["child_conflicts"].as_str().unwrap_or("cancel");
         if !matches!(policy, "cancel" | "merge" | "rename") { bail!("Unknown child-name conflict choice."); }
         for s in &sources {
+            if s.schema == target_id && same(&s.path, &target_path) { continue; }
             let mut branches: Vec<Vec<String>> = schema::subcategories(&old[&s.schema])
                 .into_iter().filter(|p| p.len() > s.path.len() && schema::starts_with(p, &s.path)).collect();
             branches.sort_by(|a, b| a.len().cmp(&b.len()).then(a.cmp(b)));
@@ -301,6 +304,7 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
     let mut taken: HashSet<PathBuf> = HashSet::new();
     for m in &ix.models {
         let Some(s) = sources.iter().find(|s| on_node(m, s)) else { continue };
+        if merging && s.schema == target_id && same(&s.path, &target_path) { continue; }
         let model_path = strings(&m.v["path"]);
         let (sid, values) = if operation == "remove-unsorted" {
             (None, vec![])
@@ -432,6 +436,28 @@ mod tests {
         relayout::undo(&lib,&id,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
         assert_eq!(schema::list(&lib).len(),3);
         assert!(root.join("One/Same/Model_One/part.stl").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn merges_into_selected_existing_category_without_replacing_its_identity() {
+        let root = temp_dir("selected-target-merge");
+        let lib = Library::open(&root).unwrap();
+        schema::create(&lib,&json!({"name":"One","subcategories":[{"name":"Inside"}]})).unwrap();
+        schema::create(&lib,&json!({"name":"Two","subcategories":[]})).unwrap();
+        file(&root,"One/Inside/Existing/ex.stl");
+        file(&root,"Two/Incoming/in.stl");
+        let before = Index::build(&lib,None,true);
+        let existing = before.models.iter().find(|m| m.rel().contains("Existing")).unwrap().id().to_string();
+        let id = execute(&lib,json!({"operation":"merge","sources":[
+            {"schema":"one","path":[]},{"schema":"two","path":[]}],
+            "target":{"schema":"one","path":[]}}));
+        assert!(root.join("One/Inside/Existing/ex.stl").is_file());
+        assert!(root.join("One/Incoming/in.stl").is_file());
+        assert_eq!(schema::list(&lib).len(),1);
+        assert_eq!(schema::list(&lib)[0].id,"one");
+        assert!(Index::build(&lib,None,true).models.iter().any(|m|m.id()==existing));
+        relayout::undo(&lib,&id,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert!(root.join("Two/Incoming/in.stl").is_file());
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
