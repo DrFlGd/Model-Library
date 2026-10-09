@@ -904,6 +904,8 @@ body:has(.sw-go) .toast { bottom: 92px; }
 .unsorted-preview-tabs { display: flex; flex: none; padding: 0 12px 8px; gap: 5px; }
 .unsorted-preview-tabs [aria-pressed="true"] { background: var(--sel); box-shadow: inset 0 -2px var(--tool); }
 .unsorted-preview > .view-switch { margin: 0 12px 8px; flex: none; }
+.unsorted-quick-details { flex: 0 0 156px; min-height: 0; overflow: hidden; border-bottom: 1px solid var(--steel-2); }
+.unsorted-quick-details > .inspector { height: 100%; box-sizing: border-box; width: auto; border-left: 0; padding: 8px 12px; overflow: auto; }
 .unsorted-file-tree { flex: 0 1 35%; min-height: 110px; overflow: auto; }
 .unsorted-file-tree #part-tree { max-height: none; border: 0; }
 .unsorted-preview-stage {
