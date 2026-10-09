@@ -65,6 +65,7 @@ The UI pass in `docs/PLAN.md` ("UI pass design") is done: actions (0.5.1), undo 
 
 ## Unreleased
 
+- Agent D review fixes (D-1/D-2): category imports now journal their planned categories, source hashes and original model.json before writing. Copy publication is verified and journalled before Move removes originals; restartable Undo restores missing source files and keeps altered copies, and unfinished journals are not history-pruned. Commits require the exact reviewed destinations and Move/Copy mode and reject changed plans instead of picking a newly numbered destination. Added fault-injection recovery and destination-drift regression tests.
 - Agent D import planning: Import now shows Sort a folder, Import folder, Import file and Import folders as categories directly in the action row (including narrow windows). The former More options remain for compatibility.
 - Folder-to-category import gets a persistent, editable staging tree. Change container/model classification, exclude branches, group direct files, rename proposed categories and map to existing nodes; a manifest-checked review lists final model and file counts, bytes, conflicts, paths and Move/Copy mode before committing. Staging does not mutate the library.
 - Reviewed commits reuse checked file transfers, category/schema templates and import Undo journals. New models and only safely empty categories are removed on Undo; changed destination files block destructive Undo. Failed items and recoverable partial work are reported.
