@@ -716,7 +716,11 @@ async def phase4(pg):
     await pg.wait_for_selector("#context-menu")
     items = await pg.eval_on_selector_all("#context-menu .menu-label", "els => els.map(e => e.textContent)")
     await pg.screenshot(path=str(out / "18-subcategories.png"))
-    await pg.click('#context-menu [data-action="delete-subcategory"]')  # empty: at once, with Undo
+    await pg.click('#context-menu [data-action="delete-subcategory"]')
+    await pg.wait_for_selector("#delete-subcategory-dialog #change-preview")
+    await pg.screenshot(path=str(out / "18b-delete-subcategory-modes.png"))
+    await pg.click("#delete-subcategory-dialog button[type=submit]")
+    await pg.wait_for_selector("#delete-subcategory-dialog", state="detached", timeout=60000)
     await pg.wait_for_function("() => !location.hash.includes('Orks')")
     gone = not (t / "Orks").exists()
     await toast_text(pg, "^Deleted the subcategory Orks")
@@ -724,7 +728,7 @@ async def phase4(pg):
     await toast_text(pg, "^Undone")
     back = (t / "Orks").is_dir()
     check("subcategories are added at any depth, kept with no models, and deleted with Undo", made and gone and back and "Orks" in w40k and "Aeldari" in w40k
-          and items == ["Add subcategory…", "Edit category…", "Rename or move…", "Delete subcategory"], (made, gone, back, w40k, items))
+          and items == ["Add subcategory…", "Edit category…", "Rename or move…", "Merge categories…", "Delete subcategory…"], (made, gone, back, w40k, items))
     # one with models in it: they move up a level, after a list of what moves
     model_folder("Tabletop/Terrain/Buildings/Ruins/Tower", {"tower.stl": cube(6)})
     await api(pg, "library_scan", {"full": False})
@@ -737,7 +741,7 @@ async def phase4(pg):
     red = "danger" in (await pg.get_attribute("#delete-subcategory-dialog button[type=submit]", "class"))
     await pg.click("#delete-subcategory-dialog button[type=submit]")
     await pg.wait_for_selector("#delete-subcategory-dialog", state="detached", timeout=60000)
-    up = (library / "Tabletop/Terrain/Buildings/Tower/tower.stl").is_file() and not (library / "Tabletop/Terrain/Buildings/Ruins").exists()
+    up = (library / "Tabletop/Terrain/Buildings/Tower/tower.stl").is_file() and (library / "Tabletop/Terrain/Buildings/Gothic").is_dir() and not (library / "Tabletop/Terrain/Buildings/Ruins").exists()
     await toast_text(pg, "^Deleted the subcategory Ruins")
     await pg.keyboard.press("Control+z")
     await toast_text(pg, "^Undone", 60000)
@@ -975,7 +979,7 @@ async def ui_pass(pg):
     await pg.screenshot(path=str(out / "25-delete-category.png"))
     await pg.click("#delete-schema-dialog .dialog-actions .ghost")
     await pg.wait_for_selector("#delete-schema-dialog", state="detached")
-    check("a category's menu is on the sidebar too, and Delete category is red", items == ["Add subcategory…", "Edit category…", "Delete category…"] and red, (items, red))
+    check("a category's menu is on the sidebar too, and Delete category is red", items == ["Add subcategory…", "Edit category…", "Merge categories…", "Delete category…"] and red, (items, red))
 
     # 38. files without a viewer show their details and an external-app action
     put(library / "Unsorted/Knight Armour/settings.ini", "x")
