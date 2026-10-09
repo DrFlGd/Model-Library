@@ -11,7 +11,7 @@ use std::io;
 /// Validate an entry before materialising it outside its archive. In particular,
 /// backslashes are separators on Windows, not innocuous file-name characters.
 pub fn safe_entry(name: &str) -> Result<PathBuf> {
-    if name.is_empty() || name.starts_with('/') || name.contains(['\\', ':', '\0'])
+    if name.is_empty() || name.starts_with('/') || (name.contains('\\') || name.contains(':') || name.contains('\0'))
         || name.split('/').any(|part| part.is_empty() || part == "." || part == "..")
         || name.chars().any(|c| c.is_control()) {
         bail!("The ZIP contains an unsafe path: {name}");
@@ -20,7 +20,7 @@ pub fn safe_entry(name: &str) -> Result<PathBuf> {
     for part in name.split('/') {
         let stem = part.split('.').next().unwrap_or("").trim_end_matches(' ').to_ascii_uppercase();
         if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9" | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9")
-            || part.ends_with([' ', '.']) {
+            || (part.ends_with(' ') || part.ends_with('.')) {
             bail!("The ZIP contains a path unavailable on Windows: {name}");
         }
     }
