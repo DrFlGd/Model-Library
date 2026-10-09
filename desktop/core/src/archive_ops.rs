@@ -315,6 +315,49 @@ pub fn execute(lib: &Library, plan: &Value, remove_sources: bool, cancel: &Atomi
     }
     result
 }
+/// Separate, opt-in cleanup after a *completed* operation. This is a second
+/// user decision: first publish and verify, then review/remove exact originals.
+pub fn cleanup(lib: &Library, id: &str, cancel: &AtomicBool) -> Result<Value> {
+    lib.writable()?;
+    stopped(cancel)?;
+    let mut j = relayout::read(lib,id)?;
+    if j["kind"] != "archive-op" || j["state"] != "done" {
+        bail!("Finish and verify the ZIP operation before offering source cleanup.");
+    }
+    if j["remove_sources"] == true { bail!("These sources were already put in recovery."); }
+    let root = lib.resolve(field(&j,"model"))?;
+    let plan = &j["plan"];
+    let outputs = j["outputs"].as_array().ok_or_else(|| anyhow!("The ZIP verification record is missing."))?;
+    for f in outputs {
+        let path = safe(&root,field(f,"path"))?;
+        let (hash,len) = file_hash(&path)?;
+        if hash != field(f,"sha256") || len != f["size"].as_u64().unwrap_or(0) {
+            bail!("A published output changed: {}. Source cleanup is unavailable.",field(f,"path"));
+        }
+    }
+    validate_sources(&root,plan)?;
+    let keep = relayout::kept_dir(lib,id).join("sources");
+    let sources: Vec<String> = if plan["action"] == "compress" {
+        plan["files"].as_array().into_iter().flatten().map(|x|field(x,"path").to_string()).collect()
+    } else { vec![field(plan,"file").to_string()] };
+    // Verify recovery has no conflicting pre-existing files before moving any.
+    for rel in &sources {
+        stopped(cancel)?;
+        if safe(&keep,rel)?.exists() { bail!("Recovery already contains {rel}. Resolve it before cleanup."); }
+    }
+    for rel in &sources {
+        stopped(cancel)?;
+        let from = safe(&root,rel)?;
+        let to = safe(&keep,rel)?;
+        fs::create_dir_all(to.parent().unwrap())?;
+        fs::rename(&from,&to).with_context(|| format!("Could not move {rel} into recovery"))?;
+        prune(&root,from.parent());
+    }
+    j["remove_sources"] = json!(true);
+    j["cleaned_at"] = json!(crate::library::now());
+    relayout::write(lib,&j)?;
+    Ok(json!({"journal":id,"removed_sources":sources.len(),"refresh":[j["model_id"]]}))
+}
 fn validate_sources(root: &Path,plan: &Value) -> Result<()> {
     if plan["action"] == "compress" {
         for f in plan["files"].as_array().into_iter().flatten() {
