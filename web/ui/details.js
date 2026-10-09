@@ -8,7 +8,7 @@ import { html, useState, useEffect } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui } from "./state.js";
 import { routeHash, schemaScope } from "./context.js";
-import { api, libraryUrl, saveDetails, recorded, toast } from "./library.js";
+import { api, saveDetails, recorded, toast } from "./library.js";
 import { ActionRow } from "./actions.js";
 import { EditBox } from "./layout.js";
 import { Icon } from "./icons.js";
@@ -33,17 +33,8 @@ export function fieldText(field, value) {
   return String(value);
 }
 
-/** A model's cover picture, or an icon for the kind of files it has. */
-export function Cover({ model, cls = "" }) {
-  const [failed, setFailed] = useState(false);
-  const cover = model.files?.cover;
-  if (cover && !failed) {
-    return html`<span class=${`thumb ${cls}`}><img src=${libraryUrl(`${model.rel}/${cover}`)} alt="" loading="lazy" onError=${() => setFailed(true)} /></span>`;
-  }
-  const kinds = Object.keys(model.files?.kinds || {});
-  const kind = ["model", "slicer", "archive", "image", "doc", "video"].find((k) => kinds.includes(k)) || "other";
-  return html`<span class=${`thumb thumb-none ${cls}`}>${(Icon[KIND_ICON[kind]] || Icon.file)(40)}</span>`;
-}
+// Shared lazy multi-file automatic composition and explicit cover support.
+export { Cover } from "./modelcover.js";
 
 /** Where a model is: its category and subcategories as links, or Unsorted. */
 export function PlaceLinks({ m, overview }) {
