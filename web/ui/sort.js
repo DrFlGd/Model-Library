@@ -711,7 +711,7 @@ export function ImportPage() {
   const empty = !se || (!se.roots.length && !se.items.length);
   const wait = busy ? "Wait for the work under way to finish." : false;
   const moreItems = () => [
-    ...(!empty ? [{ sep: true }, { id: "sort-rescan", label: "Read again", icon: "refresh", disabled: wait, title: "Pick up files added or removed since, keeping what you decided", run: readAgain }] : []),
+    ...(!empty ? [{ id: "sort-rescan", label: "Read again", icon: "refresh", disabled: wait, title: "Pick up files added or removed since, keeping what you decided", run: readAgain }] : []),
     ...(counts.done ? [{ id: "sort-forget-done", label: "Clear imported", disabled: wait, title: "Take the imported models off this list",
       run: () => act("sort_clear", { imported: true }, () => `Cleared ${plural(counts.done, "imported model", "imported models")} from the list.`) }] : []),
     ...(!empty ? [{ id: "import-clear", label: "Start again", icon: "close", disabled: wait, title: "Empty the workspace (nothing on disk changes)", run: startAgain }] : []),
@@ -758,7 +758,7 @@ export function ImportPage() {
         </div>
         <span class="muted imp-mode-note">${s.mode === "move" ? "Files move into the library. Across drives they're copied, checked, then the originals deleted." : "The originals stay where they are; every copy is checked."}</span>
         <button type="button" class="primary" id="import-go" disabled=${!ready || busy || !!lib.read_only} title="Import the models that have a category" onClick=${importSorted}>${!ready ? "Nothing to import yet" : `${s.mode === "copy" ? "Copy" : "Import"} ${plural(ready, "model", "models")}`}</button>
-      </div>`}
+      </div>`}`}
   </div>`;
 }
 
