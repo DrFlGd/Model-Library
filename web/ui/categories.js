@@ -43,8 +43,6 @@ export function categoryItems(schemaId, path) {
   if (!sc) return [];
   const ok = writable();
   const off = ok === true ? false : ok;
-  const node = path.length ? nodeAt(sc, path) : null;
-  const leaf = node && !node.count && !node.children?.length;
   return [
     { id: "add-subcategory", label: "Add subcategory…", icon: "plus", disabled: off, run: () => ui.set({ dialog: { type: "add-subcategory", schemaId, path } }) },
     { id: "edit-category", label: "Edit category…", icon: "edit", disabled: off, title: `Edit ${sc.name}: its subcategories, folders and fields`, run: () => ui.set({ dialog: { type: "edit-schema", schemaId } }) },
@@ -52,7 +50,7 @@ export function categoryItems(schemaId, path) {
     { id: "merge-categories", label: "Merge categories…", icon: "move", disabled: off, run: () => ui.set({ dialog: { type: "merge-categories", schemaId, path } }) },
     { sep: true },
     path.length
-      ? { id: "delete-subcategory", label: "Delete subcategory…", icon: "trash", danger: true, disabled: off, run: () => deleteSubcategory(sc, path, leaf) }
+      ? { id: "delete-subcategory", label: "Delete subcategory…", icon: "trash", danger: true, disabled: off, run: () => ui.set({ dialog: { type: "delete-subcategory", schemaId, path } }) }
       : { id: "delete-category", label: "Delete category…", icon: "trash", danger: true, disabled: off, run: () => ui.set({ dialog: { type: "delete-schema", schemaId } }) },
   ];
 }
