@@ -376,3 +376,89 @@ pub fn undo(lib: &Library, mut journal: Value) -> Result<Value> {
     relayout::write(lib,&journal)?;
     Ok(json!({"undone":true,"refresh":[journal["model_id"]],"id":id}))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::library::tests::temp_dir;
+    fn setup(label: &str) -> (Library,Index,String) {
+        let root = temp_dir(label);
+        let lib = Library::open(&root).unwrap();
+        let dir = root.join("Unsorted/Kit");
+        fs::create_dir_all(dir.join("Parts")).unwrap();
+        fs::write(dir.join("Parts/body.stl"),b"mesh bytes").unwrap();
+        fs::write(dir.join("README.pdf"),b"%PDF-1.4\nexample-document").unwrap();
+        fs::write(dir.join("weird.unknown"),b"unknown file kept").unwrap();
+        fs::write(dir.join(model::SIDECAR),b"{\"id\":\"zip-source-kit\",\"name\":\"Kit\",\"custom\":42}\n").unwrap();
+        let ix = Index::build(&lib,None,true);
+        let id = ix.models[0].id().to_string();
+        (lib,ix,id)
+    }
+    #[test]
+    fn verified_compress_keep_identity_and_hashes() {
+        let (lib,ix,id) = setup("archive-cycle");
+        let root=lib.root().join("Unsorted/Kit");
+        let before: Vec<(String,String)> = model::list_files(&root).iter().map(|(n,_)|(n.clone(),file_hash(&root.join(n)).unwrap().0)).collect();
+        let p=plan(&lib,&ix,&json!({"id":id,"action":"compress","file":"Kit.zip"})).unwrap();
+        let r=execute(&lib,&p,false,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert!(r["verified"].as_bool().unwrap());
+        assert!(root.join("Kit.zip").is_file());
+        assert_eq!(model::read_sidecar(&root)["id"],id);
+        let ix=Index::build(&lib,None,true);
+        assert!(plan(&lib,&ix,&json!({"id":id,"action":"extract","file":"Kit.zip"})).is_err());
+        relayout::undo(&lib,field(&r,"journal"),&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert!(!root.join("Kit.zip").exists());
+        for (n,hash) in before { assert_eq!(file_hash(&root.join(n)).unwrap().0,hash); }
+    }
+    #[test]
+    fn opt_in_cleanup_then_extract_and_undo() {
+        let (lib,ix,id)=setup("archive-clean");
+        let root=lib.root().join("Unsorted/Kit");
+        let p=plan(&lib,&ix,&json!({"id":id,"action":"compress","file":"Kit.zip"})).unwrap();
+        let r=execute(&lib,&p,true,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert!(!root.join("Parts/body.stl").exists());
+        assert!(root.join(model::SIDECAR).is_file());
+        let ix=Index::build(&lib,None,true);
+        let ep=plan(&lib,&ix,&json!({"id":id,"action":"extract","file":"Kit.zip"})).unwrap();
+        let er=execute(&lib,&ep,true,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert!(!root.join("Kit.zip").exists());
+        assert_eq!(fs::read(root.join("Parts/body.stl")).unwrap(),b"mesh bytes");
+        relayout::undo(&lib,field(&er,"journal"),&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert!(root.join("Kit.zip").exists());
+        assert!(!root.join("Parts/body.stl").exists());
+        relayout::undo(&lib,field(&r,"journal"),&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert_eq!(fs::read(root.join("Parts/body.stl")).unwrap(),b"mesh bytes");
+        assert!(!root.join("Kit.zip").exists());
+    }
+    #[test]
+    fn malicious_paths_and_corrupt_zip_preserve_sources() {
+        let (lib,_,id)=setup("archive-unsafe");
+        let root=lib.root().join("Unsorted/Kit");
+        let add_zip=|name:&str, entries:&[(&str,&[u8])]| {
+            let mut z=zip::ZipWriter::new(File::create(root.join(name)).unwrap());
+            for (entry,data) in entries { z.start_file(*entry,zip::write::SimpleFileOptions::default()).unwrap(); z.write_all(data).unwrap(); }
+            z.finish().unwrap();
+        };
+        add_zip("unsafe.zip",&[("../escape.txt",b"do not escape")]);
+        let ix=Index::build(&lib,None,true);
+        assert!(plan(&lib,&ix,&json!({"id":id,"action":"extract","file":"unsafe.zip"})).is_err());
+        add_zip("collision.zip",&[("A.txt",b"a"),("a.TXT",b"b")]);
+        assert!(plan(&lib,&ix,&json!({"id":id,"action":"extract","file":"collision.zip"})).is_err());
+        fs::write(root.join("broken.zip"),b"invalid ZIP").unwrap();
+        assert!(plan(&lib,&ix,&json!({"id":id,"action":"extract","file":"broken.zip"})).is_err());
+        assert!(root.join("Parts/body.stl").exists());
+    }
+    #[test]
+    fn cancel_and_undo_refuse_modified_output() {
+        let (lib,ix,id)=setup("archive-cancel");
+        let root=lib.root().join("Unsorted/Kit");
+        let p=plan(&lib,&ix,&json!({"id":id,"action":"compress","file":"Kit.zip"})).unwrap();
+        let stop=AtomicBool::new(false);
+        assert!(execute(&lib,&p,true,&stop,&|_,_,_|{stop.store(true,Ordering::Relaxed)}).is_err());
+        assert!(root.join("Parts/body.stl").exists());
+        let r=execute(&lib,&p,false,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        fs::write(root.join("Kit.zip"),b"changed externally").unwrap();
+        assert!(relayout::undo(&lib,field(&r,"journal"),&AtomicBool::new(false),&|_,_,_|{}).is_err());
+        assert_eq!(fs::read(root.join("Kit.zip")).unwrap(),b"changed externally");
+    }
+}
