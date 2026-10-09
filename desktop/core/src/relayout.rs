@@ -1220,7 +1220,7 @@ mod tests {
             assert!(read(&lib, &id).is_ok(), "lost protected journal {id}");
             if with_copy {
                 assert_eq!(
-                    std::fs::read(kept_dir(&lib, &id).join("source.bin")).unwrap(),
+                    std::fs::read(kept_dir(&lib, &id).join("source.bin")).unwrap().as_slice(),
                     b"recoverable content"
                 );
             }
