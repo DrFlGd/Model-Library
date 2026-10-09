@@ -433,6 +433,12 @@ pub fn remove_originals(item: &Value) -> Result<()> {
     if !valid_originals(entries) {
         bail!("Source files changed during transfer; originals were kept where possible.");
     }
+    // A new, unreviewed source file must never be erased by removing its
+    // parent directory after the checked copy is made.
+    let current = source_manifest(item)?;
+    if current != item["source_manifest"] {
+        bail!("Source files were added or changed during transfer. Do not remove the originals.");
+    }
     let files = strings(&item["files"]);
     if files.is_empty() {
         let path = Path::new(item["source"].as_str().unwrap_or(""));
@@ -580,7 +586,8 @@ pub fn undo_running(
                 let dir = path.iter().fold(lib.root().join(folder), |p, part| p.join(part));
                 let _ = std::fs::remove_dir(dir);
             }
-            if std::fs::remove_dir(lib.root().join(folder)).is_ok() { schema::remove(lib, id)?; }
+            let top = lib.root().join(folder);
+            if !top.exists() || std::fs::remove_dir(&top).is_ok() { schema::remove(lib, id)?; }
             else { failed.push(json!({ "name": folder, "error": "Category has unexpected contents and was kept." })); }
         }
         for node in journal["added"].as_array().into_iter().flatten() {
