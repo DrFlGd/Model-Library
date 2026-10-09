@@ -1568,6 +1568,13 @@ impl App {
                 let lib = self.library()?;
                 lib.writable().map_err(e2s)?;
                 let plan = self.with_index(None, |ix, lib| crate::extract::plan(lib, ix, &args)).await?.map_err(e2s)?;
+                if !args["review"].is_null() {
+                    for key in ["files","dest","source","source_id","metadata","schema","values"] {
+                        if plan[key]!=args["review"][key] {
+                            return Err("The selected files or destination changed since review. Preview extraction again.".into());
+                        }
+                    }
+                }
                 let mode = args["mode"].as_str().unwrap_or("move").to_string();
                 j(self.spawn_job("Making a new model", move |app, jid, cancel| {
                     crate::extract::execute(&lib, &plan, &mode, &cancel, &|i,n,name| app.job_progress(&jid,json!({"item":i,"items":n,"name":name})))
