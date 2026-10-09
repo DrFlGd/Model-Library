@@ -27,6 +27,7 @@ pub mod library;
 pub mod mesh;
 pub mod model;
 pub mod relayout;
+pub mod restructure;
 pub mod schema;
 pub mod sort;
 pub mod thumb;
