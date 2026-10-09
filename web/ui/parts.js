@@ -20,6 +20,7 @@ import { size } from "./details.js";
 import { openMenu, typing } from "./actions.js";
 import { fileSel, pick, pickEvent, show, clear } from "./filesel.js";
 import { TypeTag } from "./filetypes.js";
+import { PdfDocument } from "./pdf.js";
 
 export const MESH = /\.(stl|obj|3mf)$/i;
 const MD = /\.(md|markdown|txt)$/i;
@@ -87,7 +88,7 @@ function target(f, entry) {
   const name = entry || f.rel;
   if (MESH.test(name)) return { tab: "3d", file: f.rel, entry };
   if (f.kind === "image" || (entry && PICTURE.test(entry))) return { tab: "pictures", file: f.rel, entry };
-  if (!entry && f.kind === "doc") return { tab: "docs", file: f.rel };
+  if ((entry && /\.pdf$/i.test(entry)) || (!entry && f.kind === "doc")) return { tab: "docs", file: f.rel, entry };
   if (!entry && f.kind === "video") return { tab: "videos", file: f.rel };
   return null;
 }
@@ -405,22 +406,22 @@ export function Documents({ src, model, docs, current, setCurrent }) {
   const [text, setText] = useState(null);
   useEffect(() => {
     setText(null);
-    if (!doc || !MD.test(doc.file)) return;
+    if (!doc || doc.entry || !MD.test(doc.file)) return;
     let live = true;
     api("model_doc", { ...srcArgs(src), file: doc.file }).then((r) => { if (live) setText(r.html); }, (e) => { if (live) setText(`<p>${String(e.message || e).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]))}</p>`); });
     return () => { live = false; };
-  }, [src.id, doc?.file]);
+  }, [src.id, doc?.file, doc?.entry]);
   if (!doc) return html`<div class="stage-note muted">No documents.</div>`;
   const lib = ui.get().library;
   return html`<div class="stage-docs">
-    <div class="doc-list">${docs.map((d) => html`<button type="button" key=${d.file} class=${`ghost${d.file === doc.file ? " on" : ""}`} onClick=${() => setCurrent(d)}>${d.file}</button>`)}</div>
+    <div class="doc-list">${docs.map((d) => html`<button type="button" key=${d.file + (d.entry || "")} class=${`ghost${d.file === doc.file && d.entry === doc.entry ? " on" : ""}`} onClick=${() => setCurrent(d)}>${d.entry || d.file}</button>`)}</div>
     <div class="doc-view">
-      ${MD.test(doc.file) ? html`<div class="doc-text-view" id="doc-text" onClick=${followLink} dangerouslySetInnerHTML=${{ __html: text || "" }}></div>`
-        : /\.pdf$/i.test(doc.file) ? html`<iframe class="doc-frame" title=${doc.file} src=${fileUrl(src, doc.file)}></iframe>`
+      ${!doc.entry && MD.test(doc.file) ? html`<div class="doc-text-view" id="doc-text" onClick=${followLink} dangerouslySetInnerHTML=${{ __html: text || "" }}></div>`
+        : /\.pdf$/i.test(doc.entry || doc.file) ? html`<${PdfDocument} key=${doc.file + (doc.entry || "")} src=${src} doc=${doc} model=${model} />`
         : html`<div class="stage-note muted">This kind of document opens in its own app.</div>`}
     </div>
-    <div class="stage-bar"><span class="stage-what">${doc.file}</span>
-      ${isDesktop() && lib && model ? html`<span class="stage-tools"><button type="button" class="ghost" onClick=${() => openModelFile(model, doc.file)}>${Icon.external(14)} Open in its own app</button></span>` : null}</div>
+    <div class="stage-bar"><span class="stage-what">${doc.entry ? `${doc.file} / ${doc.entry}` : doc.file}</span>
+      ${isDesktop() && lib && model && !doc.entry ? html`<span class="stage-tools"><button type="button" class="ghost" onClick=${() => openModelFile(model, doc.file)}>${Icon.external(14)} Open externally</button></span>` : null}</div>
   </div>`;
 }
 
