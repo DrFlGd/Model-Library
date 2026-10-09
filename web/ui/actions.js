@@ -9,6 +9,7 @@ import { ui } from "./state.js";
 import { routeHash } from "./context.js";
 import { Icon } from "./icons.js";
 import { api, isDesktop, setStar, showModelFolder, toast, undoable, undoLast, followJob, loadOverview } from "./library.js";
+import { addFiles } from "./fileops.js";
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const nameOf = (ms) => (ms.length === 1 ? ms[0].name : plural(ms.length, "model", "models"));
@@ -216,6 +217,10 @@ export const MODEL_ACTIONS = [
   { id: "edit", label: "Edit details…", icon: "edit", key: "E", enabled: writable, run: (ms) => editDetails(ms) },
   { id: "move", label: "Move to category…", icon: "move", key: "M", enabled: writable,
     run: (ms) => ui.set({ dialog: { type: "move-models", models: ms } }) },
+  { id: "add-files", label: "Add files…", icon: "plus", enabled: writable, applies: (ms, c) => c.page === "model" && ms.length === 1,
+    run: (ms) => addFiles(ms[0]) },
+  { id: "delete", label: (ms) => ms.length === 1 ? "Delete model…" : "Delete models…", icon: "trash", danger: true, more: true, enabled: writable,
+    run: (ms) => ui.set({ dialog: { type: "delete-models", models: ms } }) },
   { id: "star", label: (ms) => (allStarred(ms) ? "Remove star" : "Star"), button: (ms) => (allStarred(ms) ? "Starred" : "Star"),
     pressed: allStarred, icon: "star", key: "S", enabled: writable, run: star },
   { id: "folder", label: "Show in folder", icon: "folder", applies: (ms) => ms.length === 1 && isDesktop(), run: (ms) => showModelFolder(ms[0]) },
