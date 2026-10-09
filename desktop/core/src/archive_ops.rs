@@ -273,7 +273,11 @@ pub fn execute(lib: &Library, plan: &Value, remove_sources: bool, cancel: &Atomi
             let to = safe(&root,rel)?;
             if to.exists() { bail!("Output destination changed during the operation: {rel}"); }
             fs::create_dir_all(to.parent().unwrap())?;
-            fs::rename(safe(&stage,rel)?,&to)?;
+            // A hard link publishes the staged, verified file without permitting
+            // rename() to overwrite a file concurrently created on Unix.
+            // The staging path stays available until the whole publish finishes.
+            fs::hard_link(safe(&stage,rel)?,&to)
+                .with_context(|| format!("Cannot safely publish {rel} without overwriting"))?;
         }
         let _ = fs::remove_dir_all(&stage);
         // Only verified bytes may replace the originals; verify published
