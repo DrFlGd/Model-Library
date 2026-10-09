@@ -9,7 +9,6 @@ import { ModelDetails } from "./details.js";
 import { SelectionRows } from "./parts.js";
 import { WorkspaceStage } from "./stage.js";
 import { reset } from "./filesel.js";
-import { ActionRow } from "./actions.js";
 import { ViewSwitch } from "./layout.js";
 
 export function UnsortedPreview({ id, narrow = false, onClose }) {
@@ -46,8 +45,9 @@ export function UnsortedPreview({ id, narrow = false, onClose }) {
       <div class="unsorted-preview-title">
         <strong>${m.name}</strong><a href=${routeHash(`model:${m.id}`)}>Open workspace ›</a>
       </div>
-      ${tab === "files" ? html`<${ActionRow} targets=${[m]} ctx=${{ page: "browse" }} idPrefix="details" />` : null}
+
       ${tab === "details" ? html`<${ModelDetails} id=${m.id} />` : html`
+        <div class="unsorted-quick-details"><${ModelDetails} id=${m.id} /></div>
         <${ViewSwitch} id="unsorted-file-views" views=${[["folders", "Folders", "folder"], ["all", "List", "list"], ["type", "By type", "grouped"]]} value=${view} onChange=${(filePanelView) => setPref({ filePanelView })} />
         <div class="unsorted-file-tree"><${SelectionRows} key=${m.id} src=${src} files=${m.files_list || []} name=${m.name} view=${view} /></div>
         <div class="unsorted-preview-stage"><${WorkspaceStage} key=${m.id} src=${src} model=${m} files=${m.files_list || []} /></div>
