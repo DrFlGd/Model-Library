@@ -354,6 +354,249 @@ pub fn destination_manifest(dir: &Path) -> Result<Value> {
     Ok(json!(v))
 }
 
+
+/// Predict the exact IDs create() assigns before any categories are touched.
+/// Those IDs and paths are journalled first, so interruption between creating a
+/// schema file and recording success does not orphan an untracked category.
+pub fn drafted_schemas(lib: &Library, planned: &Value) -> Result<Vec<Value>> {
+    let mut ids: HashSet<String> = schema::list(lib).into_iter().map(|s| s.id).collect();
+    let mut out = vec![];
+    for category in planned["categories"].as_array().into_iter().flatten() {
+        let name = category["name"].as_str().ok_or_else(|| anyhow!("Missing category name."))?;
+        let base = crate::library::slug(name);
+        let base = if base.is_empty() { "schema" } else { &base };
+        let mut id = base.to_string();
+        let mut n = 2;
+        while ids.contains(&id) || lib.root().join("_library").join("schemas").join(format!("{id}.json")).exists() {
+            id = format!("{base}-{n}");
+            n += 1;
+        }
+        ids.insert(id.clone());
+        out.push(json!({ "id": id, "draft": category["draft"], "name": name,
+            "folder": category["folder"], "phase": "planned" }));
+    }
+    Ok(out)
+}
+
+fn source_file(path: &Path, relative: &str, out: &mut Vec<Value>) -> Result<()> {
+    let meta = std::fs::symlink_metadata(path)?;
+    if meta.file_type().is_symlink() { bail!("A source is a symlink: {}.", path.display()); }
+    if meta.is_dir() {
+        let mut children = std::fs::read_dir(path)?.map(|e| e.map(|e| e.path()))
+            .collect::<std::io::Result<Vec<_>>>()?;
+        children.sort();
+        for child in children {
+            let name = import::file_name(&child);
+            let rel = if relative.is_empty() { name } else { format!("{relative}/{name}") };
+            source_file(&child, &rel, out)?;
+        }
+    } else if meta.is_file() {
+        // model.json is rewritten in the published model. Keep its raw bytes
+        // so recovery can restore source metadata byte-for-byte after cleanup.
+        let raw = if relative == SIDECAR {
+            use base64::Engine;
+            Value::String(base64::engine::general_purpose::STANDARD.encode(std::fs::read(path)?))
+        } else { Value::Null };
+        out.push(json!({ "path": path_text(path), "relative": relative,
+            "sha256": digest(path)?, "bytes": meta.len(), "original_sidecar": raw }));
+    } else { bail!("Not a regular source file: {}.", path.display()); }
+    Ok(())
+}
+
+/// Durable input preimage for one pending import. Relative names match the
+/// files in its published model; absolute names are used for exact restoration.
+pub fn source_manifest(item: &Value) -> Result<Value> {
+    let mut out = vec![];
+    let files = strings(&item["files"]);
+    if files.is_empty() {
+        source_file(Path::new(item["source"].as_str().unwrap_or("")), "", &mut out)?;
+    } else {
+        for file in files {
+            let path = Path::new(&file);
+            source_file(path, &import::file_name(path), &mut out)?;
+        }
+    }
+    Ok(json!(out))
+}
+
+fn valid_originals(entries: &[Value]) -> bool {
+    entries.iter().all(|entry| {
+        let p = Path::new(entry["path"].as_str().unwrap_or(""));
+        p.is_file() && entry["sha256"].as_str().is_some_and(|sha| digest(p).ok().as_deref() == Some(sha))
+    })
+}
+
+/// Check the source before removing it. The complete verified published
+/// model must already have a persisted manifest in the running journal.
+pub fn remove_originals(item: &Value) -> Result<()> {
+    let entries = item["source_manifest"].as_array().ok_or_else(|| anyhow!("Missing recovery manifest."))?;
+    if !valid_originals(entries) {
+        bail!("Source files changed during transfer; originals were kept where possible.");
+    }
+    let files = strings(&item["files"]);
+    if files.is_empty() {
+        let path = Path::new(item["source"].as_str().unwrap_or(""));
+        std::fs::remove_dir_all(path)?;
+    } else {
+        for file in files {
+            let path = Path::new(&file);
+            if path.is_dir() { std::fs::remove_dir_all(path)?; }
+            else { std::fs::remove_file(path)?; }
+        }
+    }
+    Ok(())
+}
+
+/// Undo a recovered Move even if the process stopped partway through deleting
+/// its original folder: restore only missing files and refuse to overwrite
+/// external changes. Check every destination hash before copying anything.
+fn restore_originals(item: &Value, dest: &Path) -> Result<()> {
+    let originals = item["source_manifest"].as_array().ok_or_else(|| anyhow!("Missing recovery manifest."))?;
+    for entry in originals {
+        let original = Path::new(entry["path"].as_str().unwrap_or(""));
+        let sha = entry["sha256"].as_str().unwrap_or("");
+        if original.exists() && digest(original).ok().as_deref() != Some(sha) {
+            bail!("{} was changed outside the app. The library copy was kept.", original.display());
+        }
+        if original.exists() { continue; }
+        let relative = entry["relative"].as_str().unwrap_or("");
+        let published = dest.join(relative);
+        if entry["original_sidecar"].is_string() {
+            continue; // the original model.json was journalled as raw bytes
+        }
+        if !published.is_file() || digest(&published)? != sha {
+            bail!("Cannot recover {} from the imported model; the library copy was kept.", relative);
+        }
+    }
+    for entry in originals {
+        let original = Path::new(entry["path"].as_str().unwrap_or(""));
+        if original.exists() { continue; }
+        std::fs::create_dir_all(original.parent().ok_or_else(|| anyhow!("Invalid source path."))?)?;
+        if let Some(saved) = entry["original_sidecar"].as_str() {
+            use base64::Engine;
+            let bytes = base64::engine::general_purpose::STANDARD.decode(saved)?;
+            crate::config::write_atomic(original, &bytes)?;
+        } else {
+            let published = dest.join(entry["relative"].as_str().unwrap_or(""));
+            // Copy to the source, not rename: leave the complete library model
+            // in place until every recovered source hash is checked.
+            std::fs::copy(&published, original)?;
+        }
+        if digest(original)? != entry["sha256"].as_str().unwrap_or("") {
+            bail!("Recovery of {} could not be verified; the library copy was kept.", original.display());
+        }
+    }
+    if !valid_originals(originals) { bail!("Some original files could not be recovered."); }
+    Ok(())
+}
+
+/// A crash during publication can leave a partial directory with no published
+/// hash. Only remove that directory when a complete verified source survives
+/// and every copied data file is unchanged. The generated sidecar and preview
+/// are allowed because they were produced by this exact pending operation.
+fn remove_incomplete_copy(item: &Value, dest: &Path) -> Result<()> {
+    let originals = item["source_manifest"].as_array().ok_or_else(|| anyhow!("Missing source manifest."))?;
+    if !valid_originals(originals) {
+        bail!("Source files are incomplete; the interrupted library copy was kept.");
+    }
+    let entries = destination_manifest(dest)?;
+    for entry in entries.as_array().into_iter().flatten() {
+        let rel = entry["path"].as_str().unwrap_or("");
+        if rel == SIDECAR || rel == crate::thumb::THUMB { continue; }
+        let expected = originals.iter().find(|e| e["relative"] == rel);
+        if expected.is_none_or(|e| e["sha256"] != entry["sha256"]) {
+            bail!("The interrupted destination contains changed files; it was kept for recovery.");
+        }
+    }
+    std::fs::remove_dir_all(dest)?;
+    Ok(())
+}
+
+/// A file's journal record is written *before* publication, and again after
+/// the checked copy and before original cleanup. Recovery works on every state.
+fn undo_item(lib: &Library, entry: &Value) -> Result<()> {
+    let dest = lib.resolve(entry["to"].as_str().unwrap_or(""))?;
+    let phase = entry["phase"].as_str().unwrap_or("planned");
+    if !dest.exists() {
+        let original = entry["source_manifest"].as_array().ok_or_else(|| anyhow!("Missing source manifest."))?;
+        if !valid_originals(original) {
+            bail!("The import destination is missing and the original is incomplete. Manual recovery is needed.");
+        }
+        return Ok(());
+    }
+    if !entry["manifest"].is_array() {
+        return remove_incomplete_copy(entry, &dest);
+    }
+    if destination_manifest(&dest)? != entry["manifest"] {
+        bail!("The imported model was changed after publication. It was kept for recovery.");
+    }
+    let originals = entry["source_manifest"].as_array().ok_or_else(|| anyhow!("Missing source manifest."))?;
+    if entry["mode"] == "move" || matches!(phase, "cleaning" | "done") {
+        restore_originals(entry, &dest)?;
+    } else if !valid_originals(originals) {
+        bail!("The original copy was changed or deleted; the library copy was kept.");
+    }
+    std::fs::remove_dir_all(&dest)?;
+    Ok(())
+}
+
+/// Recovery is an Undo-only operation: no blind replay of potentially stale
+/// inputs. Each successful item is marked and synced so Undo can itself resume
+/// after a crash. New schemas are removed only after restoring every model.
+pub fn undo_running(
+    lib: &Library, mut journal: Value,
+    cancel: &std::sync::atomic::AtomicBool,
+    on_item: &dyn Fn(usize, usize, &str),
+) -> Result<Value> {
+    use std::sync::atomic::Ordering;
+    let moves = journal["moves"].as_array().cloned().unwrap_or_default();
+    let mut failed = vec![];
+    let mut recovered = 0;
+    for (idx, entry) in moves.iter().enumerate().rev() {
+        if entry["phase"] == "undone" { continue; }
+        if cancel.load(Ordering::Relaxed) {
+            failed.push(json!({ "name": entry["name"], "error": "Stopped; recovery may be resumed." }));
+            break;
+        }
+        on_item(moves.len() - idx - 1, moves.len(), entry["name"].as_str().unwrap_or(""));
+        match undo_item(lib, entry) {
+            Ok(()) => {
+                recovered += 1;
+                journal["moves"][idx]["phase"] = json!("undone");
+                crate::relayout::write(lib, &journal)?;
+            }
+            Err(e) => failed.push(json!({ "name": entry["name"], "error": format!("{e:#}") })),
+        }
+    }
+    if failed.is_empty() {
+        // Categories may have nested subcategories. Only empty directories and
+        // schemas belonging to this staged import can be removed.
+        for made in journal["created_schemas"].as_array().into_iter().flatten() {
+            let (Some(id), Some(folder)) = (made["id"].as_str(), made["folder"].as_str()) else { continue };
+            let Some(s) = schema::list(lib).into_iter().find(|s| s.id == id && s.folder == folder) else { continue };
+            let mut paths = s.tree();
+            paths.sort_by_key(|p| std::cmp::Reverse(p.len()));
+            for path in paths {
+                let dir = path.iter().fold(lib.root().join(folder), |p, part| p.join(part));
+                let _ = std::fs::remove_dir(dir);
+            }
+            if std::fs::remove_dir(lib.root().join(folder)).is_ok() { schema::remove(lib, id)?; }
+            else { failed.push(json!({ "name": folder, "error": "Category has unexpected contents and was kept." })); }
+        }
+        for node in journal["added"].as_array().into_iter().flatten() {
+            let (Some(id), Some(parts)) = (node["schema"].as_str(), node["path"].as_array()) else { continue };
+            let path: Vec<String> = parts.iter().filter_map(Value::as_str).map(String::from).collect();
+            let _ = schema::remove_subcategory(lib, id, &path);
+        }
+    }
+    journal["state"] = json!(if failed.is_empty() { "undone" } else { "stopped" });
+    if let Some(first) = failed.first() { journal["error"] = first["error"].clone(); }
+    else if let Some(o) = journal.as_object_mut() { o.remove("error"); }
+    crate::relayout::write(lib, &journal)?;
+    Ok(json!({ "journal": journal["id"], "state": journal["state"], "moved": recovered,
+        "failed": failed, "sort": [] }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
