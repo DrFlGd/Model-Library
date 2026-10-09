@@ -142,7 +142,7 @@ function fileMenu(e, src, f, open) {
   const items = [
     ...(t ? [{ id: "view", label: "Show here", icon: "eye", run: () => open(t) }] : []),
     ...(ownApp(src) ? [
-      { id: "open-own", label: "Open in its own app", icon: "external", run: () => openModelFile({ rel: src.rel }, f.rel) },
+      { id: "open-own", label: "Open externally", icon: "external", run: () => openModelFile({ rel: src.rel }, f.rel) },
       { id: "folder", label: "Show in folder", icon: "folder", run: () => ctx.platform.library.openPath([lib.path, src.rel, dir].filter(Boolean).join("/")) },
     ] : []),
     ...(src.kind === "model" && f.kind === "image" ? [{ id: "cover", label: "Use as cover", icon: "image", disabled: lib?.read_only ? "The library is read-only." : false, run: () => useAsCover(src.id, f.rel) }] : []),
@@ -431,7 +431,7 @@ export function Videos({ src, model, videos, current, setCurrent }) {
   return html`<div class="stage-videos">
     ${VIDEO_OK.test(v.file) ? html`<video class="stage-video" controls preload="metadata" src=${fileUrl(src, v.file)} key=${v.file}></video>`
       : html`<div class="stage-note muted">${v.file} plays in its own app.
-        ${model && ownApp(src) ? html` <button type="button" class="ghost" id="video-open" onClick=${() => openModelFile(model, v.file)}>${Icon.external(14)} Open in its own app</button>` : null}</div>`}
+        ${model && ownApp(src) ? html` <button type="button" class="ghost" id="video-open" onClick=${() => openModelFile(model, v.file)}>${Icon.external(14)} Open externally</button>` : null}</div>`}
     <div class="doc-list">${videos.map((x) => html`<button type="button" key=${x.file} class=${`ghost${x.file === v.file ? " on" : ""}`} onClick=${() => setCurrent(x)}>${x.file}</button>`)}</div>
   </div>`;
 }
@@ -563,7 +563,7 @@ export function SelectionRows({ src, files, name, view = "folders", contextActio
     openMenu(e, [
       { id: "view", label: "Show here", icon: "eye", run: () => show(row.key) },
       ...(ownApp(src) && !row.entry ? [
-        { id: "open-own", label: "Open in its own app", icon: "external", run: () => openModelFile({ rel: src.rel }, row.rel) },
+        { id: "open-own", label: "Open externally", icon: "external", run: () => openModelFile({ rel: src.rel }, row.rel) },
         { id: "folder", label: "Show in folder", icon: "folder", run: () => ctx.platform.library.openPath([lib.path, src.rel, row.folder ? row.rel : splitRel(row.rel)[0]].filter(Boolean).join("/")) },
       ] : []),
       ...(row.kind === "image" && !row.entry ? [{ id: "cover", label: "Use as cover", icon: "image", disabled: lib?.read_only ? "The library is read-only." : false, run: () => useAsCover(src.id, row.rel) }] : []), ...extra,
