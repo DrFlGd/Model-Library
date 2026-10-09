@@ -1471,12 +1471,12 @@ async def agent_d_reviewed_import(pg):
     await pg.click("#import-categories")
     await pg.wait_for_selector("#category-import .ci-tree")
     staged = not (library / "Agent D collection").exists()
-    await pg.fill('.ci-node[data-depth="1"] .ci-name', "Landscape")
-    await pg.locator('.ci-node[data-depth="1"] .ci-check input').check()
-    await pg.fill('.ci-node[data-depth="1"] .ci-group-name', "Terrain files")
+    await pg.fill('.ci-node[data-depth="1"] > .ci-row .ci-name', "Landscape")
+    await pg.locator('.ci-node[data-depth="1"] > .ci-options .ci-check input').check()
+    await pg.fill('.ci-node[data-depth="1"] > .ci-options .ci-group-name', "Terrain files")
     await pg.click("#ci-back")
     await pg.click("#import-categories")
-    kept = await pg.input_value('.ci-node[data-depth="1"] .ci-name') == "Landscape"
+    kept = await pg.input_value('.ci-node[data-depth="1"] > .ci-row .ci-name') == "Landscape"
     await pg.click("#ci-review")
     await pg.wait_for_selector(".ci-review")
     names = await pg.locator(".ci-destinations tbody td:first-child").all_text_contents()
@@ -1507,7 +1507,7 @@ async def agent_d_reviewed_import(pg):
               status["done"] and status["error"] is None and status["result"]["state"] == "undone"
               and not (library / "Agent D collection").exists()
               and (src / "Terrain/Rock.stl").is_file(), status)
-    await pg.click("#ci-discard")
+    await pg.locator(".ci-results button").click()
 
 async def main():
     server = start_server()
