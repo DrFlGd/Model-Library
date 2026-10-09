@@ -185,7 +185,7 @@ pub fn execute(lib: &Library, plan: &Value, mode: &str, cancel: &AtomicBool, pro
         let _=thumb::make(&dest);
         let metadata_dir=if j["retired"]==true {keep.join("retired")} else {src.clone()};
         j["sidecar_after"]=model::read_sidecar(&metadata_dir); j["dest_hashes"]=hashes(&dest)?; j["source_sidecar_hash"]=json!(hash(&metadata_dir.join(model::SIDECAR)).ok()); j["state"]=json!("done"); j["finished"]=json!(crate::library::now()); relayout::write(lib,&j)?;
-        Ok(json!({"id":side["id"],"rel":plan["dest"],"journal":id,"refresh":[plan["source_id"]]}))
+        Ok(json!({"id":side["id"],"rel":plan["dest"],"journal":id,"retired":j["retired"]==true,"refresh":[plan["source_id"]]}))
     })();
     if let Err(error)=result {
         // Ignore cancellation during rollback: restoring the complete source is mandatory.
