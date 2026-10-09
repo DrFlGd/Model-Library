@@ -1174,6 +1174,7 @@ impl App {
             }
             "category_import_commit" => {
                 let proposal = args["proposal"].clone();
+                let reviewed = args["reviewed"].clone();
                 let mv = args["mode"].as_str() != Some("copy");
                 // Category moves always use checked copies before source cleanup.
                 let force_copy = true;
@@ -1185,6 +1186,7 @@ impl App {
                 if let Some(conflict) = checked["conflicts"].as_array().and_then(|v| v.first()) {
                     return Err(conflict.as_str().unwrap_or("Resolve the category conflicts.").to_string());
                 }
+                category_import::require_review(&checked, &reviewed, if mv { "move" } else { "copy" }).map_err(e2s)?;
                 j(self.spawn_job("Importing folders as categories", move |app, jid, cancel| {
                     let lib = app.library().map_err(|e| anyhow!(e))?;
                     lib.writable()?;
@@ -1193,6 +1195,7 @@ impl App {
                     if let Some(conflict) = plan["conflicts"].as_array().and_then(|v| v.first()) {
                         anyhow::bail!("{}", conflict.as_str().unwrap_or("Resolve the category conflicts."));
                     }
+                    category_import::require_review(&plan, &reviewed, if mv { "move" } else { "copy" })?;
                     if cancel.load(Ordering::Relaxed) {
                         anyhow::bail!("Stopped before making any changes.");
                     }
