@@ -162,7 +162,11 @@ impl Planner<'_> {
         let folder = import::folder_name(&s.model_folder, &name, "");
         let dest = import::destination(self.lib, Some(s), path, &folder, None, &self.taken)?;
         let actual = import::file_name(&dest);
-        let collision = actual != folder && !actual.eq_ignore_ascii_case(&folder);
+        let collision = actual != folder;
+        if self.items.iter().any(|i| i["dest"].as_str()
+            .is_some_and(|d| d.eq_ignore_ascii_case(&path_text(&dest)))) {
+            self.conflicts.push(format!("Two models would have the same destination, ignoring letter case: {}.", dest.display()));
+        }
         self.taken.insert(dest.clone());
         self.items.push(json!({
             "source": node["source"], "files": files, "name": name, "author": "", "tags": "",
@@ -175,6 +179,9 @@ impl Planner<'_> {
     fn walk(&mut self, node: &Value, schema_id: &str, at: &[String], root: bool) -> Result<()> {
         if !selected(node) { return Ok(()); }
         let kind = node["kind"].as_str().ok_or_else(|| anyhow!("Choose a folder type."))?;
+        if (node["hash"].is_string()) != (kind == "file") {
+            bail!("Only folders can become category containers or grouped models.");
+        }
         if kind == "file" {
             if root { bail!("Choose a folder, not a file."); }
             let name = import::stem(&string(node, "name"));
@@ -221,7 +228,11 @@ impl Planner<'_> {
             if node["group"] == true { grouped.push(string(child, "source")); }
         }
         if !grouped.is_empty() {
-            self.add_model(node, schema_id, &here, grouped, &string(node, "group_name"))?;
+            let mut direct = node.clone();
+            direct["bytes"] = json!(as_children(node)?.iter()
+                .filter(|c| selected(c) && c["kind"] == "file")
+                .map(|c| c["bytes"].as_u64().unwrap_or(0)).sum::<u64>());
+            self.add_model(&direct, schema_id, &here, grouped, &string(node, "group_name"))?;
         }
         for child in as_children(node)? {
             if node["group"] == true && child["kind"] == "file" { continue; }
@@ -268,6 +279,20 @@ pub fn plan(lib: &Library, ix: &Index, proposal: &Value) -> Result<Value> {
             (draft, vec![])
         };
         p.walk(root, &sid, &at, true)?;
+    }
+    // Model folders cannot also be proposed category containers, including
+    // collisions whose only difference is case on Windows.
+    for c in &p.subcategories {
+        if let (Some(sid), Some(parts)) = (c["schema"].as_str(), c["path"].as_array()) {
+            if let Some(s) = p.schemas.get(sid) {
+                let mut directory = lib.root().join(&s.folder);
+                for part in parts { if let Some(n) = part.as_str() { directory.push(n); } }
+                if p.items.iter().any(|it| it["dest"].as_str()
+                    .is_some_and(|d| d.eq_ignore_ascii_case(&path_text(&directory)))) {
+                    p.conflicts.push(format!("A model and subcategory both use {}. Rename one.", directory.display()));
+                }
+            }
+        }
     }
     if p.items.is_empty() { p.conflicts.push("No included model or file is ready to import.".into()); }
     Ok(json!({ "items": p.items, "categories": p.categories, "subcategories": p.subcategories,
