@@ -449,7 +449,7 @@ fn rollback(lib:&Library,j:&Value,strict:bool)->Result<()> {
     Ok(())
 }
 pub fn undo(lib:&Library,mut j:Value)->Result<Value> {
-    match rollback(lib,&j,true) {
+    match rollback(lib,&j,j["finished"].is_string()) {
         Ok(()) => {
             j["state"]=json!("undone");relayout::write(lib,&j)?;
             Ok(json!({"journal":j["id"],"state":"undone","failed":[],"refresh":[j["source_id"],j["target_id"]]}))
