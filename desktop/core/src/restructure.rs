@@ -504,6 +504,65 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
+    fn merge_into_named_new_subcategory_and_undo() {
+        let root = temp_dir("new-subcategory-merge");
+        let lib = Library::open(&root).unwrap();
+        schema::create(&lib, &json!({"name":"Items","subcategories":[
+            {"name":"From A"},{"name":"From B"},{"name":"Parent"}]})).unwrap();
+        file(&root,"Items/From A/First/a.stl");
+        file(&root,"Items/From B/Second/b.stl");
+        let id = execute(&lib,json!({"operation":"merge","sources":[
+            {"schema":"items","path":["From A"]},{"schema":"items","path":["From B"]}],
+            "target":{"schema":"items","parent":["Parent"],"name":"Combined"}}));
+        assert!(root.join("Items/Parent/Combined/First/a.stl").is_file());
+        assert!(root.join("Items/Parent/Combined/Second/b.stl").is_file());
+        assert!(!root.join("Items/From A").exists());
+        relayout::undo(&lib,&id,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert!(root.join("Items/From B/Second/b.stl").is_file());
+        assert!(!root.join("Items/Parent/Combined").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn merge_into_new_top_category_and_undo() {
+        let root = temp_dir("new-category-merge");
+        let lib = Library::open(&root).unwrap();
+        schema::create(&lib,&json!({"name":"Alpha"})).unwrap();
+        schema::create(&lib,&json!({"name":"Beta"})).unwrap();
+        file(&root,"Alpha/One/a.stl");
+        file(&root,"Beta/Two/b.stl");
+        let id = execute(&lib,json!({"operation":"merge","sources":[
+            {"schema":"alpha","path":[]},{"schema":"beta","path":[]}],
+            "target":{"name":"Merged Items"}}));
+        assert_eq!(schema::list(&lib).len(),1);
+        assert!(root.join("Merged Items/One/a.stl").is_file());
+        assert!(root.join("Merged Items/Two/b.stl").is_file());
+        relayout::undo(&lib,&id,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert_eq!(schema::list(&lib).len(),2);
+        assert!(root.join("Alpha/One/a.stl").is_file());
+        assert!(root.join("Beta/Two/b.stl").is_file());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn portable_case_only_model_folder_collision_is_numbered() {
+        let root = temp_dir("case-collision");
+        let lib = Library::open(&root).unwrap();
+        schema::create(&lib,&json!({"name":"Things","subcategories":[
+            {"name":"A"},{"name":"B"},{"name":"Target"}]})).unwrap();
+        file(&root,"Things/A/Model/a.stl");
+        file(&root,"Things/B/model/b.stl");
+        let id = execute(&lib,json!({"operation":"merge","sources":[
+            {"schema":"things","path":["A"]},{"schema":"things","path":["B"]}],
+            "target":{"schema":"things","path":["Target"]}}));
+        assert!(root.join("Things/Target/Model/a.stl").is_file());
+        assert!(root.join("Things/Target/model (2)/b.stl").is_file());
+        relayout::undo(&lib,&id,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert!(root.join("Things/B/model/b.stl").is_file());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn reject_cycles_and_ancestor_sources_without_mutation() {
         let root=temp_dir("bad-restructure");
         let lib=Library::open(&root).unwrap();
