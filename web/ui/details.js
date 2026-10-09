@@ -34,7 +34,8 @@ export function fieldText(field, value) {
 }
 
 // Shared lazy multi-file automatic composition and explicit cover support.
-export { Cover } from "./modelcover.js";
+import { Cover } from "./modelcover.js";
+export { Cover };
 
 /** Where a model is: its category and subcategories as links, or Unsorted. */
 export function PlaceLinks({ m, overview }) {
