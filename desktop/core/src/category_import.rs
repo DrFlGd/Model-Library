@@ -274,3 +274,26 @@ pub fn plan(lib: &Library, ix: &Index, proposal: &Value) -> Result<Value> {
         "conflicts": p.conflicts, "models": p.items.len(),
         "bytes": p.items.iter().map(|i| i["bytes"].as_u64().unwrap_or(0)).sum::<u64>() }))
 }
+
+/// Hash every file of a completed model so an Undo never removes a changed copy.
+/// Missing/new/modified files all invalidate the saved manifest.
+pub fn destination_manifest(dir: &Path) -> Result<Value> {
+    fn walk(base: &Path, dir: &Path, out: &mut Vec<Value>) -> Result<()> {
+        let mut paths = std::fs::read_dir(dir)?.map(|e| e.map(|e| e.path()))
+            .collect::<std::io::Result<Vec<_>>>()?;
+        paths.sort();
+        for path in paths {
+            let m = std::fs::symlink_metadata(&path)?;
+            if m.file_type().is_symlink() { bail!("A model now contains a symlink: {}.", path.display()); }
+            if m.is_dir() { walk(base, &path, out)?; }
+            else if m.is_file() {
+                let rel = path.strip_prefix(base)?.to_string_lossy().replace('\\', "/");
+                out.push(json!({ "path": rel, "bytes": m.len(), "sha256": digest(&path)? }));
+            }
+        }
+        Ok(())
+    }
+    let mut v = vec![];
+    walk(dir, dir, &mut v)?;
+    Ok(json!(v))
+}
