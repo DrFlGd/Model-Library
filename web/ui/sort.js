@@ -711,6 +711,8 @@ export function ImportPage() {
   const empty = !se || (!se.roots.length && !se.items.length);
   const wait = busy ? "Wait for the work under way to finish." : false;
   const moreItems = () => [
+    { id: "import-add-folder", label: "Import folder…", icon: "folder", disabled: wait, run: () => pickAndAdd(false) },
+    { id: "import-add-file", label: "Import file…", icon: "file", disabled: wait, run: () => pickAndAdd(false, true) },
     ...(!empty ? [{ id: "sort-rescan", label: "Read again", icon: "refresh", disabled: wait, title: "Pick up files added or removed since, keeping what you decided", run: readAgain }] : []),
     ...(counts.done ? [{ id: "sort-forget-done", label: "Clear imported", disabled: wait, title: "Take the imported models off this list",
       run: () => act("sort_clear", { imported: true }, () => `Cleared ${plural(counts.done, "imported model", "imported models")} from the list.`) }] : []),
