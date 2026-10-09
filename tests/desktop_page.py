@@ -462,6 +462,20 @@ async def phase3(pg):
     cover = await card.locator("img").get_attribute("src") or ""
     check("a preview is drawn on import (a picture of the model is still its cover)", thumb and cover.endswith("/photo.png"), (thumb, cover))
 
+    # Agent A: Unsorted selection exposes the same folders and ZIP tree before opening.
+    await card.click()
+    await pg.wait_for_selector('#unsorted-preview #part-tree')
+    unsorted_files = await pg.locator('#unsorted-preview #part-tree [data-file]').count()
+    check("Unsorted model can browse its files beside the model grid",
+          unsorted_files > 0 and await pg.locator('#unsorted-preview .unsorted-preview-stage').count() == 1)
+    await pg.screenshot(path=str(out / "agent-a-unsorted-preview.png"))
+    if await pg.locator('.results .card').count() > 1:
+        other = pg.locator('.results .card').filter(has_not=pg.locator('.card-name:text-is("Knight Armour")')).first
+        await other.click(modifiers=["Control"])
+        check("multi-model selection does not reuse a single model's files",
+              await pg.locator('#picked-panel').count() == 1 and await pg.locator('#unsorted-preview').count() == 0)
+        await card.click()
+
     # 20. the model's page: 3D view, part tree, variants
     await card.dblclick()
     await pg.wait_for_selector("#model-page")
@@ -551,7 +565,7 @@ async def phase3(pg):
     check("a model's files show as folders, a searchable list, by type and folder previews", sorted(every) == on_disk and kinds == ["model", "image", "doc", "archive"]
           and tiles == 1 and kept == "type", (every, on_disk, kinds, tiles, kept))
 
-    await panel_workspace_checks(pg, check)
+    await panel_workspace_checks(pg, check, out)
 
     # 23. library files can be read in ranges (videos seek)
     req = urllib.request.Request(B + "library/Unsorted/Knight%20Armour/README.md", headers={"Range": "bytes=2-7"})
