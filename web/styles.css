@@ -209,6 +209,29 @@ input:invalid { border-color: var(--danger); }
 .card-name { margin-top: 8px; font-weight: 700; font-size: 13.5px; line-height: 1.25; }
 .card-sub { font-size: 12px; color: var(--graphite); line-height: 1.3; }
 
+/* Agent F: card hierarchy is conveyed by weight, style and size, not colour alone. */
+.card-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.card-meta { display: grid; align-content: start; gap: 2px; min-height: 29px; margin-top: 3px; min-width: 0; }
+.card-author { display: block; min-width: 0; font-size: 12.5px; line-height: 1.3; font-style: italic; font-weight: 400; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-location { display: block; min-width: 0; font-size: 11.5px; line-height: 1.3; font-weight: 600; font-style: normal; color: var(--graphite); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A composed cover is a lazy 1–4 file montage, not a stretched representative thumbnail. */
+.cover-composed { position: relative; }
+.cover-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); width: 100%; height: 100%; gap: 2px; }
+.cover-tiles-1 { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+.cover-tiles-2 { grid-template-rows: 1fr; }
+.cover-tiles-3 > :last-child { grid-column: 1 / -1; }
+.cover-file, .cover-kind { min-width: 0; min-height: 0; width: 100%; height: 100%; background: var(--thumb-bg); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.cover-file img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.cover-kind { flex-direction: column; gap: 2px; padding: 3px; color: var(--ink); text-align: center; }
+.cover-kind svg { flex: none; width: min(32%, 25px); height: auto; opacity: .7; }
+.cover-kind span { font-size: 10.5px; font-weight: 600; line-height: 1.15; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cover-count, .cover-warning { position: absolute; right: 4px; bottom: 4px; font-size: 10px; line-height: 1.4; font-weight: 700; background: var(--ink); color: var(--white); padding: 1px 5px; border-radius: 4px; }
+.cover-warning { left: 4px; right: auto; background: var(--white); color: var(--ink); border: 1px solid currentColor; }
+.thumb-sm .cover-kind span { display: none; }
+.thumb-sm .cover-kind svg { width: 16px; }
+
+
 .list-view { display: flex; flex-direction: column; gap: 2px; }
 .row { display: flex; align-items: center; gap: 14px; padding: 5px 10px; border-radius: var(--radius-s); height: 52px; border: 1px solid transparent; cursor: default; user-select: none; }
 .row:hover { background: var(--white); }
