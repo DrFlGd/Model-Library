@@ -66,6 +66,7 @@ The UI pass in `docs/PLAN.md` ("UI pass design") is done: actions (0.5.1), undo 
 ## Unreleased
 
 - Agent B (review branch): select visible or all model files, including full-model extraction with automatic retirement of empty source cards; send selected files/folders to an existing sorted or Unsorted model; add mixed external files to an existing model; and delete/restore single or multiple complete models using SHA-256-checked, journalled recovery. These changes are in a draft PR and are not merged or released.
+- Agent B review B-1: recovery-bearing and interrupted journals no longer expire after 20 subsequent changes; only disposable history is pruned. A deleted model remains restorable after unrelated newer operations, with regression coverage for deletion and interrupted transfer/archive journal retention.
 
 - Document the published 0.5.5 workspace and its validated screenshots.
 
