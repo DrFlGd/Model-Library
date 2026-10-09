@@ -65,6 +65,8 @@ The UI pass in `docs/PLAN.md` ("UI pass design") is done: actions (0.5.1), undo 
 
 ## Unreleased
 
+- Agent B (review branch): select visible or all model files, including full-model extraction with automatic retirement of empty source cards; send selected files/folders to an existing sorted or Unsorted model; add mixed external files to an existing model; and delete/restore single or multiple complete models using SHA-256-checked, journalled recovery. These changes are in a draft PR and are not merged or released.
+
 - Document the published 0.5.5 workspace and its validated screenshots.
 
 ## 0.5.5 (2026-10-08)
