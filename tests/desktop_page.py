@@ -611,7 +611,7 @@ async def workspace_viewing(pg):
     """Package B: selection-driven viewers and direct folder/archive contents."""
     await pg.goto(B + "#/browse/unsorted")
     await pg.locator(".card:has(.card-name:text-is('Knight Armour'))").dblclick()
-    await pg.wait_for_selector("#workspace-stage")
+    await pg.wait_for_selector("#model-page #workspace-stage")
     # Drive the public selection contract; verify actual rendered viewers/tiles.
     async def show_file(key):
         await pg.evaluate("async key => (await import('./ui/filesel.js')).pick(key)", key)
@@ -1029,7 +1029,7 @@ async def ui_pass(pg):
     await api(pg, "library_scan", {"full": False})
     await pg.goto(B + "#/browse/unsorted")
     await pg.dblclick(".card:has(.card-name:text-is('Knight Armour'))")
-    await pg.wait_for_selector("#part-tree [data-file='settings.ini']", timeout=30000)
+    await pg.wait_for_selector("#model-page #part-tree [data-file='settings.ini']", timeout=30000)
     await pg.click("#part-tree [data-file='settings.ini']")
     await pg.wait_for_selector(".workspace-no-view")
     fallback = await pg.inner_text(".workspace-no-view")
