@@ -17,16 +17,21 @@
 
 pub mod api;
 pub mod archive;
+pub mod archive_ops;
+pub mod category_import;
 pub mod config;
 pub mod docs;
 pub mod dupes;
 pub mod import;
 pub mod extract;
+pub mod fileops;
+pub mod delete;
 pub mod index;
 pub mod library;
 pub mod mesh;
 pub mod model;
 pub mod relayout;
+pub mod restructure;
 pub mod schema;
 pub mod sort;
 pub mod thumb;

@@ -43,34 +43,16 @@ export function categoryItems(schemaId, path) {
   if (!sc) return [];
   const ok = writable();
   const off = ok === true ? false : ok;
-  const node = path.length ? nodeAt(sc, path) : null;
-  const leaf = node && !node.count && !node.children?.length;
   return [
     { id: "add-subcategory", label: "Add subcategory…", icon: "plus", disabled: off, run: () => ui.set({ dialog: { type: "add-subcategory", schemaId, path } }) },
     { id: "edit-category", label: "Edit category…", icon: "edit", disabled: off, title: `Edit ${sc.name}: its subcategories, folders and fields`, run: () => ui.set({ dialog: { type: "edit-schema", schemaId } }) },
     ...(path.length ? [{ id: "rename-subcategory", label: "Rename or move…", icon: "move", disabled: off, run: () => ui.set({ dialog: { type: "rename-node", schemaId, path } }) }] : []),
+    { id: "merge-categories", label: "Merge categories…", icon: "move", disabled: off, run: () => ui.set({ dialog: { type: "merge-categories", schemaId, path } }) },
     { sep: true },
     path.length
-      ? { id: "delete-subcategory", label: leaf ? "Delete subcategory" : "Delete subcategory…", icon: "trash", danger: true, disabled: off, run: () => deleteSubcategory(sc, path, leaf) }
+      ? { id: "delete-subcategory", label: "Delete subcategory…", icon: "trash", danger: true, disabled: off, run: () => ui.set({ dialog: { type: "delete-subcategory", schemaId, path } }) }
       : { id: "delete-category", label: "Delete category…", icon: "trash", danger: true, disabled: off, run: () => ui.set({ dialog: { type: "delete-schema", schemaId } }) },
   ];
-}
-
-/** Delete a subcategory: an empty one at once (Undo adds it back); one with models
- *  or subcategories in it after a preview of the folders that move up a level. */
-async function deleteSubcategory(sc, path, leaf) {
-  if (!leaf) return ui.set({ dialog: { type: "delete-subcategory", schemaId: sc.id, path } });
-  const name = path[path.length - 1];
-  const parent = path.slice(0, -1);
-  try {
-    await api("subcategory_remove", { schema: sc.id, path });
-    await loadOverview();
-    if (showing(sc.id, path)) goTo(sc.id, parent);
-    undoable(`Deleted the subcategory ${name}.`, async () => {
-      await api("subcategory_add", { schema: sc.id, path: parent, name });
-      await loadOverview();
-    });
-  } catch (e) { toast(e.message || String(e), 6000); }
 }
 
 /** What a change would move, from the core, refreshed as the form changes. */
@@ -93,6 +75,10 @@ export function ChangePreview({ change, onPlan }) {
     <p><b>${plan.moving ? `${plan.moving} ${plan.moving === 1 ? "model folder moves" : "model folders move"}` : "No model folders move"}</b>${plan.models > plan.moving ? `, ${plan.models - plan.moving} stay where they are` : ""}.${" "}
       ${plan.clashes ? html` <span class="warn-text">${plan.clashes} ${plan.clashes === 1 ? "lands" : "land"} on a folder that's already there and ${plan.clashes === 1 ? "gets" : "get"} a number, such as "(2)".</span>` : null}
       It can be undone.</p>
+    ${plan.nodes != null ? html`<p class="muted">Affected subcategories: ${plan.nodes}; files: ${plan.files ?? 0}; bytes: ${(plan.bytes ?? 0).toLocaleString()}.</p>` : null}
+    ${plan.child_collisions ? html`<p class="warn-note">${plan.child_collisions} overlapping child names use your selected mapping.</p>` : null}
+    ${plan.node_mappings?.length ? html`<details class="muted"><summary>Review ${plan.node_mappings.length} category path mappings</summary>
+      <ul class="move-sample" style="max-height:220px;overflow:auto">${plan.node_mappings.map((m, i) => html`<li key=${i}><span class="preview-path">${m.from}</span> → <span class="preview-path">${m.to}</span></li>`)}</ul></details>` : null}
     ${plan.sample.length ? html`<ul class="move-sample">${plan.sample.map((m) => html`<li key=${m.from}><span class="preview-path">${m.from}</span><span class="muted"> → </span><span class="preview-path">${m.to}</span></li>`)}
       ${plan.moving > plan.sample.length ? html`<li class="muted">and ${plan.moving - plan.sample.length} more</li>` : null}</ul>` : null}
   </div>`;
@@ -247,34 +233,98 @@ export function DeleteSchema({ schemaId }) {
   <//>`;
 }
 
-/** Delete a subcategory with models or subcategories in it: they move up to the
- *  one above it (an edit of the category, so it can be undone). */
+/** Remove a subcategory with a reviewed choice of where its contents go. */
 export function DeleteSubcategory({ schemaId, path }) {
-  const overview = useStore(ui, (s) => s.overview);
-  const sc = overview?.schemas?.find((s) => s.id === schemaId);
+  const sc = useStore(ui, (s) => s.overview)?.schemas?.find((s) => s.id === schemaId);
+  const [mode, setMode] = useState("remove-up");
   const [plan, setPlan] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  if (!sc) return null;
-  const name = path[path.length - 1];
-  const parent = path.slice(0, -1);
-  const node = nodeAt(sc, path);
-  let removed = [];
-  const drop = (nodes) => nodes.filter((n) => {
-    if (n.orig && n.orig.length === path.length && inside(path, n.orig)) { removed = origs(n); return false; }
-    n.children = drop(n.children);
-    return true;
-  });
-  const tree = drop(editorTree(sc));
-  const spec = { name: sc.name, folder: sc.folder, model_folder: sc.model_folder, fields: sc.fields || [], subcategories: treeSpec(tree), removed };
-  const change = { kind: "schema", schema: sc.id, spec, label: `Deleted the subcategory ${name}` };
+  if (!sc || !path.length) return null;
+  const parent = path.slice(0, -1), name = path[path.length - 1];
+  const change = { kind: "restructure", operation: mode, source: { schema: schemaId, path } };
   const submit = () => run(change, setBusy, setError, (r) => {
-    if (showing(sc.id, path)) goTo(sc.id, parent);
-    changed(r, `Deleted the subcategory ${name}; what was in it is in ${placeName(sc, parent)}.`);
+    if (showing(sc.id, path)) mode === "remove-unsorted" ? location.hash = routeHash("browse:unsorted") : goTo(sc.id, parent);
+    changed(r, mode === "remove-unsorted"
+      ? `Deleted the subcategory ${name}; its models are in Unsorted.`
+      : `Deleted the subcategory ${name}; its models and child subcategories moved up one level.`, [sc.id, path]);
   });
-  return html`<${Dialog} title=${`Delete ${name}`} id="delete-subcategory-dialog" onSubmit=${submit} busy=${busy || !plan} error=${error} submitLabel="Delete subcategory" danger=${true}>
-    <p>${name} goes${node?.children?.length ? ", with the subcategories in it," : ""} and its ${node?.count === 1 ? "model moves" : `${node?.count || 0} models move`} up to <b>${placeName(sc, parent)}</b>, keeping their folders' names. Their files and details are kept.</p>
+  return html`<${Dialog} title=${`Delete subcategory ${name}`} id="delete-subcategory-dialog"
+    onSubmit=${submit} busy=${busy || !plan} error=${error} submitLabel="Delete subcategory" danger=${true}>
+    <p>This removes the subcategory, not its models. Files, IDs and details are preserved.</p>
+    <div class="field-block"><span class="field-label">Where should its contents go?</span>
+      <label class="check-row"><input type="radio" name="remove-mode" checked=${mode === "remove-up"}
+        onChange=${() => { setMode("remove-up"); setPlan(null); }} />
+        Move contents up one level: direct models move to ${placeName(sc, parent)}, while child subcategories stay nested.</label>
+      <label class="check-row"><input type="radio" name="remove-mode" checked=${mode === "remove-unsorted"}
+        onChange=${() => { setMode("remove-unsorted"); setPlan(null); }} />
+        Move contents to Unsorted: all descendant models move there, and this subtree is removed.</label>
+    </div>
     <${ChangePreview} change=${change} onPlan=${setPlan} />
+    <p class="muted">Files or unknown folders outside model ownership block removal until reviewed.</p>
+  <//>`;
+}
+
+/** Combine independent classification nodes into an existing or named new target. */
+export function MergeCategories({ schemaId, path }) {
+  const ov = useStore(ui, (s) => s.overview);
+  const choices = (ov?.schemas || []).flatMap((sc) => [
+    { schema: sc.id, path: [], label: sc.name },
+    ...treeList(sc).map((n) => ({ schema: sc.id, path: n.path, label: [sc.name, ...n.path].join(" › ") })),
+  ]);
+  const key = (n) => JSON.stringify([n.schema, n.path]);
+  const initial = key({ schema: schemaId, path });
+  const [selected, setSelected] = useState([initial]);
+  const [kind, setKind] = useState("existing");
+  const [target, setTarget] = useState(key(choices.find((n) => key(n) !== initial) || choices[0] || { schema: schemaId, path: [] }));
+  const [name, setName] = useState("");
+  const [conflicts, setConflicts] = useState("cancel");
+  const [plan, setPlan] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const sources = choices.filter((c) => selected.includes(key(c))).map(({ schema, path }) => ({ schema, path }));
+  const dest = choices.find((c) => key(c) === target);
+  const targetRef = kind === "new-category" ? { name: name.trim() }
+    : kind === "new-subcategory" ? { schema: dest?.schema, parent: dest?.path || [], name: name.trim() }
+    : { schema: dest?.schema, path: dest?.path || [] };
+  const change = sources.length >= 2 && dest && (kind === "existing" || name.trim())
+    ? { kind: "restructure", operation: "merge", sources, target: targetRef, child_conflicts: conflicts } : null;
+  const submit = () => run(change, setBusy, setError, (r) => {
+    location.hash = routeHash("home");
+    changed(r, `${plan?.label || "Merged categories"}.`);
+  });
+  return html`<${Dialog} title="Merge categories and subcategories" id="merge-categories-dialog"
+    onSubmit=${submit} busy=${busy || !plan} error=${error} submitLabel="Merge categories">
+    <p>Choose two or more source nodes and a target. Existing targets keep their identity; models keep their IDs and metadata.</p>
+    <div class="field-block"><span class="field-label">Sources</span>
+      <div id="merge-sources" role="group" aria-label="Source categories" style="max-height:180px;overflow:auto">
+        ${choices.map((c) => html`<label class="check-row" key=${key(c)}>
+          <input type="checkbox" checked=${selected.includes(key(c))} onChange=${(e) => {
+            setSelected(e.target.checked ? [...selected, key(c)] : selected.filter((k) => k !== key(c))); setPlan(null);
+          }} />${c.label}</label>`)}
+      </div>
+      <small class="muted">Do not choose a category together with one of its descendants.</small>
+    </div>
+    <label class="field-block"><span>Target type</span><select id="merge-target-kind" value=${kind} onChange=${(e) => { setKind(e.target.value); setPlan(null); }}>
+      <option value="existing">Existing category or subcategory</option>
+      <option value="new-subcategory">New subcategory</option>
+      <option value="new-category">New top-level category</option>
+    </select></label>
+    ${kind !== "new-category" ? html`<label class="field-block"><span>Target or new subcategory's parent</span>
+      <select id="merge-target" value=${target} onChange=${(e) => { setTarget(e.target.value); setPlan(null); }}>
+        ${choices.map((c) => html`<option key=${key(c)} value=${key(c)}>${c.label}</option>`)}
+      </select></label>` : null}
+    ${kind !== "existing" ? html`<label class="field-block"><span>New name</span>
+      <input id="merge-name" maxlength="80" value=${name} onInput=${(e) => { setName(e.target.value); setPlan(null); }} /></label>` : null}
+    <label class="field-block"><span>Matching child subcategory names</span>
+      <select id="merge-child-conflicts" value=${conflicts} onChange=${(e) => { setConflicts(e.target.value); setPlan(null); }}>
+        <option value="cancel">Cancel until resolved</option>
+        <option value="merge">Merge matching children</option>
+        <option value="rename">Keep both with numbered names</option>
+      </select></label>
+    ${!change && sources.length < 2 ? html`<p class="warn-note" role="status">Select at least two sources.</p>` : null}
+    ${change ? html`<${ChangePreview} change=${change} onPlan=${setPlan} />` : null}
+    <p class="muted">Model folder collisions keep both with numbered paths. Unowned content and cyclic targets are blocked.</p>
   <//>`;
 }
 

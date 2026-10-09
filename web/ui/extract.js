@@ -8,15 +8,12 @@ import { writable } from "./actions.js";
 import { Dialog, close } from "./dialogs.js";
 import { CategoryPicker } from "./category.js";
 import { fileSel, pickedFiles, keyParts, clear, show } from "./filesel.js";
+import { sendFilesAction } from "./fileops.js";
 
-export const WHOLE_MODEL = "That's the whole model: use Move to category instead";
 export function extractionReason(src, model = src?.model, keys = fileSel.get().picked) {
   if (writable() !== true) return writable();
   if (!src || src.kind !== "model") return "Open a library model first.";
   if (!keys.length) return "Select files or folders first.";
-  if (keys.includes("d:")) return WHOLE_MODEL;
-  const files = model?.files_list || [];
-  if (files.length && files.every((f) => keys.some((k) => k === `f:${f.rel}` || (k.startsWith("d:") && f.rel.startsWith(`${k.slice(2)}/`))))) return WHOLE_MODEL;
   return false;
 }
 
@@ -64,6 +61,7 @@ export function ExtractionBar({ src, model = src?.model }) {
   return html`<div class="extraction-bar" id="extraction-bar" aria-label="Selected files">
     <span>${count || selection.picked.length} ${(count || selection.picked.length) === 1 ? "file selected" : "files selected"}</span>
     <button type="button" class="ghost" id="extract-model" disabled=${!!action.disabled} title=${action.disabled || "Make a new model (N)"} onClick=${action.run}>${action.label}</button>
+    ${(() => { const transfer = sendFilesAction(model); return html`<button type="button" class="ghost" id="send-model-files" disabled=${!!transfer.disabled} title=${transfer.disabled || transfer.label} onClick=${transfer.run}>${transfer.label}</button>`; })()}
     <button type="button" class="ghost" onClick=${clear}>Clear</button>
   </div>`;
 }
@@ -101,7 +99,7 @@ export function ExtractDialog({ model, keys }) {
     if (busy || !plan?.files?.length || plan.error || readOnly || !args.name) return;
     setBusy(true); setError("");
     try {
-      const { job } = await api("model_extract", { ...args, mode });
+      const { job } = await api("model_extract", { ...args, mode, review: plan });
       const done = await followJob(job, `Making ${args.name} a new model`);
       if (done.error) throw new Error(done.error);
       const result = done.result;
@@ -109,7 +107,11 @@ export function ExtractDialog({ model, keys }) {
       clear(); show("d:");
       await loadOverview();
       close();
-      recorded(`Made ${args.name} a new model in ${where}.`, result.journal, () => { clear(); show("d:"); }, [{ label: "Open", run: () => { location.hash = routeHash(`model:${result.id}`); } }]);
+      if (result.retired) location.hash = routeHash(`model:${result.id}`);
+      recorded(`Made ${args.name} a new model in ${where}.`, result.journal, () => {
+        clear(); show("d:");
+        if (result.retired) location.hash = routeHash(`model:${model.id}`);
+      }, [{ label: "Open", run: () => { location.hash = routeHash(`model:${result.id}`); } }]);
     } catch (e) { setError(e.message || String(e)); }
     finally { setBusy(false); }
   };

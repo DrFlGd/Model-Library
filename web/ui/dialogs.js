@@ -7,9 +7,11 @@ import { routeHash, schemaScope } from "./context.js";
 import { Icon } from "./icons.js";
 import { api, loadOverview, saveDetails, runChange, undoable, recorded } from "./library.js";
 import { CategoryPicker, SubcategoryTree, treeSpec, treeReady, firstBranch } from "./category.js";
-import { RenameNode, EditSchema, DeleteSchema, DeleteSubcategory, EditPicked, AddSubcategory, ChangePreview } from "./categories.js";
+import { RenameNode, EditSchema, DeleteSchema, DeleteSubcategory, MergeCategories, EditPicked, AddSubcategory, ChangePreview } from "./categories.js";
 
 import { ExtractDialog } from "./extract.js";
+import { AddFilesDialog, SendFilesDialog, DeleteModelsDialog } from "./fileops.js";
+import { ArchiveDialog } from "./archive-actions.js";
 
 export const FIELD_TYPES = [["text", "Text"], ["number", "Number"], ["choice", "Choice"], ["yes-no", "Yes or no"], ["date", "Date"]];
 export const close = () => ui.set({ dialog: null });
@@ -247,7 +249,11 @@ export const confirmDialog = (opts) => ui.set({ dialog: { type: "confirm", ...op
 export function Dialogs() {
   const dialog = useStore(ui, (s) => s.dialog);
   if (!dialog) return null;
+  if (dialog.type === "archive-model") return html`<${ArchiveDialog} request=${dialog} />`;
   if (dialog.type === "extract-model") return html`<${ExtractDialog} model=${dialog.model} keys=${dialog.keys} />`;
+  if (dialog.type === "send-model-files") return html`<${SendFilesDialog} model=${dialog.model} keys=${dialog.keys} />`;
+  if (dialog.type === "add-model-files") return html`<${AddFilesDialog} model=${dialog.model} sources=${dialog.sources} />`;
+  if (dialog.type === "delete-models") return html`<${DeleteModelsDialog} models=${dialog.models} />`;
   if (dialog.type === "new-schema") return html`<${NewSchema} />`;
   if (dialog.type === "move-models") return html`<${MoveModels} models=${dialog.models} />`;
   if (dialog.type === "add-subcategory") return html`<${AddSubcategory} schemaId=${dialog.schemaId} path=${dialog.path} />`;
@@ -255,6 +261,7 @@ export function Dialogs() {
   if (dialog.type === "edit-schema") return html`<${EditSchema} schemaId=${dialog.schemaId} />`;
   if (dialog.type === "delete-schema") return html`<${DeleteSchema} schemaId=${dialog.schemaId} />`;
   if (dialog.type === "delete-subcategory") return html`<${DeleteSubcategory} schemaId=${dialog.schemaId} path=${dialog.path} />`;
+  if (dialog.type === "merge-categories") return html`<${MergeCategories} schemaId=${dialog.schemaId} path=${dialog.path} />`;
   if (dialog.type === "edit-picked") return html`<${EditPicked} models=${dialog.models} />`;
   if (dialog.type === "confirm") return html`<${ConfirmDialog} ...${dialog} />`;
   if (dialog.type === "edit-model") return html`<${EditModel} model=${dialog.model} schema=${dialog.schema} select=${!!dialog.select} key=${dialog.model.id} />`;

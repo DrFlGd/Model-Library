@@ -65,6 +65,15 @@ async fn pick_file(app: AppHandle, title: Option<String>, extensions: Option<Vec
     }
 }
 
+/// Choose any number of files of any type to add to a model.
+#[tauri::command]
+async fn pick_files(app: AppHandle, title: Option<String>) -> Result<Vec<String>, String> {
+    let selected = app.dialog().file().set_title(title.unwrap_or_else(|| "Choose files".into())).blocking_pick_files();
+    selected.unwrap_or_default().into_iter()
+        .map(|p| p.into_path().map(|v| v.display().to_string()).map_err(err))
+        .collect()
+}
+
 #[tauri::command]
 fn reveal(app: AppHandle, path: String) -> Result<(), String> {
     app.opener().reveal_item_in_dir(PathBuf::from(path)).map_err(err)
@@ -185,7 +194,7 @@ fn main() {
                 .build()?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![api, api_bytes, pick_folder, pick_file, reveal, open_path, open_url])
+        .invoke_handler(tauri::generate_handler![api, api_bytes, pick_folder, pick_file, pick_files, reveal, open_path, open_url])
         .run(tauri::generate_context!())
         .expect("error while running Model Library");
 }

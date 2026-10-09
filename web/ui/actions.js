@@ -8,7 +8,8 @@ import { useStore } from "../lib/store.js";
 import { ui } from "./state.js";
 import { routeHash } from "./context.js";
 import { Icon } from "./icons.js";
-import { api, isDesktop, setStar, showModelFolder, toast, undoable, undoLast, followJob, loadOverview } from "./library.js";
+import { addFiles } from "./fileops.js";
+import { api, isDesktop, setStar, showModelFolder, toast, undoable, undoLast, followJob, loadOverview, followIds, recorded } from "./library.js";
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const nameOf = (ms) => (ms.length === 1 ? ms[0].name : plural(ms.length, "model", "models"));
@@ -194,6 +195,18 @@ async function remakePreviews(ms) {
   } catch (e) { toast(`Couldn't make the preview: ${e.message || e}`, 6000); }
 }
 
+/** Return to deterministic automatic composition, preserving image files and Undo. */
+async function restoreAutomaticPreview(ms) {
+  const m = ms[0];
+  if (!m) return;
+  try {
+    const v = await api("model_cover", { id: m.id, automatic: true });
+    followIds({ [m.id]: v.id });
+    await loadOverview();
+    recorded(`Restored ${m.name}'s automatic preview.`, v.journal);
+  } catch (e) { toast(`Couldn't restore the automatic preview: ${e.message || e}`, 6000); }
+}
+
 async function copyText(text) {
   try {
     await navigator.clipboard.writeText(text);
@@ -216,10 +229,20 @@ export const MODEL_ACTIONS = [
   { id: "edit", label: "Edit details…", icon: "edit", key: "E", enabled: writable, run: (ms) => editDetails(ms) },
   { id: "move", label: "Move to category…", icon: "move", key: "M", enabled: writable,
     run: (ms) => ui.set({ dialog: { type: "move-models", models: ms } }) },
+  { id: "add-files", label: "Add files…", icon: "plus", enabled: writable, applies: (ms, c) => c.page === "model" && ms.length === 1,
+    run: (ms) => addFiles(ms[0]) },
+  { id: "delete", label: (ms) => ms.length === 1 ? "Delete model…" : "Delete models…", icon: "trash", danger: true, more: true, enabled: writable,
+    run: (ms) => ui.set({ dialog: { type: "delete-models", models: ms } }) },
   { id: "star", label: (ms) => (allStarred(ms) ? "Remove star" : "Star"), button: (ms) => (allStarred(ms) ? "Starred" : "Star"),
     pressed: allStarred, icon: "star", key: "S", enabled: writable, run: star },
   { id: "folder", label: "Show in folder", icon: "folder", applies: (ms) => ms.length === 1 && isDesktop(), run: (ms) => showModelFolder(ms[0]) },
+  { id: "zip-compress", label: "Compress to ZIP…", icon: "folder", more: true, enabled: writable, applies: (ms) => ms.length === 1,
+    run: (ms) => ui.set({ dialog: { type: "archive-model", id: ms[0].id, action: "compress" } }) },
+  { id: "zip-extract", label: "Extract archive…", icon: "folder", more: true, enabled: writable, applies: (ms) => ms.length === 1,
+    run: (ms) => ui.set({ dialog: { type: "archive-model", id: ms[0].id, action: "extract" } }) },
   { id: "preview", label: "Make a new preview", icon: "image", more: true, enabled: writable, run: remakePreviews },
+  { id: "auto-cover", label: "Use automatic preview", icon: "refresh", more: true, enabled: writable,
+    applies: (ms) => ms.length === 1 && !!ms[0].files?.explicit_cover, run: restoreAutomaticPreview },
   { id: "copy-path", label: "Copy folder path", icon: "copy", more: true, applies: (ms) => ms.length === 1,
     run: (ms) => copyText(`${ui.get().library?.path}/${ms[0].rel}`).then(() => toast("Copied the folder's path.")) },
 ];

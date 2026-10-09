@@ -5,22 +5,27 @@ use serde_json::{json, Value};
 use std::{collections::BTreeMap, path::{Path, PathBuf}, sync::atomic::{AtomicBool, Ordering}};
 
 fn s<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
-fn safe(rel: &str) -> Result<PathBuf> {
+pub(crate) fn safe(rel: &str) -> Result<PathBuf> {
     if rel.is_empty() || rel.contains('\\') || rel.contains(':') || rel.split('/').any(|x| x.is_empty() || x == "." || x == "..") { bail!("Choose a path inside the model."); }
     let p = PathBuf::from(rel);
     if p.is_absolute() { bail!("Choose a path inside the model."); }
     Ok(p)
 }
-fn checked(root: &Path, rel: &str) -> Result<PathBuf> {
+pub(crate) fn checked(root: &Path, rel: &str) -> Result<PathBuf> {
     let p = safe(rel)?;
     let mut at = root.to_path_buf();
     for part in p.components() { at.push(part); if std::fs::symlink_metadata(&at).is_ok_and(|m| m.file_type().is_symlink()) { bail!("Links cannot be extracted."); } }
     Ok(at)
 }
 fn walk(root: &Path, rel: &str, out: &mut BTreeMap<String, Option<String>>) -> Result<()> {
-    let p = checked(root, rel)?;
+    let p = if rel.is_empty() { root.to_path_buf() } else { checked(root, rel)? };
     if p.is_dir() {
-        for e in std::fs::read_dir(p)? { let e = e?; walk(root, &format!("{rel}/{}", e.file_name().to_string_lossy()), out)?; }
+        for e in std::fs::read_dir(p)? {
+            let e = e?;
+            let child = if rel.is_empty() { e.file_name().to_string_lossy().to_string() } else { format!("{rel}/{}",e.file_name().to_string_lossy()) };
+            if child == model::SIDECAR || child == "_thumbs" || child.starts_with("_thumbs/") { continue; }
+            walk(root, &child, out)?;
+        }
     } else if p.is_file() {
         if rel == model::SIDECAR || rel.starts_with("_thumbs/") { bail!("The model's details and preview stay with it."); }
         out.insert(rel.to_string(), None);
@@ -28,6 +33,17 @@ fn walk(root: &Path, rel: &str, out: &mut BTreeMap<String, Option<String>>) -> R
     Ok(())
 }
 
+fn archive_entry_hash(path:&Path,entry:&str)->Result<(String,u64)> {
+    use sha2::{Digest,Sha256};
+    use std::io::Read;
+    let mut z=zip::ZipArchive::new(std::fs::File::open(path)?)?;
+    let mut item=z.by_name(entry)?;
+    let mut digest=Sha256::new();
+    let mut buf=[0u8;65536];
+    let mut bytes=0u64;
+    loop {let n=item.read(&mut buf)?;if n==0{break;}digest.update(&buf[..n]);bytes+=n as u64;}
+    Ok((hex::encode(digest.finalize()),bytes))
+}
 pub fn plan(lib: &Library, ix: &Index, args: &Value) -> Result<Value> {
     let m = ix.get(s(args,"id")).ok_or_else(|| anyhow!("Read the library again: that model is gone."))?;
     let root = checked(lib.root(), m.rel())?;
@@ -35,8 +51,13 @@ pub fn plan(lib: &Library, ix: &Index, args: &Value) -> Result<Value> {
     let mut anchors = vec![];
     for f in args["files"].as_array().into_iter().flatten() {
         let f = f.as_str().ok_or_else(|| anyhow!("Choose files inside the model."))?;
-        anchors.push(safe(f)?.parent().unwrap_or(Path::new("")).to_path_buf());
-        walk(&root, f, &mut selected)?;
+        if f.is_empty() {
+            anchors.push(PathBuf::new());
+            walk(&root, "", &mut selected)?;
+        } else {
+            anchors.push(safe(f)?.parent().unwrap_or(Path::new("")).to_path_buf());
+            walk(&root, f, &mut selected)?;
+        }
     }
     for e in args["entries"].as_array().into_iter().flatten() {
         let (file, entry) = (s(e,"file"), s(e,"entry"));
@@ -53,8 +74,6 @@ pub fn plan(lib: &Library, ix: &Index, args: &Value) -> Result<Value> {
         if !found { bail!("{entry} is no longer in the archive."); }
     }
     if selected.is_empty() { bail!("Choose files to make a new model."); }
-    let all = model::list_files(&root);
-    if !all.is_empty() && all.iter().filter(|(f,_)| !f.starts_with("_thumbs/")).all(|(f,_)| selected.contains_key(f)) { bail!("That's the whole model: use Move to category instead."); }
     let mut base = anchors.first().cloned().unwrap_or_default();
     for p in &anchors { while !p.starts_with(&base) { if !base.pop() { break; } } }
     let name = s(args,"name").trim();
@@ -73,9 +92,14 @@ pub fn plan(lib: &Library, ix: &Index, args: &Value) -> Result<Value> {
         let to = Path::new(logical).strip_prefix(&base)?.to_string_lossy().replace('\\',"/");
         if to == model::SIDECAR || to.starts_with("_thumbs/") || !used.insert(to.to_lowercase()) { bail!("Selected files have conflicting names in the new model."); }
         let file = if entry.is_some() { from.strip_suffix(&format!("!{}",entry.as_ref().unwrap())).unwrap().to_string() } else { from.clone() };
-        files.push(json!({"from":from,"to":to,"file":file,"entry":entry}));
+        let source_file=checked(&root,&file)?;
+        let (sha256,bytes)=if let Some(entry)=entry.as_deref() {
+            archive_entry_hash(&source_file,entry)?
+        } else {(hash(&source_file)?,std::fs::metadata(&source_file)?.len())};
+        files.push(json!({"from":from,"to":to,"file":file,"entry":entry,"sha256":sha256,"bytes":bytes}));
     }
-    Ok(json!({"dest":lib.relative(&dest),"files":files,"source":m.rel(),"source_id":m.id(),"name":name,"metadata":m.v,"schema":sid,"values":values}))
+    let bytes=files.iter().filter_map(|f|f["bytes"].as_u64()).sum::<u64>();
+    Ok(json!({"dest":lib.relative(&dest),"files":files,"count":files.len(),"bytes":bytes,"source":m.rel(),"source_id":m.id(),"name":name,"metadata":m.v,"schema":sid,"values":values}))
 }
 fn stop(cancel: &AtomicBool) -> Result<()> { if cancel.load(Ordering::Relaxed) { bail!("Stopped."); } Ok(()) }
 fn snapshot(root: &Path, keep: &Path, file: &str) -> Result<bool> {
@@ -98,6 +122,11 @@ pub fn execute(lib: &Library, plan: &Value, mode: &str, cancel: &AtomicBool, pro
     if dest.exists() { bail!("The destination is now taken. Preview it again."); }
     let current=model::read_sidecar(&src);
     if current["id"].is_string() && current["id"]!=plan["source_id"] { bail!("The source model changed. Preview it again."); }
+    for f in plan["files"].as_array().into_iter().flatten() {
+        let source_file=checked(&src,s(f,"file"))?;
+        let actual=if let Some(entry)=f["entry"].as_str() {archive_entry_hash(&source_file,entry)?.0} else {hash(&source_file)?};
+        if actual!=s(f,"sha256") {bail!("A selected file changed since review. Preview the extraction again.");}
+    }
     let id = relayout::new_id(lib)?;
     let keep = relayout::kept_dir(lib,&id);
     std::fs::create_dir_all(&keep)?;
@@ -134,9 +163,19 @@ pub fn execute(lib: &Library, plan: &Value, mode: &str, cancel: &AtomicBool, pro
             }
         }
         stop(cancel)?;
-        let mut side = json!({"format":1,"id":model::new_id(),"name":plan["name"],"split_from":plan["source_id"],"added":crate::library::now()});
-        for k in ["authors","tags","source","released"] { if !plan["metadata"][k].is_null() { side[k]=plan["metadata"][k].clone(); } }
-        if !plan["schema"].is_null() { side["schema"]=plan["schema"].clone(); side["path"]=plan["values"].clone(); }
+        for f in files {
+            if hash(&stage.join(s(f,"to")))?!=s(f,"sha256") {bail!("A staged file did not match the reviewed source manifest.");}
+        }
+        // Copy portable descriptive metadata, including unfamiliar custom fields, not identity.
+        let mut side = if j["sidecar_before"].is_object() { j["sidecar_before"].clone() } else { json!({}) };
+        for k in ["authors","tags","source","released"] {
+            if side[k].is_null() && !plan["metadata"][k].is_null() { side[k]=plan["metadata"][k].clone(); }
+        }
+        side["format"]=json!(1); side["id"]=json!(model::new_id());
+        side["name"]=plan["name"].clone(); side["split_from"]=plan["source_id"].clone();
+        side["added"]=json!(crate::library::now());
+        side["schema"]=plan["schema"].clone(); side["path"]=plan["values"].clone();
+        if let Some(cover)=side["cover"].as_str() { if !stage.join(cover).is_file() {side["cover"]=Value::Null;} }
         config::write_json(&stage.join(model::SIDECAR),&side)?;
         j["new_sidecar_after"]=side.clone(); j["original_hashes"]=hashes(&stage)?; relayout::write(lib,&j)?;
         std::fs::create_dir_all(dest.parent().unwrap())?;
@@ -156,11 +195,21 @@ pub fn execute(lib: &Library, plan: &Value, mode: &str, cancel: &AtomicBool, pro
             model::update(&src,&json!({}),&plan["metadata"])?;
             if !cover.is_empty() && !src.join(&cover).is_file() { model::update(&src,&json!({"cover":null}),&plan["metadata"])?; }
             for f in files { let path=src.join(s(f,"file")); let mut p=path.parent(); while let Some(d)=p { if d==src || std::fs::remove_dir(d).is_err() {break;} p=d.parent(); } }
-            let _=std::fs::remove_file(src.join(thumb::THUMB)); let _=thumb::make(&src);
+            if model::list_files(&src).is_empty() {
+                // Move the obsolete model folder to the journal. Its metadata and
+                // empty directory structure remain available for exact Undo.
+                j["retired"]=json!(true);
+                j["retired_hashes"]=hashes(&src)?;
+                relayout::write(lib,&j)?;
+                std::fs::rename(&src,keep.join("retired"))?;
+            } else {
+                let _=std::fs::remove_file(src.join(thumb::THUMB)); let _=thumb::make(&src);
+            }
         }
         let _=thumb::make(&dest);
-        j["sidecar_after"]=model::read_sidecar(&src); j["dest_hashes"]=hashes(&dest)?; j["source_sidecar_hash"]=json!(hash(&src.join(model::SIDECAR)).ok()); j["state"]=json!("done"); j["finished"]=json!(crate::library::now()); relayout::write(lib,&j)?;
-        Ok(json!({"id":side["id"],"rel":plan["dest"],"journal":id,"refresh":[plan["source_id"]]}))
+        let metadata_dir=if j["retired"]==true {keep.join("retired")} else {src.clone()};
+        j["sidecar_after"]=model::read_sidecar(&metadata_dir); j["dest_hashes"]=hashes(&dest)?; j["source_sidecar_hash"]=json!(hash(&metadata_dir.join(model::SIDECAR)).ok()); j["state"]=json!("done"); j["finished"]=json!(crate::library::now()); relayout::write(lib,&j)?;
+        Ok(json!({"id":side["id"],"rel":plan["dest"],"journal":id,"retired":j["retired"]==true,"refresh":[plan["source_id"]]}))
     })();
     if let Err(error)=result {
         // Ignore cancellation during rollback: restoring the complete source is mandatory.
@@ -175,13 +224,13 @@ fn directories(root:&Path)->Result<Vec<String>> {
     }
     let mut out=vec![]; visit(root,root,&mut out)?; Ok(out)
 }
-fn hash(path:&Path)->Result<String> {
+pub(crate) fn hash(path:&Path)->Result<String> {
     use sha2::{Digest,Sha256}; use std::io::Read;
     let mut f=std::fs::File::open(path)?; let mut h=Sha256::new(); let mut b=vec![0;1<<20];
     loop { let n=f.read(&mut b)?; if n==0 {break;} h.update(&b[..n]); }
     Ok(hex::encode(h.finalize()))
 }
-fn hashes(root:&Path)->Result<Value> {
+pub(crate) fn hashes(root:&Path)->Result<Value> {
     fn collect(root:&Path,dir:&Path,out:&mut Value)->Result<()> {
         for e in std::fs::read_dir(dir)? { let e=e?; let p=e.path(); if e.file_type()?.is_symlink() {bail!("A link was added to the model.");} if p.is_dir() {collect(root,&p,out)?;} else {out[p.strip_prefix(root)?.to_string_lossy().replace('\\',"/")]=json!(hash(&p)?);} } Ok(())
     }
@@ -193,9 +242,17 @@ fn rollback(lib:&Library,j:&Value, strict:bool)->Result<()> {
     let files=j["files"].as_array().unwrap();
     let owns_dest=dest.is_dir() && !j["new_sidecar_after"]["id"].is_null() && model::read_sidecar(&dest)["id"]==j["new_sidecar_after"]["id"];
     if dest.exists() && !owns_dest { bail!("The destination belongs to another model. Nothing was removed."); }
+    let retired=keep.join("retired");
     if strict {
         if !owns_dest || hashes(&dest)? != j["dest_hashes"] { bail!("The new model changed outside the app. Restore it before undoing."); }
-        if json!(hash(&src.join(model::SIDECAR)).ok()) != j["source_sidecar_hash"] { bail!("The source model's details changed. Restore them before undoing."); }
+        if j["retired"]==true {
+            if src.exists() || !retired.is_dir() || hashes(&retired)? != j["retired_hashes"] { bail!("The former model location or its recovery files changed. Resolve this before undoing."); }
+        } else if json!(hash(&src.join(model::SIDECAR)).ok()) != j["source_sidecar_hash"] { bail!("The source model's details changed. Restore them before undoing."); }
+    }
+    if j["retired"]==true && retired.is_dir() {
+        if src.exists() { bail!("The former model location was reused. Move it aside before recovery."); }
+        std::fs::create_dir_all(src.parent().unwrap())?;
+        std::fs::rename(&retired,&src)?;
     }
     if j["mode"]=="move" {
         if strict { for f in files { if f["entry"].is_null() && checked(&src,s(f,"file"))?.exists() && hash(&checked(&src,s(f,"file"))?)? != j["original_hashes"][s(f,"to")].as_str().unwrap_or("") { bail!("A file is back at {}. Move it aside before undoing.",s(f,"file")); } } }
@@ -296,9 +353,32 @@ mod tests {
         assert!(relayout::undo(&lib,s(&r,"journal"),&AtomicBool::new(false),&|_,_,_|{}).is_err()); assert!(added.is_file());
     }
     #[test]
-    fn rejects_unsafe_paths_and_whole_model() {
+    fn whole_model_move_retires_the_card_and_undo_restores_everything() {
         let (lib,ix,id)=setup("extract-safe");
-        for f in ["../body.stl","/body.stl","C:/body.stl","model.json",""] { assert!(plan(&lib,&ix,&json!({"id":id,"files":[f],"name":"Bad"})).is_err(),"{f}"); }
-        assert!(plan(&lib,&ix,&json!({"id":id,"files":["Arms","body.stl","cover.png"],"name":"All"})).is_err());
+        for f in ["../body.stl","/body.stl","C:/body.stl","model.json"] {
+            assert!(plan(&lib,&ix,&json!({"id":id,"files":[f],"name":"Bad"})).is_err(),"{f}");
+        }
+        let p=plan(&lib,&ix,&json!({"id":id,"files":["Arms","body.stl","cover.png"],"name":"All"})).unwrap();
+        assert_eq!(p["files"].as_array().unwrap().len(),4);
+        let root=plan(&lib,&ix,&json!({"id":id,"files":[""],"name":"All"})).unwrap();
+        assert_eq!(root["files"].as_array().unwrap().len(),4);
+        let source=lib.resolve("Unsorted/Kit").unwrap();
+        let before=hashes(&source).unwrap();
+        let r=execute(&lib,&p,"move",&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert!(!source.exists());
+        let dest=lib.resolve(s(&r,"rel")).unwrap();
+        assert_eq!(model::read_sidecar(&dest)["custom"],42);
+        relayout::undo(&lib,s(&r,"journal"),&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert_eq!(hashes(&source).unwrap(),before);
+    }
+    #[test]
+    fn whole_model_copy_leaves_source_untouched() {
+        let (lib,ix,id)=setup("extract-whole-copy");
+        let source=lib.resolve("Unsorted/Kit").unwrap();
+        let before=hashes(&source).unwrap();
+        let p=plan(&lib,&ix,&json!({"id":id,"files":[""],"name":"Everything"})).unwrap();
+        let r=execute(&lib,&p,"copy",&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert_eq!(hashes(&source).unwrap(),before);
+        assert_eq!(model::read_sidecar(&lib.resolve(s(&r,"rel")).unwrap())["custom"],42);
     }
 }

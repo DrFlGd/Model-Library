@@ -20,10 +20,38 @@ export function keyParts(key) {
   if (key.startsWith("z:")) { const i = key.indexOf("!"); return { kind: "entry", file: key.slice(2, i), entry: key.slice(i + 1) }; }
   return { kind: key.startsWith("d:") ? "folder" : "file", file: key.slice(2) };
 }
+/** Normalise parent/child overlaps, including ZIP entries, before counting or planning.
+ * Keeps visual selection intact while preventing duplicated work. */
+export function normaliseKeys(keys) {
+  const uniq = [...new Set(keys)];
+  const selected = new Set(uniq);
+  const ancestor = (path) => {
+    if (selected.has("d:")) return true;
+    const parts = path.split("/");
+    for (let i = 1; i < parts.length; i++) {
+      if (selected.has("d:" + parts.slice(0, i).join("/"))) return true;
+    }
+    return false;
+  };
+  return uniq.filter((key) => {
+    const p = keyParts(key);
+    if (p.kind === "folder") {
+      if (!p.file) return true;
+      return !ancestor(p.file);
+    }
+    if (p.kind === "file") return !ancestor(p.file);
+    if (selected.has("f:" + p.file) || ancestor(p.file)) return false;
+    const parts = p.entry.replace(/\/$/, "").split("/");
+    for (let i = 1; i < parts.length; i++) {
+      if (selected.has("z:" + p.file + "!" + parts.slice(0, i).join("/") + "/")) return false;
+    }
+    return true;
+  });
+}
 /** Folders remain paths: the core expands their contents and removes overlaps. */
 export function pickedFiles(keys = fileSel.get().picked) {
   const files = [], entries = [];
-  for (const key of keys) {
+  for (const key of normaliseKeys(keys)) {
     const p = keyParts(key);
     if (p.kind === "entry") entries.push({ file: p.file, entry: p.entry });
     else files.push(p.file);

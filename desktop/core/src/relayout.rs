@@ -23,7 +23,8 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
-/// Journals kept in a library (older ones are removed).
+/// Maximum number of disposable, completed history entries. Recovery-bearing and
+/// unfinished journals are never subject to this limit.
 const KEEP: usize = 20;
 
 fn journal_dir(lib: &Library) -> PathBuf {
@@ -67,6 +68,9 @@ fn path_in(m: &Value, side: &str) -> Vec<String> {
 pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
     if change["kind"] == "move" {
         return plan_move(lib, ix, change);
+    }
+    if change["kind"] == "restructure" {
+        return crate::restructure::plan(lib, ix, change);
     }
     let sid = change["schema"].as_str().unwrap_or("");
     let old = ix
@@ -284,7 +288,7 @@ fn plan_move(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
 
 /// Whether a change edits a category, and so saves its file when done or undone.
 fn edits_schema(j: &Value) -> bool {
-    matches!(j["kind"].as_str(), Some("category" | "schema" | "delete"))
+    matches!(j["kind"].as_str(), Some("category" | "schema" | "delete" | "restructure"))
 }
 
 /// Take away the subcategories a change made, unless something has gone into them
@@ -356,6 +360,12 @@ pub fn summary(plan: &Value) -> Value {
         "models": moves.len(),
         "moving": moving.len(),
         "clashes": clashes,
+        "node_mappings": plan["node_mappings"],
+        "nodes": plan["nodes"],
+        "files": plan["files"],
+        "bytes": plan["bytes"],
+        "child_collisions": plan["child_collisions"],
+        "target_path": plan["target_path"],
         "folder_before": folder_before,
         "folder_after": plan["schema_after"]["folder"],
         "sample": moving.iter().take(30).map(|m| json!({ "name": m["name"], "from": m["from"], "to": m["to"] })).collect::<Vec<_>>(),
@@ -391,15 +401,56 @@ fn begin(lib: &Library, id: &str, change: &Value, state: &str) -> Result<()> {
         j["finished"] = j["created"].clone();
     }
     write(lib, &j)?;
-    // keep the newest few
-    let dir = journal_dir(lib);
-    let mut all = list(lib);
-    for old in all.drain(KEEP.min(all.len())..) {
-        let old = old["id"].as_str().unwrap_or("x");
-        let _ = std::fs::remove_file(dir.join(format!("{old}.json")));
-        let _ = std::fs::remove_dir_all(kept_dir(lib, old));
-    }
+    prune_disposable_history(lib);
     Ok(())
+}
+
+/// No journal may expire while it holds recovery data or represents an
+/// unfinished operation. A deleted model also keeps its record even if its
+/// recovery folder is temporarily absent, so the missing copy stays visible
+/// and actionable rather than disappearing from the history.
+fn retains_recovery(lib: &Library, j: &Value) -> bool {
+    if !matches!(j["state"].as_str(), Some("done" | "undone" | "emptied")) {
+        return true;
+    }
+    if (j["kind"] == "model_delete" || (j["kind"] == "archive-op" && j["remove_sources"] == true))
+        && j["state"] != "undone" {
+        return true;
+    }
+    let Some(id) = j["id"].as_str() else { return true; };
+    if crate::library::valid_id(id).is_err() {
+        return true;
+    }
+    match std::fs::read_dir(kept_dir(lib, id)) {
+        Ok(mut contents) => contents.next().is_some(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(_) => true, // fail closed if recovery storage cannot be inspected
+    }
+}
+
+/// Keep the 20 newest *disposable* records, in addition to every retained
+/// recovery and every unfinished operation. Never remove a journal that might
+/// be needed to recover user data. Remove the kept folder before its metadata
+/// so a filesystem error cannot orphan a recovery directory.
+fn prune_disposable_history(lib: &Library) {
+    let dir = journal_dir(lib);
+    for old in list(lib)
+        .into_iter()
+        .filter(|j| !retains_recovery(lib, j))
+        .skip(KEEP)
+    {
+        let Some(id) = old["id"].as_str() else { continue; };
+        if crate::library::valid_id(id).is_err() {
+            continue;
+        }
+        let kept = kept_dir(lib, id);
+        match std::fs::remove_dir_all(&kept) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => continue, // preserve the journal if cleanup failed
+        }
+        let _ = std::fs::remove_file(dir.join(format!("{id}.json")));
+    }
 }
 
 pub(crate) fn write(lib: &Library, j: &Value) -> Result<()> {
@@ -439,7 +490,7 @@ pub fn brief(j: &Value) -> Value {
     } else {
         j["moves"].as_array().or(j["models"].as_array()).map_or(0, Vec::len)
     };
-    json!({ "id": j["id"], "kind": j["kind"], "label": j["label"], "created": j["created"], "state": j["state"], "direction": j["direction"], "models": models, "error": j["error"] })
+    json!({ "id": j["id"], "kind": j["kind"], "label": j["label"], "created": j["created"], "state": j["state"], "direction": j["direction"], "models": models, "category_import": j["category_import"], "error": j["error"] })
 }
 
 /// The recorded changes for Home, newest first, each saying whether it can be
@@ -451,7 +502,7 @@ pub fn briefs(lib: &Library) -> Vec<Value> {
         .map(|(i, j)| {
             let mut b = brief(j);
             b["undo"] = match blocked_by(&all[..i], j) {
-                _ if j["state"] != "done" => json!(false),
+                _ if j["state"] != "done" && !(j["kind"] == "archive-op" && j["state"] == "interrupted") => json!(false),
                 Some(newer) => json!(format!(
                     "Undo the newer change first: {}.",
                     newer["label"].as_str().unwrap_or("")
@@ -494,6 +545,12 @@ fn blocked_by<'a>(newer: &'a [Value], j: &Value) -> Option<&'a Value> {
         .iter()
         .filter(|x| x["state"] != "undone" && x["id"] != j["id"])
         .find(|x| {
+            // Restoring a deleted model is independent of later unrelated
+            // operations. The restore handler still checks for reused paths
+            // and verifies the SHA-256 manifest before moving any folder.
+            if j["kind"] == "model_delete" {
+                return folders(x).iter().any(|a| mine.iter().any(|b| near(a, b)));
+            }
             if x["kind"] != "details" && j["kind"] != "details" {
                 return true;
             }
@@ -590,8 +647,38 @@ fn place(lib: &Library, from: &str, to: &str, m: &Value, side: &str, p: &Progres
     Ok(())
 }
 
+/// Persist all changed schemas only after the model folders have been relocated.
+/// The same snapshots are used in reverse for Undo and interrupted-job recovery.
+fn restore_restructure_schemas(lib: &Library, j: &Value, side: &str, other: &str) -> Result<()> {
+    let entries = j["schemas"].as_array().ok_or_else(|| anyhow!("Category journal has no hierarchy snapshots."))?;
+    // Mutation jobs are serialised, and an interrupted journal stays recoverable.
+    for entry in entries {
+        let id = entry["id"].as_str().ok_or_else(|| anyhow!("Invalid category snapshot."))?;
+        if entry[side].is_null() {
+            schema::remove(lib, id)?;
+        } else {
+            schema::save(lib, &entry[side])?;
+        }
+    }
+    for entry in entries {
+        sync_folders(lib, &entry[side], &entry[other])?;
+        let before = entry[other]["folder"].as_str();
+        let after = entry[side]["folder"].as_str();
+        if let Some(folder) = before.filter(|b| Some(*b) != after) {
+            let _ = std::fs::remove_dir(lib.root().join(folder)); // never remove non-empty user folders
+        }
+        if let Some(folder) = after {
+            std::fs::create_dir_all(lib.root().join(folder))?;
+        }
+    }
+    Ok(())
+}
+
 /// A finished change's categories: the schema saved (or removed) and its folders made.
 fn apply_schema(lib: &Library, j: &Value) -> Result<()> {
+    if j["kind"] == "restructure" {
+        return restore_restructure_schemas(lib, j, "after", "before");
+    }
     match &j["schema_after"] {
         Value::Null => schema::remove(lib, j["schema"].as_str().unwrap_or(""))?,
         v => schema::save(lib, v)?,
@@ -612,6 +699,9 @@ fn apply_schema(lib: &Library, j: &Value) -> Result<()> {
 
 /// An undone change's categories: the schema as it was, and its folders.
 fn undo_schema(lib: &Library, j: &Value) -> Result<()> {
+    if j["kind"] == "restructure" {
+        return restore_restructure_schemas(lib, j, "before", "after");
+    }
     schema::save(lib, &j["schema_before"])?;
     sync_folders(lib, &j["schema_before"], &j["schema_after"])?;
     let (before, after) = (
@@ -653,7 +743,7 @@ pub fn apply(
     if j["state"] == "emptied" {
         bail!("Those copies were deleted already.");
     }
-    if matches!(j["kind"].as_str(), Some("details" | "import" | "extract" | "wrap_loose")) {
+    if matches!(j["kind"].as_str(), Some("details" | "import" | "extract" | "wrap_loose" | "file_transfer" | "model_delete" | "archive-op")) {
         bail!("That change can't be made again from here.");
     }
     j["state"] = json!("running");
@@ -740,12 +830,20 @@ pub fn undo(
             x["label"].as_str().unwrap_or("")
         );
     }
+    // Archive undo performs its own preflight before changing journal state, so
+    // a conflict remains actionable rather than leaving an "undoing" record.
+    if j["kind"] == "archive-op" { return crate::archive_ops::undo(lib, j); }
     j["state"] = json!("undoing");
     j["direction"] = json!("undo");
     write(lib, &j)?;
+    if j["category_import"] == true {
+        return crate::category_import::undo_running(lib, j, cancel, on_item);
+    }
     match j["kind"].as_str() {
         Some("details") => return undo_details(lib, j),
         Some("extract") => return crate::extract::undo(lib, j),
+        Some("file_transfer") => return crate::fileops::undo(lib, j),
+        Some("model_delete") => return crate::delete::undo(lib, j),
         Some("wrap_loose") => return model::undo_loose(lib, id, cancel),
         Some("import") => return undo_import(lib, j, cancel, on_item),
         _ => {}
@@ -891,6 +989,18 @@ fn undo_import(
             break;
         }
         on_item(moves.len() - 1 - i, moves.len(), name);
+        // Reviewed category imports store the exact published bytes. A model
+        // changed since import must not be discarded by Undo.
+        let safe = if m["manifest"].is_array() {
+            m["to"].as_str().ok_or_else(|| anyhow!("Missing destination."))
+                .and_then(|to| lib.resolve(to))
+                .and_then(|path| crate::category_import::destination_manifest(&path))
+                .map(|now| now == m["manifest"])
+        } else { Ok(true) };
+        if !matches!(safe, Ok(true)) {
+            failed.push(json!({ "name": name, "error": "This model changed after import. Resolve its files before undoing." }));
+            continue;
+        }
         match put_back(lib, m, copied, &p) {
             Ok(()) => {
                 moved += 1;
@@ -904,6 +1014,24 @@ fn undo_import(
     }
     if failed.is_empty() {
         remove_added(lib, &j);
+        // Remove only categories created by this import, and only if their
+        // directories are empty after restoring the models. Other categories,
+        // user-created files and even unexpected empty folders are kept.
+        for made in j["created_schemas"].as_array().into_iter().flatten() {
+            let (Some(id), Some(folder)) = (made["id"].as_str(), made["folder"].as_str()) else { continue };
+            let Some(s) = schema::list(lib).into_iter().find(|s| s.id == id) else { continue };
+            let mut paths = s.tree();
+            paths.sort_by_key(|p| std::cmp::Reverse(p.len()));
+            for path in paths {
+                let d = path.iter().fold(lib.root().join(folder), |d, n| d.join(n));
+                let _ = std::fs::remove_dir(d); // never remove nonempty folders
+            }
+            match std::fs::remove_dir(lib.root().join(folder)) {
+                Ok(()) => { schema::remove(lib, id)?; }
+                Err(_) => failed.push(json!({ "name": folder, "error":
+                    "The imported category has unexpected contents; it was kept for recovery." })),
+            }
+        }
     }
     end(lib, &mut j, &failed, "undone")?;
     Ok(
@@ -1138,6 +1266,50 @@ mod tests {
             side.get("schema").is_none() && side.get("path").is_none() && side["id"].is_string()
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn pruning_preserves_unfinished_and_recovery_backed_journals() {
+        let root = temp_dir("journal-retention");
+        let lib = Library::open(&root).unwrap();
+        // Archive and transfer journals use the same store as model deletion.
+        // An unfinished record without a recovery directory must also survive.
+        let cases = [
+            ("file_transfer", "running", true),
+            ("archive", "interrupted", true),
+            ("archive", "stopped", false),
+            ("file_transfer", "done", true),
+        ];
+        let mut preserved = vec![];
+        for (kind, state, with_copy) in cases {
+            let id = new_id(&lib).unwrap();
+            write(&lib, &json!({"id": id, "kind": kind, "state": state, "moves": []})).unwrap();
+            if with_copy {
+                let kept = kept_dir(&lib, &id);
+                std::fs::create_dir_all(&kept).unwrap();
+                std::fs::write(kept.join("source.bin"), b"recoverable content").unwrap();
+            }
+            preserved.push((id, with_copy));
+        }
+        for i in 0..27 {
+            let id = new_id(&lib).unwrap();
+            record(&lib, &id, &json!({"kind": "details", "label": format!("change {i}"), "models": []})).unwrap();
+        }
+        for (id, with_copy) in preserved {
+            assert!(read(&lib, &id).is_ok(), "lost protected journal {id}");
+            if with_copy {
+                assert_eq!(
+                    std::fs::read(kept_dir(&lib, &id).join("source.bin")).unwrap().as_slice(),
+                    b"recoverable content"
+                );
+            }
+        }
+        assert_eq!(
+            list(&lib).iter().filter(|j| j["kind"] == "details").count(),
+            KEEP,
+            "retained journals must not consume the disposable history quota"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

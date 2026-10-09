@@ -209,6 +209,29 @@ input:invalid { border-color: var(--danger); }
 .card-name { margin-top: 8px; font-weight: 700; font-size: 13.5px; line-height: 1.25; }
 .card-sub { font-size: 12px; color: var(--graphite); line-height: 1.3; }
 
+/* Agent F: card hierarchy is conveyed by weight, style and size, not colour alone. */
+.card-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.card-meta { display: grid; align-content: start; gap: 2px; min-height: 29px; margin-top: 3px; min-width: 0; }
+.card-author { display: block; min-width: 0; font-size: 12.5px; line-height: 1.3; font-style: italic; font-weight: 400; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-location { display: block; min-width: 0; font-size: 11.5px; line-height: 1.3; font-weight: 600; font-style: normal; color: var(--graphite); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A composed cover is a lazy 1–4 file montage, not a stretched representative thumbnail. */
+.cover-composed { position: relative; }
+.cover-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); width: 100%; height: 100%; gap: 2px; }
+.cover-tiles-1 { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+.cover-tiles-2 { grid-template-rows: 1fr; }
+.cover-tiles-3 > :last-child { grid-column: 1 / -1; }
+.cover-file, .cover-kind { min-width: 0; min-height: 0; width: 100%; height: 100%; background: var(--thumb-bg); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.cover-file img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.cover-kind { flex-direction: column; gap: 2px; padding: 3px; color: var(--ink); text-align: center; }
+.cover-kind svg { flex: none; width: min(32%, 25px); height: auto; opacity: .7; }
+.cover-kind span { font-size: 10.5px; font-weight: 600; line-height: 1.15; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cover-count, .cover-warning { position: absolute; right: 4px; bottom: 4px; font-size: 10px; line-height: 1.4; font-weight: 700; background: var(--ink); color: var(--white); padding: 1px 5px; border-radius: 4px; }
+.cover-warning { left: 4px; right: auto; background: var(--white); color: var(--ink); border: 1px solid currentColor; }
+.thumb-sm .cover-kind span { display: none; }
+.thumb-sm .cover-kind svg { width: 16px; }
+
+
 .list-view { display: flex; flex-direction: column; gap: 2px; }
 .row { display: flex; align-items: center; gap: 14px; padding: 5px 10px; border-radius: var(--radius-s); height: 52px; border: 1px solid transparent; cursor: default; user-select: none; }
 .row:hover { background: var(--white); }
@@ -804,3 +827,216 @@ body:has(.sw-go) .toast { bottom: 92px; }
 /* Package C: loose model files on Home */
 #home-loose-files .loose-file-path { overflow-wrap: anywhere; min-width: 0; }
 #home-loose-files .wrap-loose { flex-shrink: 0; }
+
+
+/* Agent A: the workspace occupies the *current* shell rectangle. Each pane owns
+   its scroll, so changing ribbons or scaling never leaves a mount-time gap. */
+.app, .app-main, .browser, .browse-main { min-height: 0; }
+.model-page {
+  padding: 0; overflow: hidden; gap: 0; min-width: 0;
+}
+.model-page > .page-head {
+  padding: 12px 20px; flex: none; border-bottom: 1px solid var(--steel-2);
+}
+.model-workspace {
+  flex: 1 1 auto; height: auto; min-height: 0; min-width: 0; gap: 0;
+  overflow: hidden;
+}
+.model-workspace > .file-panel, .model-workspace > .details-panel {
+  height: 100%; min-height: 0;
+}
+.file-panel-scroll { flex: 1 1 0; min-height: 0; max-height: none; overflow: auto; }
+.file-panel #part-tree { max-height: none; min-height: 0; border: 0; padding: 0; }
+.workspace-viewing-area {
+  display: flex; flex-direction: column; min-height: 0; overflow: auto;
+}
+.workspace-viewing-area > .extraction-bar { flex: none; }
+.workspace-stage { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.workspace-stage > .stage-3d, .workspace-stage > .stage-pictures,
+.workspace-stage > .stage-docs, .workspace-stage > .stage-videos {
+  flex: 1 1 auto; min-height: 0;
+}
+.workspace-stage .stage-canvas {
+  flex: 1 1 auto; height: auto; min-height: 160px;
+}
+.workspace-stage .stage-picture { flex: 1 1 auto; height: auto; min-height: 160px; }
+.workspace-stage .doc-view { min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column; }
+.workspace-stage .doc-frame { flex: 1 1 auto; min-height: 180px; height: auto; }
+.workspace-stage .doc-text-view { flex: 1 1 auto; max-height: none; overflow: auto; }
+.workspace-stage .contents-view { min-height: 0; }
+
+.details-panel {
+  position: relative; flex: none; box-sizing: border-box; min-width: 0;
+  display: flex; flex-direction: column; background: var(--white);
+  border-left: 1px solid var(--steel-2);
+}
+.details-panel.collapsed { align-items: stretch; }
+.details-panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; border-bottom: 1px solid var(--steel-2); flex: none;
+}
+.details-panel-tab {
+  display: block; writing-mode: vertical-rl; text-orientation: mixed;
+  width: 100%; padding: 12px 6px; margin: 0; font-weight: 700;
+}
+.details-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px; }
+.details-panel.collapsed .details-body { display: none; }
+.workspace-details-form { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.workspace-details-form .field-block { min-width: 0; }
+.workspace-details-form input, .workspace-details-form select,
+.workspace-details-form textarea { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
+.workspace-details-form .insp-thumb { max-height: 230px; object-fit: contain; flex: none; }
+.details-save-note { font-size: 12px; }
+.workspace-details-actions {
+  display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap;
+  gap: 8px; position: sticky; bottom: -12px; padding: 10px 0;
+  background: var(--white);
+}
+.details-panel-resize {
+  position: absolute; left: -4px; top: 0; bottom: 0; width: 8px;
+  cursor: col-resize; touch-action: none;
+}
+.details-panel-resize:hover, .details-panel-resize:focus-visible,
+.file-panel-resize:focus-visible { background: var(--tool); outline: 2px solid var(--focus); }
+
+/* The navigation may shrink without relocating the adjacent Files panel. */
+@media (min-width: 901px) {
+  .nav-burger { display: inline-flex; }
+  .sidebar { transition: width .12s ease; min-width: 0; box-sizing: border-box; }
+  .sidebar.collapsed { width: 56px; padding-left: 4px; padding-right: 4px; overflow: hidden; }
+  .sidebar.collapsed .nav-head, .sidebar.collapsed .nav-note,
+  .sidebar.collapsed #schema-tree, .sidebar.collapsed .nav-add,
+  .sidebar.collapsed .nav-count, .sidebar.collapsed .nav-label,
+  .sidebar.collapsed .nav-toggle, .sidebar.collapsed .nav-toggle-space { display: none; }
+  .sidebar.collapsed .nav-row { padding-left: 0; }
+  .sidebar.collapsed .nav-link { justify-content: center; }
+  .sidebar.collapsed .nav-icon { justify-content: center; }
+}
+.unsorted-preview {
+  flex: 0 0 clamp(340px, 34vw, 520px); min-width: 0; min-height: 0;
+  display: flex; flex-direction: column; overflow: hidden;
+  border-left: 1px solid var(--steel-2); background: var(--white);
+}
+.unsorted-preview-head, .unsorted-preview-title {
+  flex: none; display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 6px; padding: 10px 12px;
+}
+.unsorted-preview-title { border-bottom: 1px solid var(--steel-2); }
+.unsorted-preview-title strong { overflow-wrap: anywhere; }
+.unsorted-preview-title a { font-size: 12px; }
+.unsorted-preview-tabs { display: flex; flex: none; padding: 0 12px 8px; gap: 5px; }
+.unsorted-preview-tabs [aria-pressed="true"] { background: var(--sel); box-shadow: inset 0 -2px var(--tool); }
+.unsorted-preview > .view-switch { margin: 0 12px 8px; flex: none; }
+.unsorted-quick-details { flex: 0 0 156px; min-height: 0; overflow: hidden; border-bottom: 1px solid var(--steel-2); }
+.unsorted-quick-details > .inspector { height: 100%; box-sizing: border-box; width: auto; border-left: 0; padding: 8px 12px; overflow: auto; }
+.unsorted-file-tree { flex: 0 1 35%; min-height: 110px; overflow: auto; }
+.unsorted-file-tree #part-tree { max-height: none; border: 0; }
+.unsorted-preview-stage {
+  flex: 1 1 0; min-height: 0; border-top: 1px solid var(--steel-2);
+  overflow: hidden; display: flex; flex-direction: column;
+}
+.unsorted-preview-stage > .workspace-stage { min-height: 0; flex: 1; }
+.unsorted-preview-stage .stage-canvas, .unsorted-preview-stage .stage-picture { min-height: 140px; }
+.unsorted-preview > .inspector {
+  width: auto; flex: 1; min-width: 0; min-height: 0; border-left: 0; box-sizing: border-box;
+}
+.preview-shade { display: none; }
+
+@media (max-width: 899px) {
+  .model-page { padding: 0; }
+  .model-page > .page-head { padding: 10px 12px; }
+  .model-workspace { display: flex; }
+  .model-workspace > .file-panel.drawer,
+  .model-workspace > .details-panel.drawer {
+    position: absolute; top: 0; bottom: 0; z-index: 21;
+    max-width: calc(100% - 28px); height: 100%;
+    background: var(--white); box-shadow: 0 0 18px #0004;
+  }
+  .model-workspace > .file-panel.drawer { left: 0; }
+  .model-workspace > .details-panel.drawer { right: 0; }
+  .model-workspace > .file-panel.drawer.collapsed,
+  .model-workspace > .details-panel.drawer.collapsed { display: none; }
+  .model-workspace > .workspace-viewing-area { flex: 1 1 auto; }
+  .file-panel-shade { z-index: 20; }
+  .unsorted-preview.mobile-preview {
+    position: fixed; top: 52px; right: 0; bottom: 0; z-index: 52;
+    width: min(520px, 92vw); height: auto; min-height: 0;
+    box-shadow: var(--shadow); flex: none;
+  }
+  .preview-shade {
+    display: block; position: fixed; z-index: 51; inset: 52px 0 0 0;
+    background: #0006; border: 0;
+  }
+}
+@media (max-width: 600px) {
+  .model-page > .page-head { gap: 6px; }
+  .model-page .page-actions { flex-wrap: wrap; }
+  .workspace-stage .stage-canvas { min-height: 120px; }
+}
+
+
+/* Explicit concurrent-edit resolution in the Details ribbon (Agent A-1). */
+.details-conflict {
+  border: 1px solid var(--steel-2);
+  border-left: 3px solid var(--tool);
+  border-radius: var(--radius-s);
+  padding: 10px 12px;
+  background: var(--panel);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.details-conflict p { margin: 6px 0; }
+.details-conflict-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.details-conflict-actions button:focus-visible { outline: 3px solid var(--focus); }
+/* Agent C: PDF document controls fit the centre pane and remain keyboard-accessible. */
+.pdf-viewer { display:flex; flex-direction:column; min-width:0; min-height:300px; background:var(--panel); }
+.pdf-controls { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:8px 10px; border-bottom:1px solid var(--steel-2); }
+.pdf-controls label { display:inline-flex; align-items:center; gap:6px; font-size:13px; }
+.pdf-page-label input { width:5em; min-width:0; }
+.pdf-controls select { max-width:130px; }
+.pdf-frame { flex:1; min-height:420px; height:min(68vh,760px); background:var(--white); }
+.pdf-temporary-note { padding:6px 12px; font-size:12px; }
+.pdf-external { align-self:flex-start; margin:8px; }
+.workspace-stage .pdf-viewer { flex:1; min-height:0; }
+.workspace-stage .pdf-frame { min-height:360px; }
+
+/* Agent C: archive review retains path/size information without overflowing dialogs. */
+.archive-plan { max-height:min(55vh,480px); overflow:auto; display:grid; gap:8px; }
+.archive-plan p { margin:0; }
+.archive-plan ul { list-style:disc; margin:8px 0; padding:0 0 0 20px; max-height:180px; overflow:auto; }
+.archive-plan li { padding:3px 0; overflow-wrap:anywhere; }
+.archive-cleanup { display:flex; gap:8px; align-items:flex-start; margin:10px 0; font-weight:600; }
+/* Reviewed folder-to-category import (Agent D). The proposal remains separate
+   from the normal sorter until the user confirms the final destination plan. */
+.ci-workspace { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.ci-heading, .ci-toolbar, .ci-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.ci-heading h2, .ci-proposal h2, .ci-review h2 { margin: 0 0 5px; }
+.ci-heading p, .ci-proposal > p, .ci-note { margin: 0; }
+.ci-proposal, .ci-review, .ci-results { border: 1px solid var(--line, #7775); border-radius: 10px; padding: 15px; min-width: 0; }
+.ci-tree, .ci-children { padding: 0; margin: 0; list-style: none; }
+.ci-children { margin-left: 15px; border-left: 1px solid var(--line, #7775); }
+.ci-node { min-width: 0; }
+.ci-row { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; padding: 7px 3px 7px calc(var(--ci-depth) * 2px); border-bottom: 1px solid var(--line, #7773); }
+.ci-row:focus-within { outline: 2px solid var(--accent, #618cde); outline-offset: -2px; }
+.ci-included { display: flex; align-items: center; }
+.ci-kind { font-size: 0.78rem; font-weight: 650; text-transform: uppercase; min-width: 72px; }
+.ci-name { flex: 2 1 170px; min-width: 90px; }
+.ci-row select { flex: 1 1 180px; min-width: 135px; }
+.ci-size { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ci-options { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 2px 0 8px 33px; padding-left: calc(var(--ci-depth) * 2px); }
+.ci-options label { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 0.87rem; }
+.ci-options select { max-width: 440px; }
+.ci-check input { margin: 0; }
+.ci-group-name { max-width: 220px; }
+.ci-note { padding: 5px 8px; margin-left: calc(30px + var(--ci-depth) * 2px); font-size: 0.84rem; opacity: 0.8; }
+.ci-destinations { overflow: auto; max-height: 360px; }
+.ci-destinations table { width: 100%; border-collapse: collapse; text-align: left; min-width: 600px; }
+.ci-destinations td, .ci-destinations th { text-align: left; border-bottom: 1px solid var(--line, #7773); padding: 7px; max-width: 290px; overflow-wrap: anywhere; }
+.ci-review .form-error ul { margin-top: 6px; }
+@media (max-width: 800px) {
+  .ci-proposal, .ci-review, .ci-results { padding: 10px; }
+  .ci-row { gap: 5px; }
+  .ci-row .ci-kind { min-width: 54px; }
+  .ci-children { margin-left: 8px; }
+  .ci-options { margin-left: 13px; }
+}

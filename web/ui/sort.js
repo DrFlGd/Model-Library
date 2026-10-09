@@ -19,6 +19,7 @@ import { size } from "./details.js";
 import { FilesView, LazyPreview } from "./parts.js";
 import { PageHead, ViewSwitch, SortMenu, SearchNote, EditBox } from "./layout.js";
 import { TypeTag, TypeTags } from "./filetypes.js";
+import { CategoryImport, categoryStage, openCategoryImport } from "./categoryimport.js";
 
 /** The workspace as the core keeps it, and what's selected here. */
 export const sorter = createStore({
@@ -596,6 +597,7 @@ function JobBar({ job }) {
 
 export function ImportPage() {
   const s = useStore(sorter, (st) => st);
+  const stagedCategories = useStore(categoryStage, (st) => ({ open: st.open, library: st.library }));
   const overview = useStore(ui, (st) => st.overview);
   const lib = useStore(ui, (st) => st.library);
   const view = useStore(ui, (st) => st.sortView || "folders");
@@ -709,19 +711,23 @@ export function ImportPage() {
   const empty = !se || (!se.roots.length && !se.items.length);
   const wait = busy ? "Wait for the work under way to finish." : false;
   const moreItems = () => [
-    { id: "import-add-folder", label: "Add a model folder…", icon: "folder", disabled: wait, run: () => pickAndAdd(false) },
-    { id: "import-add-file", label: "Add a file…", icon: "file", disabled: wait, run: () => pickAndAdd(false, true) },
-    ...(!empty ? [{ sep: true }, { id: "sort-rescan", label: "Read again", icon: "refresh", disabled: wait, title: "Pick up files added or removed since, keeping what you decided", run: readAgain }] : []),
+    { id: "import-add-folder", label: "Import folder…", icon: "folder", disabled: wait, run: () => pickAndAdd(false) },
+    { id: "import-add-file", label: "Import file…", icon: "file", disabled: wait, run: () => pickAndAdd(false, true) },
+    ...(!empty ? [{ id: "sort-rescan", label: "Read again", icon: "refresh", disabled: wait, title: "Pick up files added or removed since, keeping what you decided", run: readAgain }] : []),
     ...(counts.done ? [{ id: "sort-forget-done", label: "Clear imported", disabled: wait, title: "Take the imported models off this list",
       run: () => act("sort_clear", { imported: true }, () => `Cleared ${plural(counts.done, "imported model", "imported models")} from the list.`) }] : []),
     ...(!empty ? [{ id: "import-clear", label: "Start again", icon: "close", disabled: wait, title: "Empty the workspace (nothing on disk changes)", run: startAgain }] : []),
   ];
   const count = se && !empty ? `${plural(counts.all, "model", "models")}, ${counts.todo} with no category` : null;
   return html`<div class="sort-page" id="sort-page" data-ready=${se ? "1" : null}>
-    <${PageHead} title="Import" count=${count} menu=${{ id: "import-more", items: moreItems, title: "Add a model folder or a file, read the folders again, start again" }}>
+    <${PageHead} title="Import" count=${count} menu=${{ id: "import-more", items: moreItems, title: "Read or clear the sorting workspace" }}>
       <button type="button" class="primary" id="import-sort" disabled=${busy} onClick=${() => pickAndAdd(true)}>${Icon.folder(15)} Sort a folder…</button>
+      <button type="button" class="ghost" id="import-folder" disabled=${busy} onClick=${() => pickAndAdd(false)}>${Icon.folder(15)} Import folder…</button>
+      <button type="button" class="ghost" id="import-file" disabled=${busy} onClick=${() => pickAndAdd(false, true)}>${Icon.file(15)} Import file…</button>
+      <button type="button" class="ghost" id="import-categories" disabled=${busy} onClick=${openCategoryImport}>${Icon.layers(15)} Import folders as categories…</button>
     </${PageHead}>
     ${lib.read_only ? html`<p class="warn-note">${lib.read_only}</p>` : null}
+    ${stagedCategories.open && stagedCategories.library === lib.path ? html`<${CategoryImport} />` : html`
     ${s.error ? html`<p class="form-error" role="alert">${s.error}</p>` : null}
     ${s.job ? html`<${JobBar} job=${s.job} />` : se?.busy ? html`<p class="muted">The workspace is busy reading folders or importing. <button type="button" class="linkish" onClick=${loadSession}>Read again</button></p>` : null}
     ${s.results ? html`<${Results} r=${s.results} />` : null}
@@ -754,7 +760,7 @@ export function ImportPage() {
         </div>
         <span class="muted imp-mode-note">${s.mode === "move" ? "Files move into the library. Across drives they're copied, checked, then the originals deleted." : "The originals stay where they are; every copy is checked."}</span>
         <button type="button" class="primary" id="import-go" disabled=${!ready || busy || !!lib.read_only} title="Import the models that have a category" onClick=${importSorted}>${!ready ? "Nothing to import yet" : `${s.mode === "copy" ? "Copy" : "Import"} ${plural(ready, "model", "models")}`}</button>
-      </div>`}
+      </div>`}`}
   </div>`;
 }
 
