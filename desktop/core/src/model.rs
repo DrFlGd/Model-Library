@@ -115,7 +115,27 @@ pub fn summarise(files: &[(String, u64)], sidecar: &Value) -> Value {
         .map(String::from)
         .or_else(|| images().find(|r| r.starts_with("_media/")).cloned())
         .or_else(|| images().next().cloned());
-    json!({ "kinds": kinds, "exts": exts, "bytes": bytes, "count": files.len(), "cover": cover })
+    // A cover stored in model.json is a user choice, even if its source went
+    // missing. Keep that choice distinct from the legacy suggested image/thumbnail.
+    let explicit_cover = sidecar["cover"].as_str().filter(|c| !c.is_empty());
+    let cover_missing = explicit_cover.is_some_and(|c| !files.iter().any(|(r, _)| r == c));
+
+    // Only paths and small metadata reach the collection grid. Rendering large
+    // meshes is deferred until a card is visible; no full-size assets are decoded
+    // while indexing. Order is stable across scans and never repeats a file.
+    let previewable: Vec<_> = files.iter()
+        .filter(|(rel, size)| file_kind(rel) == "image"
+            || (crate::mesh::readable(rel) && *size <= crate::thumb::MAX_BYTES))
+        .collect();
+    let previews: Vec<Value> = previewable.iter().take(4).map(|(rel, size)| json!({
+        "file": rel, "size": size,
+        "kind": if file_kind(rel) == "image" { "image" } else { "model" }
+    })).collect();
+    json!({
+        "kinds": kinds, "exts": exts, "bytes": bytes, "count": files.len(),
+        "cover": cover, "explicit_cover": explicit_cover, "cover_missing": cover_missing,
+        "previews": previews, "previewable": previewable.len()
+    })
 }
 
 /// The sidecar, or {} when the folder has none (or it isn't valid JSON).
@@ -477,6 +497,17 @@ mod tests {
             summarise(&files, &json!({ "cover": "gone.png" }))["cover"],
             "_media/z.jpg"
         );
+        let auto = summarise(&files, &json!({}));
+        assert_eq!(auto["explicit_cover"], Value::Null);
+        assert_eq!(auto["previewable"], 4);
+        assert_eq!(auto["previews"].as_array().unwrap().len(), 4);
+        assert_eq!(auto["cover_missing"], false);
+        let chosen = summarise(&files, &json!({ "cover": "a.png" }));
+        assert_eq!(chosen["explicit_cover"], "a.png");
+        assert_eq!(chosen["cover_missing"], false);
+        let missing = summarise(&files, &json!({ "cover": "gone.png" }));
+        assert_eq!(missing["explicit_cover"], "gone.png");
+        assert_eq!(missing["cover_missing"], true);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
