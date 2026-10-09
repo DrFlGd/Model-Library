@@ -425,3 +425,128 @@ pub fn undo(lib:&Library,mut j:Value)->Result<Value> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::library::tests::temp_dir;
+
+    fn setup(tag: &str) -> (Library, String, String) {
+        let root = temp_dir(tag);
+        let lib = Library::open(&root).unwrap();
+        for (name,id) in [("Source","source-1"),("Target","target-1")] {
+            let dir = root.join("Unsorted").join(name);
+            std::fs::create_dir_all(dir.join("Nested")).unwrap();
+            std::fs::write(dir.join(model::SIDECAR),
+                format!(r#"{{"id":"{id}","name":"{name}","custom":"unchanged"}}"#)).unwrap();
+        }
+        std::fs::write(root.join("Unsorted/Source/Nested/a.xyz"), b"unknown-extension").unwrap();
+        std::fs::write(root.join("Unsorted/Source/Nested/b.pdf"), b"%PDF-1.5").unwrap();
+        let ix = Index::build(&lib,None,true);
+        let from=ix.models.iter().find(|m|m.v["name"]=="Source").unwrap().id().to_string();
+        let to=ix.models.iter().find(|m|m.v["name"]=="Target").unwrap().id().to_string();
+        (lib,from,to)
+    }
+    #[test]
+    fn sends_nested_folder_and_undoes_without_changing_target_identity() {
+        let (lib,from,to)=setup("send-nested");
+        let src=lib.resolve("Unsorted/Source").unwrap();
+        let dst=lib.resolve("Unsorted/Target").unwrap();
+        let before=extract::hashes(&src).unwrap();
+        let args=json!({"kind":"send","id":from,"target":to,"files":["Nested"],"mode":"move"});
+        let ix=Index::build(&lib,None,true);
+        let p=plan(&lib,&ix,&args).unwrap();
+        assert_eq!(p["count"],2);
+        let result=execute(&lib,&p,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert!(!src.exists(),"last-file Move should retire the source model");
+        assert_eq!(model::read_sidecar(&dst)["id"],to);
+        assert_eq!(std::fs::read(dst.join("Nested/a.xyz")).unwrap(),b"unknown-extension");
+        relayout::undo(&lib,s(&result,"journal"),&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert_eq!(extract::hashes(&src).unwrap(),before);
+        assert!(!dst.join("Nested/a.xyz").exists());
+        assert_eq!(model::read_sidecar(&dst)["id"],to);
+    }
+    #[test]
+    fn copies_and_resolves_case_insensitive_collisions() {
+        let (lib,from,to)=setup("send-clash");
+        let dst=lib.resolve("Unsorted/Target").unwrap();
+        std::fs::write(dst.join("Nested/a.xyz"),"taken").unwrap();
+        let ix=Index::build(&lib,None,true);
+        let base=json!({"kind":"send","id":from,"target":to,"files":["Nested"],"mode":"copy"});
+        let p=plan(&lib,&ix,&base).unwrap();
+        assert_eq!(p["conflicts"].as_array().unwrap().len(),1);
+        assert!(execute(&lib,&p,&AtomicBool::new(false),&|_,_,_|{}).is_err());
+        let mut keep=base;
+        keep["conflict"]=json!("keep_both");
+        let p=plan(&lib,&ix,&keep).unwrap();
+        let r=execute(&lib,&p,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert_eq!(std::fs::read(dst.join("Nested/a.xyz")).unwrap(),b"taken");
+        assert!(dst.join("Nested/a (2).xyz").is_file());
+        relayout::undo(&lib,s(&r,"journal"),&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert!(!dst.join("Nested/a (2).xyz").exists());
+        assert!(lib.resolve("Unsorted/Source/Nested/a.xyz").unwrap().exists());
+    }
+    #[test]
+    fn adding_mixed_external_files_keeps_originals_and_can_undo() {
+        let (lib,_,to)=setup("add-mixed");
+        let external=temp_dir("add-external");
+        std::fs::create_dir_all(&external).unwrap();
+        let files=["image.png","video.mp4","document.pdf","other.7z"];
+        let selected:Vec<String>=files.iter().map(|name| {
+            let path=external.join(name);
+            std::fs::write(&path,name.as_bytes()).unwrap();
+            path.display().to_string()
+        }).collect();
+        let ix=Index::build(&lib,None,true);
+        let p=plan(&lib,&ix,&json!({"kind":"add","target":to,"sources":selected,"folder":"Nested"})).unwrap();
+        assert_eq!(p["count"],files.len());
+        let r=execute(&lib,&p,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        for name in files {
+            assert!(lib.resolve(&format!("Unsorted/Target/Nested/{name}")).unwrap().is_file());
+            assert!(external.join(name).is_file());
+        }
+        relayout::undo(&lib,s(&r,"journal"),&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        for name in files {
+            assert!(!lib.resolve(&format!("Unsorted/Target/Nested/{name}")).unwrap().exists());
+            assert!(external.join(name).is_file());
+        }
+    }
+    #[test]
+    fn destination_failure_and_modified_undo_cannot_lose_files() {
+        let (lib,from,to)=setup("send-failure");
+        let ix=Index::build(&lib,None,true);
+        let args=json!({"kind":"send","id":from,"target":to,"files":["Nested"],"mode":"move"});
+        let p=plan(&lib,&ix,&args).unwrap();
+        let dst=lib.resolve("Unsorted/Target/Nested/a.xyz").unwrap();
+        std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
+        std::fs::write(&dst,"external-new-file").unwrap();
+        assert!(execute(&lib,&p,&AtomicBool::new(false),&|_,_,_|{}).is_err());
+        assert_eq!(std::fs::read(&dst).unwrap(),b"external-new-file");
+        assert!(lib.resolve("Unsorted/Source/Nested/a.xyz").unwrap().exists());
+        std::fs::remove_file(dst).unwrap();
+        let r=execute(&lib,&p,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        let dst=lib.resolve("Unsorted/Target/Nested/a.xyz").unwrap();
+        std::fs::write(&dst,"changed after send").unwrap();
+        assert!(relayout::undo(&lib,s(&r,"journal"),&AtomicBool::new(false),&|_,_,_|{}).is_err());
+        assert_eq!(std::fs::read(&dst).unwrap(),b"changed after send");
+    }
+    #[test]
+    fn moving_zip_entries_requires_archive_rewrite() {
+        use std::io::Write;
+        let (lib,from,to)=setup("send-zip");
+        let src=lib.resolve("Unsorted/Source/more.zip").unwrap();
+        let mut z=zip::ZipWriter::new(std::fs::File::create(&src).unwrap());
+        z.start_file("Parts/item.xyz",zip::write::SimpleFileOptions::default()).unwrap();
+        z.write_all(b"archive entry").unwrap();z.finish().unwrap();
+        let ix=Index::build(&lib,None,true);
+        let mut args=json!({"kind":"send","id":from,"target":to,"entries":[{"file":"more.zip","entry":"Parts/item.xyz"}],"mode":"move"});
+        assert!(plan(&lib,&ix,&args).is_err());
+        args["mode"]=json!("copy");
+        let p=plan(&lib,&ix,&args).unwrap();
+        let r=execute(&lib,&p,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert_eq!(std::fs::read(lib.resolve("Unsorted/Target/Parts/item.xyz").unwrap()).unwrap(),b"archive entry");
+        assert!(src.is_file());
+        relayout::undo(&lib,s(&r,"journal"),&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert!(src.is_file());
+    }
+}
