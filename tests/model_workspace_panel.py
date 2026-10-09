@@ -144,7 +144,7 @@ async def details_refresh_checks(pg, check, out=None):
     await pg.wait_for_function("""value =>
       document.querySelector('#workspace-edit-tags')?.value === value &&
       document.querySelector('#workspace-details-form button[type=submit]')?.disabled
-    """, tags_before)
+    """, arg=tags_before)
     check('Undo refreshes clean Details without false draft',
           not await pg.evaluate("""async () =>
             (await import('./ui/state.js')).ui.get().workspaceDirty"""))
@@ -230,7 +230,7 @@ async def details_refresh_checks(pg, check, out=None):
     await pg.wait_for_function("""value =>
       document.querySelector('#workspace-edit-tags')?.value === value &&
       document.querySelector('#workspace-details-form button[type=submit]')?.disabled
-    """, tags_before)
+    """, arg=tags_before)
     if out is not None:
         await pg.screenshot(path=str(out / 'agent-a-details-refresh.png'))
     await pg.click('#details-panel-close')
