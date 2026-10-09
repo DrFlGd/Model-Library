@@ -391,10 +391,16 @@ fn begin(lib: &Library, id: &str, change: &Value, state: &str) -> Result<()> {
         j["finished"] = j["created"].clone();
     }
     write(lib, &j)?;
-    // keep the newest few
+    // Running and failed operations keep their journal until an explicit
+    // recovery. Never prune an unfinished transfer's only recovery record.
     let dir = journal_dir(lib);
     let mut all = list(lib);
-    for old in all.drain(KEEP.min(all.len())..) {
+    let mut kept_history = 0;
+    for old in all.drain(..) {
+        let finished = matches!(old["state"].as_str(), Some("done" | "undone" | "emptied"));
+        if !finished { continue; }
+        kept_history += 1;
+        if kept_history <= KEEP { continue; }
         let old = old["id"].as_str().unwrap_or("x");
         let _ = std::fs::remove_file(dir.join(format!("{old}.json")));
         let _ = std::fs::remove_dir_all(kept_dir(lib, old));
@@ -743,6 +749,9 @@ pub fn undo(
     j["state"] = json!("undoing");
     j["direction"] = json!("undo");
     write(lib, &j)?;
+    if j["category_import"] == true {
+        return crate::category_import::undo_running(lib, j, cancel, on_item);
+    }
     match j["kind"].as_str() {
         Some("details") => return undo_details(lib, j),
         Some("extract") => return crate::extract::undo(lib, j),
