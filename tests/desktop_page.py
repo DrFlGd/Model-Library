@@ -748,6 +748,17 @@ async def phase4(pg):
     down = (library / "Tabletop/Terrain/Buildings/Ruins/Tower/tower.stl").is_file() and (library / "Tabletop/Terrain/Buildings/Ruins/Gothic").is_dir()
     check("a subcategory with models is deleted after a list of what moves up, and Ctrl+Z puts it back", red and up and down, (red, up, down))
 
+    # Agent E: the multi-source merge staging dialog is discoverable and reviewable.
+    await pg.goto(B + "#/browse/schema/wargames")
+    await pg.click("#category-menu")
+    await pg.click('#context-menu [data-action="merge-categories"]')
+    await pg.wait_for_selector("#merge-categories-dialog")
+    await pg.screenshot(path=str(out / "18c-merge-categories.png"))
+    selectable = await pg.locator("#merge-sources input[type=checkbox]").count()
+    check("Merge categories opens an accessible multi-source review", selectable >= 2, selectable)
+    await pg.click("#merge-categories-dialog .dialog-actions .ghost")
+    await pg.wait_for_selector("#merge-categories-dialog", state="detached")
+
     # 29. several models' details at once
     await pg.goto(B + "#/browse/schema/wargames")
     await pg.wait_for_selector(".card:has(.card-name:text-is('Gargoyle'))")
