@@ -61,6 +61,32 @@ def wait(js, timeout=60, what=""):
         shot(f"timeout-{len(failures):02d}")
         print("page says:", d.execute_script("return document.body.innerText.slice(0, 400)"), flush=True)
         print("errors:", d.execute_script("return window.__errors || []"), flush=True)
+        # A static module-import failure prevents app.js from running at all, so
+        # window.__errors is never registered. Diagnose that separately from an
+        # initialized page that later fails to render.
+        print("startup:", d.execute_script("""return {
+            url: location.href, readyState: document.readyState,
+            errorsHook: typeof window.__errors,
+            platform: typeof window.__modlib,
+            tauri: !!window.__TAURI_INTERNALS__,
+            mainHTML: (document.querySelector('#main-root')?.innerHTML || '').slice(0, 300),
+            scripts: [...document.querySelectorAll('script[src]')].map(s => s.src),
+            resources: performance.getEntriesByType('resource').filter(e => /app\\.js|ui\\//.test(e.name))
+                .slice(0, 12).map(e => ({name:e.name, duration:Math.round(e.duration), size:e.transferSize}))
+        }"""), flush=True)
+        try:
+            # Force the existing root module to resolve, reporting its actual
+            # syntax/import failure if the original module graph did not load.
+            module = d.execute_async_script("""
+                const finish = arguments[arguments.length - 1];
+                import('./app.js').then(
+                    () => finish({loaded:true}),
+                    e => finish({loaded:false, error:String(e), stack:String(e?.stack || '')})
+                );
+            """)
+            print("module probe:", module, flush=True)
+        except Exception as e:
+            print("module probe unavailable:", str(e)[:500], flush=True)
     except Exception as e:
         print("couldn't inspect the page:", e, flush=True)
     return False
