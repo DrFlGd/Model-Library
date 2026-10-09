@@ -120,7 +120,7 @@ function filtersIn(q) {
 }
 
 export function Browser() {
-  const s = useStore(ui, (st) => ({ route: st.route, q: st.q, sort: st.sort, layout: st.layout, selection: st.selection, picked: st.picked, rev: st.catalogRev, favs: st.favs, overview: st.overview, library: st.library }));
+  const s = useStore(ui, (st) => ({ route: st.route, q: st.q, sort: st.sort, layout: st.layout, selection: st.selection, picked: st.picked, rev: st.catalogRev, favs: st.favs, overview: st.overview, library: st.library, navOpen: st.navOpen }));
   const scope = s.route.slice(7);
   const [text, setText] = useState(s.q);
   const [result, setResult] = useState(null);
@@ -134,6 +134,7 @@ export function Browser() {
     return () => query.removeEventListener("change", changed);
   }, []);
   useEffect(() => { setPreviewOpen(false); }, [scope]);
+  useEffect(() => { if (s.navOpen) setPreviewOpen(false); }, [s.navOpen]);
   const seq = useRef(0);
   useLayoutEffect(() => { setText(s.q); }, [s.q]); // before paint, so nothing typed meanwhile is put back
   useEffect(() => { setLimit(PAGE); }, [scope, s.q, s.sort]);
@@ -222,7 +223,7 @@ export function Browser() {
           <input id="search" data-search type="search" value=${text} placeholder="Search names, authors, tags… or author:jo tag:presupported" autocomplete="off" spellcheck="false"
             title="Search (/)" onInput=${(e) => setText(e.target.value)} /></label>
         <${SortMenu} id="sort" options=${SORTS} value=${s.sort} onChange=${(v) => setPref({ sort: v })} />
-        ${previewNarrow && unsortedOne ? html`<button type="button" class="ghost" id="unsorted-preview-open" onClick=${() => setPreviewOpen(true)}>Preview files</button>` : null}
+        ${previewNarrow && unsortedOne ? html`<button type="button" class="ghost" id="unsorted-preview-open" onClick=${() => { ui.set({ navOpen: false }); setPreviewOpen(true); }}>Preview files</button>` : null}
         <${ViewSwitch} views=${VIEWS} value=${s.layout === "list" ? "list" : "grid"} onChange=${(v) => setPref({ layout: v })} />
       </div>
       ${chips.length ? html`<div class="filters" aria-label="Narrow down">${chips.map(([k, f]) => {
