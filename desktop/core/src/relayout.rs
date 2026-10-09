@@ -391,13 +391,23 @@ fn begin(lib: &Library, id: &str, change: &Value, state: &str) -> Result<()> {
         j["finished"] = j["created"].clone();
     }
     write(lib, &j)?;
-    // keep the newest few
+    // Only disposable, completed history is eligible for retention pruning.
+    // Older interrupted work and journals carrying recoverable user content
+    // must NEVER be silently deleted, regardless of how many changes follow.
+    // Also covers future deletion/transfer journals using the shared kept dir.
     let dir = journal_dir(lib);
     let mut all = list(lib);
     for old in all.drain(KEEP.min(all.len())..) {
-        let old = old["id"].as_str().unwrap_or("x");
-        let _ = std::fs::remove_file(dir.join(format!("{old}.json")));
-        let _ = std::fs::remove_dir_all(kept_dir(lib, old));
+        let id = old["id"].as_str().unwrap_or("x");
+        let state = old["state"].as_str().unwrap_or("");
+        let kept = kept_dir(lib, id);
+        let recoverable_archive = old["kind"] == "archive-op"
+            && old["remove_sources"] == true && state != "undone";
+        if !matches!(state, "done" | "undone" | "emptied")
+            || kept.exists() || recoverable_archive {
+            continue;
+        }
+        let _ = std::fs::remove_file(dir.join(format!("{id}.json")));
     }
     Ok(())
 }
