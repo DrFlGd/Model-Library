@@ -54,25 +54,25 @@ export function ArchiveDialog({ request }) {
     } catch (e) { setError(errorOf(e)); }
     finally { setBusy(false); }
   };
-  return html`<${Dialog id="archive-dialog" title=${{action === "compress" ? "Compress model to ZIP" : "Extract archive into model"} onSubmit=${{submit} busy=${{busy || !plan || readOnly} error=${{error || preview?.error || (readOnly ? "The library is read-only." : "")} submitLabel=${{action === "compress" ? "Compress to ZIP" : "Extract files"}>
+  return html`<${Dialog} id="archive-dialog" title=${action === "compress" ? "Compress model to ZIP" : "Extract archive into model"} onSubmit=${submit} busy=${busy || !plan || readOnly} error=${error || preview?.error || (readOnly ? "The library is read-only." : "")} submitLabel=${action === "compress" ? "Compress to ZIP" : "Extract files"}>
     <p class="muted">This changes files in the existing model. Its identity, category and model.json stay in place. Existing files are never overwritten.</p>
-    ${{action === "compress" ? html`<label class="field-block"><span>ZIP file name (in the model's folder)</span><input id="archive-name" required value=${{filename} disabled=${{busy} onInput=${{(e) => setFilename(e.target.value)} /></label>` :
-      html`<label class="field-block"><span>Archive to extract</span><select id="archive-select" value=${{filename} disabled=${{busy} onChange=${{(e) => setFilename(e.target.value)}>
-        ${{!archives.length ? html`<option value="">No ZIP files</option>` : null}
-        ${{archives.map((f) => html`<option key=${{f.rel} value=${{f.rel}>${{f.rel}</option>`)}
+    ${action === "compress" ? html`<label class="field-block"><span>ZIP file name (in the model's folder)</span><input id="archive-name" required value=${filename} disabled=${busy} onInput=${(e) => setFilename(e.target.value)} /></label>` :
+      html`<label class="field-block"><span>Archive to extract</span><select id="archive-select" value=${filename} disabled=${busy} onChange=${(e) => setFilename(e.target.value)}>
+        ${!archives.length ? html`<option value="">No ZIP files</option>` : null}
+        ${archives.map((f) => html`<option key=${f.rel} value=${f.rel}>${f.rel}</option>`)}
       </select></label>`}
-    ${{!preview && filename ? html`<p role="status" class="muted">Checking files, destinations and hashes…</p>` : null}
-    ${{plan ? html`<div class="archive-plan" aria-label="ZIP operation preview">
-      <p><strong>${{plan.files_count} files</strong> · ${{size(plan.bytes)} of content · approximately ${{size(plan.required_bytes)} of staging space required.</p>
-      <p class="muted">${{action === "compress" ? "Output ZIP:" : "Source archive:"} <code>${{plan.file}</code></p>
-      <p class="muted">${{plan.metadata}</p>
-      <details><summary>Review file paths (${{plan.files_count})</summary><ul>
-        ${{plan.files.slice(0, 250).map((f) => html`<li key=${{f.path}><code>${{f.path}</code> <span class="muted">${{size(f.size)}</span></li>`)}
+    ${!preview && filename ? html`<p role="status" class="muted">Checking files, destinations and hashes…</p>` : null}
+    ${plan ? html`<div class="archive-plan" aria-label="ZIP operation preview">
+      <p><strong>${plan.files_count} files</strong> · ${size(plan.bytes)} of content · approximately ${size(plan.required_bytes)} of staging space required.</p>
+      <p class="muted">${action === "compress" ? "Output ZIP:" : "Source archive:"} <code>${plan.file}</code></p>
+      <p class="muted">${plan.metadata}</p>
+      <details><summary>Review file paths (${plan.files_count})</summary><ul>
+        ${plan.files.slice(0, 250).map((f) => html`<li key=${f.path}><code>${f.path}</code> <span class="muted">${size(f.size)}</span></li>`)}
         ${plan.files_count > 250 ? html`<li class="muted">... and ${plan.files_count - 250} more files</li>` : null}
       </ul></details>
-      <label class="archive-cleanup"><input type="checkbox" checked=${{remove} disabled=${{busy} onChange=${{(e) => setRemove(e.target.checked)} />
-      ${{action === "compress" ? "Remove original content only after the ZIP passes hash verification" : "Remove source ZIP only after extracted files pass hash verification"}</label>
+      <label class="archive-cleanup"><input type="checkbox" checked=${remove} disabled=${busy} onChange=${(e) => setRemove(e.target.checked)} />
+      ${action === "compress" ? "Remove original content only after the ZIP passes hash verification" : "Remove source ZIP only after extracted files pass hash verification"}</label>
       <p class="muted">By default, originals remain. Optional removal keeps exact sources in journal recovery for Undo. Changed files are never removed.</p>
     </div>` : null}
-  </${Dialog>`;
+  <//>`;
 }
