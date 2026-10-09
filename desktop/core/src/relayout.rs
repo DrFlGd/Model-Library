@@ -653,7 +653,7 @@ pub fn apply(
     if j["state"] == "emptied" {
         bail!("Those copies were deleted already.");
     }
-    if matches!(j["kind"].as_str(), Some("details" | "import" | "extract" | "wrap_loose")) {
+    if matches!(j["kind"].as_str(), Some("details" | "import" | "extract" | "wrap_loose" | "file_transfer" | "model_delete")) {
         bail!("That change can't be made again from here.");
     }
     j["state"] = json!("running");
