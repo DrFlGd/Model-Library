@@ -87,5 +87,5 @@ export function PdfDocument({ src, doc, model }) {
     ${address ? html`<iframe class="doc-frame pdf-frame" key=${address} title=${doc.entry || doc.file} src=${address} onError=${() => setView((v) => ({ ...v, error: "The system PDF viewer could not display this file." }))}></iframe> : null}
     ${doc.entry ? html`<p class="pdf-temporary-note muted">This PDF is read from the ZIP without changing the archive. Page display depends on the system PDF viewer.</p> : null}
     ${!doc.entry && isDesktop() && model ? html`<button type="button" class="ghost pdf-external" onClick=${() => openModelFile(model, doc.file)}>Open externally</button> : null}
-  </div>;
+  </div>`;
 }
