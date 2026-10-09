@@ -86,27 +86,32 @@ function FileTile({ model, item }) {
   </span>`;
 }
 
-function automaticTiles(model) {
+/** Deterministic, bounded composition. File-kind counts must describe the
+ *  kinds actually shown: never relabel all remaining files as a single kind.
+ *  The +N badge counts every file not represented by a tile (not just meshes). */
+export function automaticTiles(model) {
   const files = model.files || {};
   const previews = (files.previews || []).filter((it) => it?.file).slice(0, 4);
-  const previewable = files.previewable || previews.length;
-  const total = files.count || 0;
   const tiles = previews.map((item) => ({ type: "preview", item }));
-  if (previewable <= 1 && total > previewable) {
-    // With just one drawable file, do not pretend the whole model is that one file.
-    const otherKinds = Object.entries(files.kinds || {})
-      .filter(([kind]) => !previews.some((p) => p.kind === kind))
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-    const kind = otherKinds[0]?.[0] || "other";
-    tiles.push({ type: "kind", kind, count: total - previewable });
-  }
-  if (!tiles.length) {
-    for (const [kind, count] of Object.entries(files.kinds || {}).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 4)) {
-      tiles.push({ type: "kind", kind, count });
-    }
+
+  // Subtract the files we already represent individually. The remainder can
+  // contain PDFs, videos, unrenderable model formats, archives or other kinds.
+  const remaining = Object.entries(files.kinds || {}).map(([kind, value]) => {
+    const shown = previews.filter((p) => p.kind === kind).length;
+    return [kind, Math.max(0, Number(value) - shown)];
+  }).filter(([, count]) => count > 0);
+  remaining.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+
+  for (const [kind, count] of remaining.slice(0, 4 - tiles.length)) {
+    tiles.push({ type: "kind", kind, count });
   }
   if (!tiles.length) tiles.push({ type: "kind", kind: "other", count: 0, label: "No files" });
-  return { tiles: tiles.slice(0, 4), more: Math.max(0, previewable - previews.length) };
+
+  // A file either occupies its own preview slot, belongs to a displayed kind
+  // tile, or contributes to overflow. No file is counted twice.
+  const represented = tiles.reduce((n, tile) =>
+    n + (tile.type === "preview" ? 1 : tile.count), 0);
+  return { tiles, more: Math.max(0, (files.count || 0) - represented) };
 }
 
 /** Shared by grid cards, list rows, Home and model details. */
@@ -134,7 +139,7 @@ export function Cover({ model, cls = "" }) {
         ? html`<${FileTile} key=${tile.item.file} model=${model} item=${tile.item} />`
         : html`<${KindTile} key=${`${tile.kind}:${i}`} kind=${tile.kind} count=${tile.count} label=${tile.label} />`)}
     </span>
-    ${more ? html`<span class="cover-count" title=${`${more} additional previewable files`}>+${more}</span>` : null}
+    ${more ? html`<span class="cover-count" title=${`${more} additional files`}>+${more}</span>` : null}
     ${missing || broken ? html`<span class="cover-warning">Cover missing</span>` : null}
   </span>`;
 }
