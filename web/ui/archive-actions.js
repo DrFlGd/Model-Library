@@ -10,7 +10,8 @@ export function ArchiveDialog({ request }) {
   const { id, action } = request;
   const [model, setModel] = useState(null);
   const [filename, setFilename] = useState("");
-  const [remove, setRemove] = useState(false);
+  const [verified, setVerified] = useState(null);
+  const [cleaned, setCleaned] = useState(false);
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -27,6 +28,7 @@ export function ArchiveDialog({ request }) {
     return () => { live = false; };
   }, [id, action]);
   useEffect(() => {
+    if (verified) return;
     setPreview(null);
     if (!model || !filename || busy) return;
     let live = true;
@@ -36,25 +38,41 @@ export function ArchiveDialog({ request }) {
       }, (e) => { if (live) setPreview({ error: errorOf(e) }); });
     }, 350);
     return () => { live = false; clearTimeout(timer); };
-  }, [id, action, filename, model, busy]);
+  }, [id, action, filename, model, busy, verified]);
   const archives = (model?.files_list || []).filter((f) => /\.zip$/i.test(f.rel));
   const plan = preview?.plan;
   const submit = async () => {
-    if (busy || !plan || readOnly) return;
+    if (busy || (!plan && !verified) || readOnly) return;
+    if (verified) {
+      close();
+      recorded(cleaned ? "Verified ZIP operation and recovered original files." : "Verified ZIP operation; originals retained.", verified.journal, () => loadOverview());
+      return;
+    }
     setBusy(true); setError("");
     try {
-      const { job } = await api("archive_execute", { id, action, file: filename, remove_sources: remove });
+      const { job } = await api("archive_execute", { id, action, file: filename, remove_sources: false });
       const done = await followJob(job, action === "compress" ? "Compressing ZIP" : "Extracting ZIP");
       if (done.error) throw new Error(done.error + " If any outputs were published, Home → Recent changes contains the recovery journal.");
       const result = done.result;
       if (!result?.verified) throw new Error("Verification did not finish. Source files were kept.");
       await loadOverview();
-      close();
-      recorded(action === "compress" ? "Created a verified ZIP." : "Extracted the ZIP after checking its contents.", result.journal, () => loadOverview());
+      setVerified(result);
     } catch (e) { setError(errorOf(e)); }
     finally { setBusy(false); }
   };
-  return html`<${Dialog} id="archive-dialog" title=${action === "compress" ? "Compress model to ZIP" : "Extract archive into model"} onSubmit=${submit} busy=${busy || !plan || readOnly} error=${error || preview?.error || (readOnly ? "The library is read-only." : "")} submitLabel=${action === "compress" ? "Compress to ZIP" : "Extract files"}>
+  const cleanup = async () => {
+    if (!verified || cleaned || busy || readOnly) return;
+    setBusy(true); setError("");
+    try {
+      const { job } = await api("archive_cleanup", { journal: verified.journal });
+      const done = await followJob(job, "Recovering original files");
+      if (done.error) throw new Error(done.error);
+      setCleaned(true);
+      await loadOverview();
+    } catch (e) { setError(errorOf(e)); }
+    finally { setBusy(false); }
+  };
+  return html`<${Dialog} id="archive-dialog" title=${action === "compress" ? "Compress model to ZIP" : "Extract archive into model"} onSubmit=${submit} busy=${busy || (!verified && !plan) || readOnly} error=${error || preview?.error || (readOnly ? "The library is read-only." : "")} submitLabel=${verified ? "Finish" : action === "compress" ? "Compress to ZIP" : "Extract files"}>
     <p class="muted">This changes files in the existing model. Its identity, category and model.json stay in place. Existing files are never overwritten.</p>
     ${action === "compress" ? html`<label class="field-block"><span>ZIP file name (in the model's folder)</span><input id="archive-name" required value=${filename} disabled=${busy} onInput=${(e) => setFilename(e.target.value)} /></label>` :
       html`<label class="field-block"><span>Archive to extract</span><select id="archive-select" value=${filename} disabled=${busy} onChange=${(e) => setFilename(e.target.value)}>
@@ -70,9 +88,12 @@ export function ArchiveDialog({ request }) {
         ${plan.files.slice(0, 250).map((f) => html`<li key=${f.path}><code>${f.path}</code> <span class="muted">${size(f.size)}</span></li>`)}
         ${plan.files_count > 250 ? html`<li class="muted">... and ${plan.files_count - 250} more files</li>` : null}
       </ul></details>
-      <label class="archive-cleanup"><input type="checkbox" checked=${remove} disabled=${busy} onChange=${(e) => setRemove(e.target.checked)} />
-      ${action === "compress" ? "Remove original content only after the ZIP passes hash verification" : "Remove source ZIP only after extracted files pass hash verification"}</label>
-      <p class="muted">By default, originals remain. Optional removal keeps exact sources in journal recovery for Undo. Changed files are never removed.</p>
+      <p class="muted">Original content remains available when this operation finishes. After complete verification, you can choose to move exact originals into journal recovery.</p>
     </div>` : null}
+    ${{verified ? html`<section class="archive-verified" role="status">
+      <p><strong>Verification complete.</strong> All published content passed SHA-256 checks. ${{cleaned ? "Original files have been moved into recoverable journal storage." : "Original files have been retained."}</p>
+      ${{!cleaned ? html`<button type="button" class="ghost" id="archive-cleanup" disabled=${{busy || readOnly} onClick=${{cleanup}>${{action === "compress" ? "Remove verified original files…" : "Remove verified source ZIP…"}</button>` : null}
+      <p class="muted">Choose Finish to keep the verified result. Undo is available through Recent changes.</p>
+    </section>` : null}
   <//>`;
 }
