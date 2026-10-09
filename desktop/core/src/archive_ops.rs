@@ -476,12 +476,16 @@ mod tests {
         let (lib,ix,id)=setup("archive-clean");
         let root=lib.root().join("Unsorted/Kit");
         let p=plan(&lib,&ix,&json!({"id":id,"action":"compress","file":"Kit.zip"})).unwrap();
-        let r=execute(&lib,&p,true,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        let r=execute(&lib,&p,false,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert!(root.join("Parts/body.stl").is_file());
+        cleanup(&lib,field(&r,"journal"),&AtomicBool::new(false)).unwrap();
         assert!(!root.join("Parts/body.stl").exists());
         assert!(root.join(model::SIDECAR).is_file());
         let ix=Index::build(&lib,None,true);
         let ep=plan(&lib,&ix,&json!({"id":id,"action":"extract","file":"Kit.zip"})).unwrap();
-        let er=execute(&lib,&ep,true,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        let er=execute(&lib,&ep,false,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert!(root.join("Kit.zip").is_file());
+        cleanup(&lib,field(&er,"journal"),&AtomicBool::new(false)).unwrap();
         assert!(!root.join("Kit.zip").exists());
         assert_eq!(fs::read(root.join("Parts/body.stl")).unwrap(),b"mesh bytes");
         relayout::undo(&lib,field(&er,"journal"),&AtomicBool::new(false),&|_,_,_|{}).unwrap();
