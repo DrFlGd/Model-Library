@@ -65,6 +65,7 @@ The UI pass in `docs/PLAN.md` ("UI pass design") is done: actions (0.5.1), undo 
 
 ## Unreleased
 
+- Agent E review fixes (E-1, E-2): Block incoming child paths that overlap a model folder, unindexed directory or case-only filesystem alias, and use existing destination spelling for matching children at every depth. Added multi-case merge/reparent and Undo regressions.
 - Agent E: Added reviewed subcategory removal (move models/child subcategories up intact, or move descendant models to Unsorted) and multi-source category/subcategory merges into an existing or new target. The planner validates model ownership and linked/unindexed entries, reports collisions and paths, and uses the existing journal for Undo/recovery. See `desktop/core/src/restructure.rs`; further integration review is required.
 
 - Document the published 0.5.5 workspace and its validated screenshots.
