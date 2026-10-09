@@ -65,6 +65,9 @@ The UI pass in `docs/PLAN.md` ("UI pass design") is done: actions (0.5.1), undo 
 
 ## Unreleased
 
+- Agent C: view ordinary and ZIP-contained PDFs with page/zoom controls; open unsupported formats and ZIP entries explicitly through the system's registered app (archive entries use bounded temporary copies).
+- Agent C: review, hash-verify and Undo in-model ZIP compression/extraction; optional source cleanup moves verified originals into journal recovery, and malicious archive paths or collisions are rejected before writing. See `docs/agent-c-handoff.md` for limits and integration notes.
+
 - Document the published 0.5.5 workspace and its validated screenshots.
 
 ## 0.5.5 (2026-10-08)
