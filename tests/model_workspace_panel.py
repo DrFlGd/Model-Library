@@ -55,7 +55,6 @@ async def panel_workspace_checks(pg, check):
     check("Send to another model has a searchable destination review", await pg.locator("#send-search").count() == 1)
     await pg.keyboard.press("Escape")
     await pg.wait_for_selector("#send-files-dialog", state="detached")
-    await pg.locator("#file-panel").click(position={"x":20,"y":15})
     await pg.set_viewport_size({'width': 700, 'height': 800})
     await pg.wait_for_selector('#files-drawer-button')
     check('the narrow file drawer starts closed', not await pg.locator('#file-panel').is_visible())
