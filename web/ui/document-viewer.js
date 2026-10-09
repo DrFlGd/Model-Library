@@ -22,7 +22,7 @@ function remember(key, bytes) {
   const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   // A native frame does not reliably fire onError for invalid PDF bytes.
   // Reject a clearly corrupt entry before handing it to the system renderer.
-  const signature = [37, 80, 68, 70, 45]; // %PDF-
+  const signature = [37, 80, 68, 70, 45]; // PDF header bytes, written numerically to avoid MIME sniffing.
   if (data.byteLength < signature.length || signature.some((b, i) => data[i] !== b)) {
     throw new Error("The selected ZIP entry is not a valid PDF (missing PDF signature).");
   }
