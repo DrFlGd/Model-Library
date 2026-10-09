@@ -204,7 +204,18 @@ export function showModelFolder(model) {
 /** Open one of a model's files in its default app. */
 export function openModelFile(model, rel) {
   const lib = ui.get().library;
-  if (lib) ctx.platform.library.openPath(`${lib.path}/${model.rel}/${rel}`);
+  if (lib) return ctx.platform.library.openPath(`${lib.path}/${model.rel}/${rel}`).catch((e) => toast("Could not open externally: " + (e.message || String(e)) + ". Try Open with in your file manager.", 7500));
+}
+
+/** Open a ZIP entry as a managed temporary copy. External edits do not alter the ZIP. */
+export async function openArchiveEntry(src, file, entry) {
+  if (!isDesktop()) return;
+  if (!window.confirm("Open a temporary copy in another app? Changes you make there will not be saved back to the ZIP.")) return;
+  try {
+    const args = src.kind === "sort" ? { sort: src.id } : { id: src.id };
+    const { path } = await api("model_external_entry", { ...args, file, entry });
+    await ctx.platform.library.openPath(path);
+  } catch (e) { toast("Could not open externally: " + (e.message || String(e)) + ". Choose an app through your system's Open with menu if there is no default.", 7500); }
 }
 
 /** Star or unstar a model (starring gives it a model.json, so the star lasts). */
