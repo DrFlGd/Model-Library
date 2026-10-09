@@ -101,3 +101,116 @@ async def panel_workspace_checks(pg, check, out=None):
         await pg.screenshot(path=str(out / 'agent-a-docked-workspace.png'))
         await pg.click('#details-panel-close')
     await pg.set_viewport_size(original_viewport or {'width': 1280, 'height': 900})
+
+
+async def details_refresh_checks(pg, check, out=None):
+    """Agent A-1: clean refresh, true drafts, concurrent edits and Undo."""
+    await pg.wait_for_selector('#details-panel-open')
+    await pg.click('#details-panel-open')
+    await pg.wait_for_selector('#workspace-edit-tags')
+    tags_before = await pg.input_value('#workspace-edit-tags')
+    notes_before = await pg.locator('#workspace-edit-notes').input_value()
+
+    async def remote_update(patch, refresh=True):
+        await pg.evaluate("""async ({patch, refresh}) => {
+            const {api, loadOverview} = await import('./ui/library.js');
+            const id = document.querySelector('#model-page').dataset.model;
+            await api('model_update', {id, patch});
+            if (refresh) await loadOverview();
+        }""", {'patch': patch, 'refresh': refresh})
+
+    # Dialog edit should refresh the untouched ribbon, including when its
+    # component remains mounted inside the open panel.
+    await pg.click('#mp-edit')
+    await pg.wait_for_selector('#details-dialog')
+    await pg.fill('#edit-tags', 'Agent A dialog change')
+    await pg.click('#details-dialog button[type=submit]')
+    await pg.wait_for_selector('#details-dialog', state='detached')
+    await pg.wait_for_function("""() =>
+      document.querySelector('#workspace-edit-tags')?.value === 'Agent A dialog change' &&
+      document.querySelector('#workspace-details-form button[type=submit]')?.disabled
+    """)
+    clean = await pg.evaluate("""async () => {
+      const {ui} = await import('./ui/state.js');
+      return !ui.get().workspaceDirty;
+    }""")
+    check('clean Details refreshes after separate Edit details dialog', clean)
+
+    # Undo is a model metadata refresh, not a new unsaved draft.
+    await pg.evaluate("""async () => {
+      const {undoLast} = await import('./ui/library.js');
+      await undoLast();
+    }""")
+    await pg.wait_for_function("""value =>
+      document.querySelector('#workspace-edit-tags')?.value === value &&
+      document.querySelector('#workspace-details-form button[type=submit]')?.disabled
+    """, tags_before)
+    check('Undo refreshes clean Details without false draft',
+          not await pg.evaluate("""async () =>
+            (await import('./ui/state.js')).ui.get().workspaceDirty"""))
+
+    # A watcher/catalog refresh should also replace the clean baseline.
+    await remote_update({'tags': 'Agent A external change'})
+    await pg.wait_for_function("""() =>
+      document.querySelector('#workspace-edit-tags')?.value === 'Agent A external change' &&
+      document.querySelector('#workspace-details-form button[type=submit]')?.disabled
+    """)
+    check('external refresh replaces clean Details without overwrite risk',
+          not await pg.evaluate("""async () =>
+            (await import('./ui/state.js')).ui.get().workspaceDirty"""))
+
+    # A genuine notes draft must survive a different external field edit.
+    await pg.fill('#workspace-edit-notes', 'Agent A local notes draft')
+    await remote_update({'tags': 'Agent A newer tags'})
+    await pg.wait_for_selector('#details-concurrent')
+    check('dirty Details retains draft and blocks Save after refresh',
+          await pg.input_value('#workspace-edit-notes') == 'Agent A local notes draft' and
+          await pg.locator('#workspace-details-form button[type=submit]').is_disabled())
+    await pg.click('#details-keep-draft')
+    check('rebasing retains local notes and newer remote tags',
+          await pg.input_value('#workspace-edit-tags') == 'Agent A newer tags' and
+          await pg.input_value('#workspace-edit-notes') == 'Agent A local notes draft')
+    await pg.click('#workspace-details-form button[type=submit]')
+    await pg.wait_for_function("""() =>
+      document.querySelector('#workspace-details-form button[type=submit]')?.disabled &&
+      !document.querySelector('#details-concurrent')
+    """)
+    current = await pg.evaluate("""async () => {
+      const {api} = await import('./ui/library.js');
+      return api('model_get', {id: document.querySelector('#model-page').dataset.model});
+    }""")
+    check('rebased Save preserves unrelated external metadata',
+          current.get('tags') == ['Agent A newer tags'] and
+          (current.get('details') or {}).get('notes') == 'Agent A local notes draft')
+
+    # A simultaneous edit to the same field must be named as a conflict.
+    await pg.fill('#workspace-edit-tags', 'Agent A conflicting draft')
+    await remote_update({'tags': 'Agent A concurrent author'})
+    await pg.wait_for_selector('#details-concurrent')
+    warning = await pg.locator('#details-concurrent').inner_text()
+    check('conflicting field is named before user resolves it',
+          'tags' in warning and await pg.locator('#workspace-details-form button[type=submit]').is_disabled())
+    await pg.click('#details-load-latest')
+    check('Use latest discards only deliberate draft state',
+          await pg.input_value('#workspace-edit-tags') == 'Agent A concurrent author' and
+          await pg.locator('#workspace-details-form button[type=submit]').is_disabled())
+
+    # Race after the form's render but before Save is caught by preflight.
+    await pg.fill('#workspace-edit-notes', 'Unsaved preflight test')
+    await remote_update({'tags': 'Agent A preflight update'}, refresh=False)
+    await pg.click('#workspace-details-form button[type=submit]')
+    await pg.wait_for_selector('#details-concurrent')
+    check('preflight rejects changed backend data rather than overwriting it',
+          await pg.input_value('#workspace-edit-notes') == 'Unsaved preflight test' and
+          await pg.locator('#workspace-details-form button[type=submit]').is_disabled())
+    await pg.click('#details-load-latest')
+
+    # Return the test model to its original metadata for the rest of acceptance.
+    await remote_update({'tags': tags_before, 'notes': notes_before})
+    await pg.wait_for_function("""value =>
+      document.querySelector('#workspace-edit-tags')?.value === value &&
+      document.querySelector('#workspace-details-form button[type=submit]')?.disabled
+    """, tags_before)
+    if out is not None:
+        await pg.screenshot(path=str(out / 'agent-a-details-refresh.png'))
+    await pg.click('#details-panel-close')
