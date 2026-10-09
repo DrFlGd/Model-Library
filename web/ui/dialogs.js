@@ -10,6 +10,7 @@ import { CategoryPicker, SubcategoryTree, treeSpec, treeReady, firstBranch } fro
 import { RenameNode, EditSchema, DeleteSchema, DeleteSubcategory, EditPicked, AddSubcategory, ChangePreview } from "./categories.js";
 
 import { ExtractDialog } from "./extract.js";
+import { ArchiveDialog } from "./archive-actions.js";
 
 export const FIELD_TYPES = [["text", "Text"], ["number", "Number"], ["choice", "Choice"], ["yes-no", "Yes or no"], ["date", "Date"]];
 export const close = () => ui.set({ dialog: null });
@@ -247,6 +248,7 @@ export const confirmDialog = (opts) => ui.set({ dialog: { type: "confirm", ...op
 export function Dialogs() {
   const dialog = useStore(ui, (s) => s.dialog);
   if (!dialog) return null;
+  if (dialog.type === "archive-model") return html`<${ArchiveDialog} request=${dialog} />`;
   if (dialog.type === "extract-model") return html`<${ExtractDialog} model=${dialog.model} keys=${dialog.keys} />`;
   if (dialog.type === "new-schema") return html`<${NewSchema} />`;
   if (dialog.type === "move-models") return html`<${MoveModels} models=${dialog.models} />`;
