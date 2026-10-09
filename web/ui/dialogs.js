@@ -10,6 +10,7 @@ import { CategoryPicker, SubcategoryTree, treeSpec, treeReady, firstBranch } fro
 import { RenameNode, EditSchema, DeleteSchema, DeleteSubcategory, EditPicked, AddSubcategory, ChangePreview } from "./categories.js";
 
 import { ExtractDialog } from "./extract.js";
+import { AddFilesDialog, SendFilesDialog, DeleteModelsDialog } from "./fileops.js";
 
 export const FIELD_TYPES = [["text", "Text"], ["number", "Number"], ["choice", "Choice"], ["yes-no", "Yes or no"], ["date", "Date"]];
 export const close = () => ui.set({ dialog: null });
@@ -248,6 +249,9 @@ export function Dialogs() {
   const dialog = useStore(ui, (s) => s.dialog);
   if (!dialog) return null;
   if (dialog.type === "extract-model") return html`<${ExtractDialog} model=${dialog.model} keys=${dialog.keys} />`;
+  if (dialog.type === "send-model-files") return html`<${SendFilesDialog} model=${dialog.model} keys=${dialog.keys} />`;
+  if (dialog.type === "add-model-files") return html`<${AddFilesDialog} model=${dialog.model} sources=${dialog.sources} />`;
+  if (dialog.type === "delete-models") return html`<${DeleteModelsDialog} models=${dialog.models} />`;
   if (dialog.type === "new-schema") return html`<${NewSchema} />`;
   if (dialog.type === "move-models") return html`<${MoveModels} models=${dialog.models} />`;
   if (dialog.type === "add-subcategory") return html`<${AddSubcategory} schemaId=${dialog.schemaId} path=${dialog.path} />`;
