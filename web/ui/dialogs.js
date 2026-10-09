@@ -7,7 +7,7 @@ import { routeHash, schemaScope } from "./context.js";
 import { Icon } from "./icons.js";
 import { api, loadOverview, saveDetails, runChange, undoable, recorded } from "./library.js";
 import { CategoryPicker, SubcategoryTree, treeSpec, treeReady, firstBranch } from "./category.js";
-import { RenameNode, EditSchema, DeleteSchema, DeleteSubcategory, EditPicked, AddSubcategory, ChangePreview } from "./categories.js";
+import { RenameNode, EditSchema, DeleteSchema, DeleteSubcategory, MergeCategories, EditPicked, AddSubcategory, ChangePreview } from "./categories.js";
 
 import { ExtractDialog } from "./extract.js";
 
@@ -255,6 +255,7 @@ export function Dialogs() {
   if (dialog.type === "edit-schema") return html`<${EditSchema} schemaId=${dialog.schemaId} />`;
   if (dialog.type === "delete-schema") return html`<${DeleteSchema} schemaId=${dialog.schemaId} />`;
   if (dialog.type === "delete-subcategory") return html`<${DeleteSubcategory} schemaId=${dialog.schemaId} path=${dialog.path} />`;
+  if (dialog.type === "merge-categories") return html`<${MergeCategories} schemaId=${dialog.schemaId} path=${dialog.path} />`;
   if (dialog.type === "edit-picked") return html`<${EditPicked} models=${dialog.models} />`;
   if (dialog.type === "confirm") return html`<${ConfirmDialog} ...${dialog} />`;
   if (dialog.type === "edit-model") return html`<${EditModel} model=${dialog.model} schema=${dialog.schema} select=${!!dialog.select} key=${dialog.model.id} />`;
