@@ -56,3 +56,15 @@ Frontend JavaScript syntax checked for the touched UI modules. `tests/desktop_pa
 - The underlying `relayout` operation commits model folders individually, not as a whole-tree atomic filesystem transaction. Stopped changes remain in the existing journal for Finish/Undo; users should not be told the entire tree is atomic.
 - The existing journal retains its history limit and newest-first Undo rule. Coordinating with Agent B's planned shared mutation contract is an integration task. No new library format number, index identity scheme or migration is required.
 - Run end-to-end failure/interruption and Undo checks on Windows and Linux before approving integration, especially if Agent B changes the relocation/journal contract.
+
+## PR review follow-up (E-1 / E-2)
+
+The 9 October review requested two changes, both now implemented in this branch:
+
+- **E-1:** `validate_destination_node` checks *each* new or reparented destination category path against the original filesystem and pre-change schema tree. An occupied path is accepted only if it is a retained, existing category with matching exact spelling; model folders (with/without sidecars), unindexed/empty folders, symlinks and case-only aliases cannot become subcategory containers. This check is used by merge, remove-up, and selected/new targets before folder moves are planned. The error asks the user to resolve or rename the conflicting folder.
+- **E-2:** Merge collisions with `child_conflicts: "merge"` adopt the exact full path of the already-existing target node, not the source spelling; the same canonicalisation is applied to an existing selected destination and a named-new destination's parent. Child mappings and `model.json` locations therefore use the target's case at all depths.
+
+Added Rust regression tests for merge and remove-up against occupied model folders with sidecars, no-sidecar model folders, unmanaged empty folders and case-only aliases, without mutating the library; multiple-depth case canonicalisation; lower-case user-selected target paths; exact destination and reversible Undo. These tests are run by the draft PR's GitHub Actions checks.
+
+The review's failed Linux report upload on the **original** head was a concurrent report-branch update and not a feature test failure. The latest review-fix commit has new CI results; verify the latest run before central integration.
+
