@@ -6,7 +6,7 @@ use crate::config::{AppConfig, Prefs};
 use crate::index::Index;
 use crate::library::{self, Library};
 use crate::sort::Session;
-use crate::{archive, dupes, import, mesh, model, relayout, schema, thumb};
+use crate::{archive, category_import, dupes, import, mesh, model, relayout, schema, thumb};
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
