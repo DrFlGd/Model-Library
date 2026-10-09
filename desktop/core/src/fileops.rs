@@ -1,6 +1,6 @@
 //! Reviewed, SHA-256-verified file transfers into an existing model.
 //! The journal retains recovery copies; destinations are published one file at a time.
-use crate::{archive, extract, import, index::Index, library::Library, model, relayout, thumb};
+use crate::{archive, extract, index::Index, library::Library, model, relayout, thumb};
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
 use std::{collections::{BTreeMap, HashSet}, path::{Path,PathBuf}, sync::atomic::{AtomicBool,Ordering}};
