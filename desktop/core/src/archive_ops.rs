@@ -411,15 +411,30 @@ pub fn undo(lib: &Library, mut journal: Value) -> Result<Value> {
     let sources: Vec<String> = if plan["action"] == "compress" {
         plan["files"].as_array().into_iter().flatten().map(|x|field(x,"path").to_string()).collect()
     } else { vec![field(plan,"file").to_string()] };
+    // The source set must be complete BEFORE the last verified output can
+    // disappear. In particular, an Undo with originals retained must not erase
+    // the only remaining ZIP when an original was deleted outside the app.
     for rel in &sources {
+        let target = safe(&root,rel)?;
         let saved = safe(&recovery,rel)?;
-        if saved.exists() {
-            let target = safe(&root,rel)?;
-            if target.exists() { bail!("Cannot restore {rel}: a new file now occupies its path."); }
-            let expected = if plan["action"] == "compress" {
-                plan["files"].as_array().unwrap().iter().find(|f|field(f,"path")==rel).map(|f|field(f,"sha256")).unwrap_or("")
-            } else { field(plan,"source_sha256") };
-            if file_hash(&saved)?.0 != expected { bail!("Recovery file {rel} failed verification."); }
+        let expected = if plan["action"] == "compress" {
+            plan["files"].as_array().unwrap().iter().find(|f|field(f,"path")==rel)
+                .map(|f|field(f,"sha256")).unwrap_or("")
+        } else { field(plan,"source_sha256") };
+        if expected.is_empty() { bail!("The recovery manifest is incomplete for {rel}. Keep the archive output."); }
+        if target.exists() {
+            if saved.exists() {
+                bail!("Both the original and a recovery copy exist for {rel}; resolve the conflict before Undo.");
+            }
+            if !target.is_file() || file_hash(&target)?.0 != expected {
+                bail!("Original {rel} changed. Undo will not remove the archive containing a verified copy.");
+            }
+        } else if saved.exists() {
+            if !saved.is_file() || file_hash(&saved)?.0 != expected {
+                bail!("Recovery file {rel} failed SHA-256 verification. The verified output was preserved.");
+            }
+        } else {
+            bail!("Cannot undo: original {rel} and its verified recovery copy are both missing. Keep the ZIP/output and restore the missing file before retrying.");
         }
     }
     journal["state"] = json!("interrupted");
@@ -431,6 +446,18 @@ pub fn undo(lib: &Library, mut journal: Value) -> Result<Value> {
             let dst = safe(&root,rel)?;
             fs::create_dir_all(dst.parent().unwrap())?;
             fs::rename(saved,dst)?;
+        }
+    }
+    // Restores can fail halfway through; do not delete an output until every
+    // source has been restored AND independently verified at its live path.
+    for rel in &sources {
+        let expected = if plan["action"] == "compress" {
+            plan["files"].as_array().unwrap().iter().find(|f|field(f,"path")==rel)
+                .map(|f|field(f,"sha256")).unwrap_or("")
+        } else { field(plan,"source_sha256") };
+        let live = safe(&root,rel)?;
+        if file_hash(&live)?.0 != expected {
+            bail!("Restored source {rel} failed verification. The ZIP/output remains available.");
         }
     }
     for f in &outputs {
@@ -524,6 +551,45 @@ mod tests {
         fs::write(root.join("broken.zip"),b"invalid ZIP").unwrap();
         assert!(plan(&lib,&ix,&json!({"id":id,"action":"extract","file":"broken.zip"})).is_err());
         assert!(root.join("Parts/body.stl").exists());
+    }
+    #[test]
+    fn undo_retained_sources_refuses_to_discard_only_zip() {
+        let (lib,ix,id)=setup("archive-undo-last-copy");
+        let root=lib.root().join("Unsorted/Kit");
+        let p=plan(&lib,&ix,&json!({"id":id,"action":"compress","file":"Kit.zip"})).unwrap();
+        let r=execute(&lib,&p,false,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        fs::remove_file(root.join("Parts/body.stl")).unwrap();
+        let error=relayout::undo(&lib,field(&r,"journal"),&AtomicBool::new(false),&|_,_,_|{}).unwrap_err().to_string();
+        assert!(error.contains("original Parts/body.stl") || error.contains("Original Parts/body.stl"));
+        assert!(root.join("Kit.zip").exists(), "Undo must keep the last copy");
+        let zip=zip_entries(&root.join("Kit.zip")).unwrap();
+        assert!(zip.iter().any(|e|field(e,"path")=="Parts/body.stl"));
+    }
+    #[test]
+    fn undo_missing_recovery_refuses_to_discard_archive() {
+        let (lib,ix,id)=setup("archive-undo-missing-recovery");
+        let root=lib.root().join("Unsorted/Kit");
+        let p=plan(&lib,&ix,&json!({"id":id,"action":"compress","file":"Kit.zip"})).unwrap();
+        let r=execute(&lib,&p,false,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        cleanup(&lib,field(&r,"journal"),&AtomicBool::new(false)).unwrap();
+        let saved=relayout::kept_dir(&lib,field(&r,"journal")).join("sources/Parts/body.stl");
+        fs::remove_file(saved).unwrap();
+        assert!(relayout::undo(&lib,field(&r,"journal"),&AtomicBool::new(false),&|_,_,_|{}).is_err());
+        assert!(root.join("Kit.zip").is_file(), "Undo must preserve surviving archive");
+    }
+    #[test]
+    fn undo_extraction_without_source_archive_preserves_extracted_files() {
+        let (lib,ix,id)=setup("archive-undo-extract-missing-source");
+        let root=lib.root().join("Unsorted/Kit");
+        let p=plan(&lib,&ix,&json!({"id":id,"action":"compress","file":"Kit.zip"})).unwrap();
+        let r=execute(&lib,&p,false,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        cleanup(&lib,field(&r,"journal"),&AtomicBool::new(false)).unwrap();
+        let ix=Index::build(&lib,None,true);
+        let p=plan(&lib,&ix,&json!({"id":id,"action":"extract","file":"Kit.zip"})).unwrap();
+        let extraction=execute(&lib,&p,false,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        fs::remove_file(root.join("Kit.zip")).unwrap();
+        assert!(relayout::undo(&lib,field(&extraction,"journal"),&AtomicBool::new(false),&|_,_,_|{}).is_err());
+        assert!(root.join("Parts/body.stl").is_file(), "Undo must preserve surviving extracted content");
     }
     #[test]
     fn cancel_and_undo_refuse_modified_output() {
