@@ -100,6 +100,7 @@ export function Contents({ src, model, files, shown, archive, entries, error, co
   const p = keyParts(shown), folder = archive ? p.entry || "" : p.file;
   const rows = sortChildren(childrenOf(archive ? entries : files, folder, archive), prefs[0]);
   const order = rows.map((r) => r.key);
+  const scopeKey = archive ? (folder ? "z:" + archive + "!" + folder.replace(/\\/$/, "") + "/" : null) : "d:" + folder;
   const open = (row) => {
     pick(row.key);
     if (!row.folder && !row.entry && !viewable(row.name) && isDesktop()) openModelFile(model, row.file);
@@ -134,6 +135,10 @@ export function Contents({ src, model, files, shown, archive, entries, error, co
     return html`<${LazyPreview} key=${row.key} cacheKey=${`${src.id}:${row.key}:${row.size}`} ask=${() => image ? Promise.resolve({ url: `${src.rel}/${row.file}` }) : api("file_preview", { ...srcArgs(src), file: row.file, entry: row.entry || null })} fallback=${fallback} />`;
   };
   return html`<div class="contents-view" id="contents-view" tabIndex="0" onKeyDown=${key}>
+    <div class="file-scope-tools" role="group" aria-label="Folder selection scope">
+      <button type="button" class="ghost" id="select-this-level" disabled=${!order.length} onClick=${() => fileSel.set({ picked: order, anchor: order[0] || null })}>Select this level (${rows.length})</button>
+      <button type="button" class="ghost" id="select-folder-contents" disabled=${!scopeKey || !rows.length} title="Recursively select all descendants, including files not in this level" onClick=${() => fileSel.set({ picked: [scopeKey], anchor: scopeKey })}>Select folder contents</button>
+    </div>
     <div class="contents-tools"><${SortMenu} id="contents-sort" options=${[["name", "Name"], ["type", "Type"], ["size", "Largest first"], ["newest", "Newest"]]} value=${prefs[0]} onChange=${(contentsSort) => setPref({ contentsSort })} /><${ViewSwitch} id="contents-views" views=${[["grid", "Grid", "grid"], ["list", "List", "list"]]} value=${prefs[1]} onChange=${(contentsView) => setPref({ contentsView })} /></div>
     ${error ? html`<p class="form-error" role="alert">${error}</p>` : archive && !entries ? html`<p class="muted">Reading the archive…</p>` : !rows.length ? html`<p class="muted">Nothing in this folder.</p>` : null}
     ${prefs[1] === "list" ? html`<div class="contents-columns">${[["name", "Name"], ["type", "Type"], ["size", "Size"]].map(([k, label]) => html`<button type="button" class="ghost" data-sort=${k} onClick=${() => setPref({ contentsSort: k })}>${label}${prefs[0] === k ? " ↓" : ""}</button>`)}</div>` : null}
