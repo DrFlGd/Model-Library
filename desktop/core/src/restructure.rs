@@ -715,7 +715,7 @@ mod tests {
             {"name":"Terrain","subcategories":[{"name":"Rocks"}]}]})).unwrap();
         schema::create(&lib,&json!({"name":"Source","subcategories":[
             {"name":"terrain","subcategories":[{"name":"rocks","subcategories":[
-                {"name":"Deep"}]}]}]}]})).unwrap();
+                {"name":"Deep"}]}]}]})).unwrap();
         file(&root,"Source/terrain/rocks/Deep/Boulder/rock.stl");
         file(&root,"Target/Terrain/Rocks/Existing/ex.stl");
         let c = json!({"operation":"merge","sources":[
