@@ -23,13 +23,14 @@ if ui.exists():
     shutil.rmtree(ui)
 shutil.copytree(ROOT / "web", ui)
 
-# Tauri sniffs the first 1 KiB of an asset's content before considering the
-# extension. A JavaScript comment containing the PDF file signature can make
-# WebKitGTK reject the module as application/pdf and leave a blank app window.
+# Tauri infers some MIME types from content before considering extensions.
+# Keep the PDF magic marker out of JavaScript, including comments, so WebKitGTK
+# never treats an ES module as application/pdf. Scan the whole small JS asset:
+# a marker crossing a 1 KiB sniff-window boundary must also be caught.
 for script in ui.rglob("*"):
-    if script.suffix.lower() in (".js", ".mjs") and b"%PDF-" in script.read_bytes()[:1024]:
+    if script.is_file() and script.suffix.lower() in (".js", ".mjs") and b"%PDF" in script.read_bytes():
         raise SystemExit(
-            f"{script.relative_to(ui)} contains a PDF magic header in its first 1024 bytes; "
+            f"{script.relative_to(ui)} contains the PDF magic marker; "
             "Tauri can serve this JavaScript module as application/pdf."
         )
 
