@@ -1,20 +1,26 @@
 // The parts around the main view: the top bar's buttons and the status bar.
 import { html, useEffect, useState } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
-import { ui, cycleTheme, resolvedTheme, nextTheme, THEMES } from "./state.js";
+import { ui, setPref, cycleTheme, resolvedTheme, nextTheme, THEMES } from "./state.js";
 import { Icon } from "./icons.js";
 
 const themeName = (t) => THEMES.find(([v]) => v === t)?.[1].replace(/ \(.*\)$/, "") || t;
 
 export function TopButtons() {
   const theme = useStore(ui, (s) => s.theme);
+  const nav = useStore(ui, (s) => ({ open: s.navOpen, collapsed: s.navCollapsed }));
   const [, force] = useState(0);
   useEffect(() => { const f = () => force((n) => n + 1); window.addEventListener("ml-theme", f); return () => window.removeEventListener("ml-theme", f); }, []);
   const cur = resolvedTheme();
   const next = nextTheme(theme);
   const icon = theme === "system" ? Icon.auto(17) : cur === "light" ? Icon.sun(17) : cur === "dark" ? Icon.moon(17) : Icon.night(17);
   const now = theme === "system" ? `Follow the system (${cur})` : themeName(theme);
-  return html`<button type="button" class="topicon nav-burger" aria-label="Menu" title="Menu" onClick=${() => ui.set({ navOpen: !ui.get().navOpen })}>${Icon.menu(18)}</button>
+  const toggleNav = () => {
+    if (matchMedia("(max-width: 900px)").matches)
+      ui.set({ navOpen: !ui.get().navOpen, mobilePanel: null });
+    else setPref({ navCollapsed: !ui.get().navCollapsed });
+  };
+  return html`<button type="button" class="topicon nav-burger" aria-label=${nav.collapsed ? "Expand navigation" : "Toggle navigation"} aria-expanded=${nav.open ? "true" : "false"} title="Expand or collapse navigation" onClick=${toggleNav}>${Icon.menu(18)}</button>
     <button type="button" class="topicon" id="theme-toggle" data-theme=${theme} aria-label=${`Theme: ${now}. Switch to ${themeName(next)}`} title=${`Theme: ${now}. Click for ${themeName(next)}.`}
       onClick=${cycleTheme}>${icon}</button>`;
 }
