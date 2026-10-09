@@ -74,8 +74,8 @@ export function ArchiveDialog({ request }) {
   };
   return html`<${Dialog} id="archive-dialog" title=${action === "compress" ? "Compress model to ZIP" : "Extract archive into model"} onSubmit=${submit} busy=${busy || (!verified && !plan) || readOnly} error=${error || preview?.error || (readOnly ? "The library is read-only." : "")} submitLabel=${verified ? "Finish" : action === "compress" ? "Compress to ZIP" : "Extract files"}>
     <p class="muted">This changes files in the existing model. Its identity, category and model.json stay in place. Existing files are never overwritten.</p>
-    ${action === "compress" ? html`<label class="field-block"><span>ZIP file name (in the model's folder)</span><input id="archive-name" required value=${filename} disabled=${busy} onInput=${(e) => setFilename(e.target.value)} /></label>` :
-      html`<label class="field-block"><span>Archive to extract</span><select id="archive-select" value=${filename} disabled=${busy} onChange=${(e) => setFilename(e.target.value)}>
+    ${action === "compress" ? html`<label class="field-block"><span>ZIP file name (in the model's folder)</span><input id="archive-name" required value=${filename} disabled=${busy || !!verified} onInput=${(e) => setFilename(e.target.value)} /></label>` :
+      html`<label class="field-block"><span>Archive to extract</span><select id="archive-select" value=${filename} disabled=${busy || !!verified} onChange=${(e) => setFilename(e.target.value)}>
         ${!archives.length ? html`<option value="">No ZIP files</option>` : null}
         ${archives.map((f) => html`<option key=${f.rel} value=${f.rel}>${f.rel}</option>`)}
       </select></label>`}
