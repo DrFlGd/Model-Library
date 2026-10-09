@@ -891,6 +891,18 @@ fn undo_import(
             break;
         }
         on_item(moves.len() - 1 - i, moves.len(), name);
+        // Reviewed category imports store the exact published bytes. A model
+        // changed since import must not be discarded by Undo.
+        let safe = if m["manifest"].is_array() {
+            m["to"].as_str().ok_or_else(|| anyhow!("Missing destination."))
+                .and_then(|to| lib.resolve(to))
+                .and_then(|path| crate::category_import::destination_manifest(&path))
+                .map(|now| now == m["manifest"])
+        } else { Ok(true) };
+        if safe != Ok(true) {
+            failed.push(json!({ "name": name, "error": "This model changed after import. Resolve its files before undoing." }));
+            continue;
+        }
         match put_back(lib, m, copied, &p) {
             Ok(()) => {
                 moved += 1;
@@ -904,6 +916,24 @@ fn undo_import(
     }
     if failed.is_empty() {
         remove_added(lib, &j);
+        // Remove only categories created by this import, and only if their
+        // directories are empty after restoring the models. Other categories,
+        // user-created files and even unexpected empty folders are kept.
+        for made in j["created_schemas"].as_array().into_iter().flatten() {
+            let (Some(id), Some(folder)) = (made["id"].as_str(), made["folder"].as_str()) else { continue };
+            let Some(s) = schema::list(lib).into_iter().find(|s| s.id == id) else { continue };
+            let mut paths = s.tree();
+            paths.sort_by_key(|p| std::cmp::Reverse(p.len()));
+            for path in paths {
+                let d = path.iter().fold(lib.root().join(folder), |d, n| d.join(n));
+                let _ = std::fs::remove_dir(d); // never remove nonempty folders
+            }
+            match std::fs::remove_dir(lib.root().join(folder)) {
+                Ok(()) => { schema::remove(lib, id)?; }
+                Err(_) => failed.push(json!({ "name": folder, "error":
+                    "The imported category has unexpected contents; it was kept for recovery." })),
+            }
+        }
     }
     end(lib, &mut j, &failed, "undone")?;
     Ok(
