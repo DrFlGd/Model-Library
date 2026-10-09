@@ -1416,11 +1416,20 @@ async def model_workspace_extract(pg):
     await undo()
     model = await api(pg, "model_get", {"id": "workspace-extract"})
     await select(["f:" + f["rel"] for f in model["files_list"]])
-    disabled = await pg.is_disabled("#extract-model")
-    reason = await pg.get_attribute("#extract-model", "title")
+    enabled = not await pg.is_disabled("#extract-model")
+    await pg.click("#extract-model")
+    whole_dest = await make("Entire workspace")
+    check("complete selection makes a new model and retires its empty source", enabled and not source.exists() and
+          (whole_dest / "model.json").is_file() and (whole_dest / "extras.zip").is_file())
+    await undo()
+    restored = {str(p.relative_to(source)): p.read_bytes() for p in source.rglob("*") if p.is_file() and "_thumbs" not in p.parts}
+    check("whole-model extraction Undo restores original identity and files", restored == before and not whole_dest.exists())
+    await pg.goto(B + "#/model/workspace-extract")
+    await pg.wait_for_selector('#model-page[data-model="workspace-extract"]')
+    await select(["d:"])
     await pg.evaluate("""async () => {const {ui} = await import('/ui/state.js'); ui.set({library: {...ui.get().library, read_only: true}});} """)
     readonly = await pg.get_attribute("#extract-model", "title")
-    check("whole-model and read-only extraction explain why they are unavailable", disabled and reason == "That's the whole model: use Move to category instead" and "read-only" in readonly, (reason, readonly))
+    check("whole-model extraction is enabled and read-only still forbids mutation", enabled and "read-only" in readonly, (enabled, readonly))
     await pg.evaluate("""async () => {const {ui} = await import('/ui/state.js'); ui.set({library: {...ui.get().library, read_only: false}});} """)
 
 
