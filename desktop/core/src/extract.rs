@@ -329,9 +329,32 @@ mod tests {
         assert!(relayout::undo(&lib,s(&r,"journal"),&AtomicBool::new(false),&|_,_,_|{}).is_err()); assert!(added.is_file());
     }
     #[test]
-    fn rejects_unsafe_paths_and_whole_model() {
+    fn whole_model_move_retires_the_card_and_undo_restores_everything() {
         let (lib,ix,id)=setup("extract-safe");
-        for f in ["../body.stl","/body.stl","C:/body.stl","model.json",""] { assert!(plan(&lib,&ix,&json!({"id":id,"files":[f],"name":"Bad"})).is_err(),"{f}"); }
-        assert!(plan(&lib,&ix,&json!({"id":id,"files":["Arms","body.stl","cover.png"],"name":"All"})).is_err());
+        for f in ["../body.stl","/body.stl","C:/body.stl","model.json"] {
+            assert!(plan(&lib,&ix,&json!({"id":id,"files":[f],"name":"Bad"})).is_err(),"{f}");
+        }
+        let p=plan(&lib,&ix,&json!({"id":id,"files":["Arms","body.stl","cover.png"],"name":"All"})).unwrap();
+        assert_eq!(p["files"].as_array().unwrap().len(),4);
+        let root=plan(&lib,&ix,&json!({"id":id,"files":[""],"name":"All"})).unwrap();
+        assert_eq!(root["files"].as_array().unwrap().len(),4);
+        let source=lib.resolve("Unsorted/Kit").unwrap();
+        let before=hashes(&source).unwrap();
+        let r=execute(&lib,&p,"move",&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert!(!source.exists());
+        let dest=lib.resolve(s(&r,"rel")).unwrap();
+        assert_eq!(model::read_sidecar(&dest)["custom"],42);
+        relayout::undo(&lib,s(&r,"journal"),&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert_eq!(hashes(&source).unwrap(),before);
+    }
+    #[test]
+    fn whole_model_copy_leaves_source_untouched() {
+        let (lib,ix,id)=setup("extract-whole-copy");
+        let source=lib.resolve("Unsorted/Kit").unwrap();
+        let before=hashes(&source).unwrap();
+        let p=plan(&lib,&ix,&json!({"id":id,"files":[""],"name":"Everything"})).unwrap();
+        let r=execute(&lib,&p,"copy",&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert_eq!(hashes(&source).unwrap(),before);
+        assert_eq!(model::read_sidecar(&lib.resolve(s(&r,"rel")).unwrap())["custom"],42);
     }
 }
