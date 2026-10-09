@@ -1237,10 +1237,13 @@ impl App {
             "archive_execute" => {
                 let lib = self.library()?;
                 lib.writable().map_err(e2s)?;
-                let plan = self.with_index(None, |ix, lib| crate::archive_ops::plan(lib, ix, &args)).await?.map_err(e2s)?;
-                let remove_sources = args["remove_sources"].as_bool() == Some(true);
+                if args["remove_sources"].as_bool() == Some(true) {
+                    return Err("Source cleanup requires a separate decision after the ZIP has been published and verified.".into());
+                }
+                let plan = self.with_index(None, |ix, lib|
+                    crate::archive_ops::reviewed_plan(lib, ix, &args)).await?.map_err(e2s)?;
                 j(self.spawn_job("Working with ZIP", move |app, jid, cancel| {
-                    crate::archive_ops::execute(&lib, &plan, remove_sources, &cancel, &|i,n,name|
+                    crate::archive_ops::execute(&lib, &plan, false, &cancel, &|i,n,name|
                         app.job_progress(&jid, json!({"item":i,"items":n,"name":name})))
                 }))
             }
