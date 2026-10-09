@@ -14,7 +14,7 @@ import { useStore } from "../lib/store.js";
 import { ui, resolvedTheme, setPref } from "./state.js";
 import { ctx } from "./context.js";
 import { Icon } from "./icons.js";
-import { api, apiBytes, isDesktop, libraryUrl, openModelFile, toast, loadOverview, recorded, followIds } from "./library.js";
+import { api, apiBytes, isDesktop, libraryUrl, openModelFile, openArchiveEntry, toast, loadOverview, recorded, followIds } from "./library.js";
 import { ViewSwitch, SortMenu } from "./layout.js";
 import { size } from "./details.js";
 import { openMenu, typing } from "./actions.js";
@@ -111,7 +111,7 @@ function ZipEntries({ src, f, open, current }) {
     const on = current?.file === f.rel && current?.entry === e.name;
     return html`<li key=${e.name} class="tree-file in-zip">
       <button type="button" class=${`tree-btn${on ? " on" : ""}`} disabled=${!t} data-entry=${e.name} onClick=${() => t && open(t)}>
-        <span class="tree-icon tree-type"><${TypeTag} name=${e.name} /></span><span class="tree-name">${e.name}</span><span class="muted tree-size">${size(e.size)}</span></button></li>`;
+        <span class="tree-icon tree-type"><${TypeTag} name=${e.name} /></span><span class="tree-name">${e.name}</span><span class="muted tree-size">${size(e.size)}</span></button>${ownApp(src) && !t ? html`<button type="button" class="ghost" aria-label=${`Open ${e.name} externally`} onClick=${() => openArchiveEntry(src, f.rel, e.name)}>Open externally</button>` : null}</li>`;
   });
 }
 
