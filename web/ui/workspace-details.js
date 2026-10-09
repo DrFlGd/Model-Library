@@ -136,12 +136,17 @@ export function WorkspaceDetails({ model, onModelChange }) {
       }
       const patch = { ...form, fields: { ...(fresh.fields || {}), ...fields } };
       const result = await saveDetails(fresh, patch);
-      const saved = detailsSnapshot(result);
-      setEditor({ ...saved, baseline: saved, modelId: result.id });
+      // model_update returns an index entry, not the full model_get payload
+      // (which also contains details, files_list and main). Preserve those
+      // workspace properties immediately after Save instead of replacing
+      // the page's model with a partial object.
+      const full = await api("model_get", { id: result.id });
+      const saved = detailsSnapshot(full);
+      setEditor({ ...saved, baseline: saved, modelId: full.id });
       // Saving can give a legacy model its first persistent ID. Clear the
       // navigation guard before the existing follow-IDs route replacement.
       ui.set({ workspaceDirty: false });
-      onModelChange?.(result);
+      onModelChange?.(full);
       recorded(`Saved ${result.name}'s details.`, result.journal);
     } catch (e) {
       setError(e.message || String(e));
