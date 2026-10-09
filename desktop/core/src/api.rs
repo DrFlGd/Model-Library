@@ -1175,6 +1175,11 @@ impl App {
             "category_import_commit" => {
                 let proposal = args["proposal"].clone();
                 let reviewed = args["reviewed"].clone();
+                // Fault-injection is compiled only for Rust regression tests.
+                #[cfg(test)]
+                let fault = args["test_interrupt"].as_str().map(String::from);
+                #[cfg(not(test))]
+                let fault: Option<String> = None;
                 let mv = args["mode"].as_str() != Some("copy");
                 // Category moves always use checked copies before source cleanup.
                 let force_copy = true;
@@ -1233,6 +1238,9 @@ impl App {
                         "created_schemas": drafts, "added": added, "moves": journal_moves });
                     let id = relayout::start(&lib, &start)?;
                     let mut journal = relayout::read(&lib, &id)?;
+                    if fault.as_deref() == Some("after_journal") {
+                        anyhow::bail!("Simulated interruption after writing the journal");
+                    }
                     let mut schemas = import::schemas_by_id(&ix);
                     let mut draft_ids = std::collections::HashMap::new();
                     for (i, spec) in plan["categories"].as_array().into_iter().flatten().enumerate() {
@@ -1249,6 +1257,9 @@ impl App {
                         schemas.insert(made.id.clone(), made);
                         journal["created_schemas"][i]["phase"] = json!("created");
                         relayout::write(&lib, &journal)?;
+                    }
+                    if fault.as_deref() == Some("after_schema") {
+                        anyhow::bail!("Simulated interruption after creating categories");
                     }
                     let mut used = import::ids_in_use(&ix);
                     let mut results: Vec<Value> = vec![];
@@ -1282,13 +1293,25 @@ impl App {
                                     eprintln!("preview of {}: {e:#}", dest.display());
                                 }
                             }
+                            if fault.as_deref() == Some("after_copy") && i == 0 {
+                                anyhow::bail!("Simulated interruption during final destination manifest");
+                            }
                             let manifest = category_import::destination_manifest(&dest)?;
                             journal["moves"][i]["manifest"] = manifest;
                             journal["moves"][i]["phase"] = json!("copied");
                             relayout::write(&lib, &journal)?;
+                            if fault.as_deref() == Some("after_manifest") && i == 0 {
+                                anyhow::bail!("Simulated interruption after verified manifest");
+                            }
                             if mv {
                                 journal["moves"][i]["phase"] = json!("cleaning");
                                 relayout::write(&lib, &journal)?;
+                                if fault.as_deref() == Some("during_cleanup") && i == 0 {
+                                    if let Some(first) = journal["moves"][i]["source_manifest"].as_array().and_then(|v| v.first()) {
+                                        std::fs::remove_file(first["path"].as_str().unwrap_or(""))?;
+                                    }
+                                    anyhow::bail!("Simulated interruption during source cleanup");
+                                }
                                 category_import::remove_originals(&journal["moves"][i])?;
                             }
                             journal["moves"][i]["phase"] = json!("done");
@@ -1302,6 +1325,9 @@ impl App {
                                 r["name"] = item["name"].clone();
                                 r["source"] = item["source"].clone();
                                 results.push(r);
+                                if fault.as_deref() == Some("after_first") && i == 0 {
+                                    anyhow::bail!("Simulated interruption after first model committed");
+                                }
                             }
                             Err(e) => {
                                 interrupted = true;
