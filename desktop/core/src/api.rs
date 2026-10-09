@@ -1241,8 +1241,9 @@ impl App {
                             }
                         }
                         let before = before.unwrap_or_default();
+                        let manifest = category_import::destination_manifest(dest)?;
                         moves.push(json!({ "name": r["name"], "id": r["id"], "to": r["rel"],
-                            "source": it["source"], "files": it["files"],
+                            "source": it["source"], "files": it["files"], "manifest": manifest,
                             "sidecar_before": before["sidecar_before"], "thumb_before": before["thumb_before"] }));
                     }
                     // Discard categories created by a failed/skipped branch, without
