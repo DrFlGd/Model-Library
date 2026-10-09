@@ -69,6 +69,28 @@ async def card_checks(pg, library, base, out, api, check, png, cube):
     five = pg.locator('.card:has(.card-name:text-is("F card five"))')
     unknown = pg.locator('.card:has(.card-name:text-is("F card unknown"))')
     missing = pg.locator('.card:has(.card-name:text-is("F card missing"))')
+    # Also probe the pure grouping logic: more kinds than available slots must
+    # never mislabel their counts, and the overflow badge counts hidden files.
+    grouping = await pg.evaluate("""async () => {
+      const {automaticTiles} = await import('/ui/modelcover.js');
+      return {
+        none: automaticTiles({files:{count:0,kinds:{},previews:[]}}),
+        mixed: automaticTiles({files:{count:3,kinds:{model:1,doc:1,video:1},
+          previews:[{file:'part.stl',kind:'model'}]}}),
+        full: automaticTiles({files:{count:6,kinds:{model:1,doc:1,video:1,archive:1,slicer:1,other:1},
+          previews:[{file:'part.stl',kind:'model'}]}})
+      };
+    }""")
+    check("Agent F grouping preserves each kind's actual counts and accurately reports overflow",
+          grouping["none"]["more"] == 0
+          and len(grouping["none"]["tiles"]) == 1
+          and [(t["kind"], t["count"]) for t in grouping["mixed"]["tiles"] if t["type"] == "kind"]
+             == [("doc", 1), ("video", 1)]
+          and len(grouping["full"]["tiles"]) == 4
+          and grouping["full"]["more"] == 2
+          and all(t["count"] == 1 for t in grouping["full"]["tiles"] if t["type"] == "kind"),
+          grouping)
+
     # Scroll first, then require *actual loaded* mesh and image previews, not
     # transient placeholders while the lazy render queue is still working.
     await two.scroll_into_view_if_needed()
@@ -94,7 +116,7 @@ async def card_checks(pg, library, base, out, api, check, png, cube):
           and await five.locator(".cover-tiles-4 .cover-file").count() == 4
           and await five.locator(".cover-count").inner_text() == "+1"
           and sorted(t.strip() for t in mixed_tiles) == ["Document", "Video"]
-          and sorted(t.strip() for t in all_kind_tiles) == ["Archive", "File", "Document"]
+          and sorted(t.strip() for t in all_kind_tiles) == ["Archive", "Document", "File"]
           and await unknown.locator(".cover-kind").count() == 2
           and await missing.locator(".cover-warning").inner_text() == "Cover missing",
           (mixed_tiles, all_kind_tiles))
