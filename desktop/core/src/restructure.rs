@@ -47,6 +47,58 @@ fn check_links(lib: &Library, path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Validate each category-container component against the pre-change filesystem.
+/// A planned tree entry must not turn an existing model, unindexed directory or
+/// case-only alias into a category, including on Linux before Windows sync.
+fn validate_destination_node(
+    lib: &Library, folder: &str,
+    existing: &[Vec<String>], kept: &[Vec<String>], path: &[String],
+) -> Result<()> {
+    let mut dir = lib.root().join(folder);
+    check_links(lib, &dir)?;
+    for (i, name) in path.iter().enumerate() {
+        let prefix = &path[..=i];
+        match std::fs::read_dir(&dir) {
+            Ok(entries) => for entry in entries {
+                let entry = entry?;
+                let actual = entry.file_name().to_string_lossy().into_owned();
+                if !actual.eq_ignore_ascii_case(name) { continue; }
+                let known = contains(existing, prefix) && contains(kept, prefix);
+                let kind = entry.file_type()?;
+                if !known || actual != *name || !kind.is_dir() || kind.is_symlink()
+                    || entry.path().join(crate::model::SIDECAR).exists()
+                {
+                    bail!("{} is occupied by an existing model, unmanaged directory or case-only name; rename the incoming subcategory or resolve that folder first.", dir.join(name).display());
+                }
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+        dir.push(name);
+        check_links(lib, &dir)?;
+    }
+    Ok(())
+}
+
+/// Check a directory entry without creating it; this also catches case-only
+/// aliases on case-sensitive systems when choosing a numbered child name.
+fn occupied_casefold(dir: &Path) -> Result<bool> {
+    let Some(parent) = dir.parent() else { return Ok(false) };
+    let name = dir.file_name().unwrap_or_default().to_string_lossy();
+    match std::fs::read_dir(parent) {
+        Ok(entries) => {
+            for entry in entries {
+                if entry?.file_name().to_string_lossy().eq_ignore_ascii_case(&name) {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// Windows regards case-only differences as path collisions. Resolve them now
 /// even when planning on a case-sensitive system, so libraries stay portable.
 fn clashes_case_insensitive(path: &Path, own: &Path, taken: &HashSet<PathBuf>) -> bool {
@@ -229,8 +281,9 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
             if let Some(name) = to["name"].as_str() {
                 let name = schema::subcategory_name(name)?;
                 let mut p = strings(&to["parent"]);
-                if !p.is_empty() && !contains(&existing, &p) {
-                    bail!("The new target's parent doesn't exist.");
+                if !p.is_empty() {
+                    p = existing.iter().find(|v| same(v, &p))
+                        .cloned().ok_or_else(|| anyhow!("The new target's parent doesn't exist."))?;
                 }
                 p.push(name);
                 if contains(&existing, &p) { bail!("Target already exists; select it instead."); }
@@ -245,8 +298,9 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
                 schema::set_subcategories(after.get_mut(&target_id).unwrap(), &new_paths);
             } else {
                 target_path = strings(&to["path"]);
-                if !target_path.is_empty() && !contains(&existing, &target_path) {
-                    bail!("Choose an existing target subcategory.");
+                if !target_path.is_empty() {
+                    target_path = existing.iter().find(|p| same(p, &target_path))
+                        .cloned().ok_or_else(|| anyhow!("Choose an existing target subcategory."))?;
                 }
                 let target_folder = target_path.iter().fold(lib.root().join(v["folder"].as_str().unwrap_or("")), |d, n| d.join(n));
                 check_links(lib, &target_folder)?;
@@ -293,23 +347,35 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
                 if contains(&paths, &wanted) {
                     node_collisions += 1;
                     match policy {
-                        "merge" => {}
+                        "merge" => {
+                            // The existing target's exact spelling is authoritative.
+                            wanted = paths.iter().find(|p| same(p, &wanted)).unwrap().clone();
+                        }
                         "rename" => {
                             let stem = wanted.last().unwrap().clone();
-                            let mut n = 2;
-                            loop {
+                            let mut found = false;
+                            for n in 2..=1000 {
                                 *wanted.last_mut().unwrap() = schema::subcategory_name(&format!("{stem} ({n})"))?;
-                                if !contains(&paths, &wanted)
-                                    && !wanted.iter().fold(lib.root().join(after[&target_id]["folder"].as_str().unwrap_or("")), |p, n| p.join(n)).exists() {
+                                let dir = wanted.iter().fold(lib.root().join(after[&target_id]["folder"].as_str().unwrap_or("")), |p, n| p.join(n));
+                                if !contains(&paths, &wanted) && !occupied_casefold(&dir)? {
+                                    found = true;
                                     break;
                                 }
-                                n += 1;
                             }
+                            if !found { bail!("Too many matching child names. Choose another target."); }
+                            let folder = after[&target_id]["folder"].as_str().unwrap_or("");
+                            let known = old.get(&target_id).map(schema::subcategories).unwrap_or_default();
+                            validate_destination_node(lib, folder, &known, &paths, &wanted)?;
                             paths.push(wanted.clone());
                         }
                         _ => bail!("Child subcategory {} already exists in the target. Choose Merge matching names or Rename incoming children.", wanted.join(" › ")),
                     }
-                } else { paths.push(wanted.clone()); }
+                } else {
+                    let folder = after[&target_id]["folder"].as_str().unwrap_or("");
+                    let known = old.get(&target_id).map(schema::subcategories).unwrap_or_default();
+                    validate_destination_node(lib, folder, &known, &paths, &wanted)?;
+                    paths.push(wanted.clone());
+                }
                 validate_tree(&paths)?;
                 schema::set_subcategories(after.get_mut(&target_id).unwrap(), &paths);
                 local.push((p, wanted));
@@ -328,6 +394,9 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
             if contains(&paths, &new_path) {
                 bail!("Subcategory {} already exists one level up. Rename or merge it before removing its parent.", new_path.join(" › "));
             }
+            let folder = after[&s.schema]["folder"].as_str().unwrap_or("");
+            let known = schema::subcategories(&old[&s.schema]);
+            validate_destination_node(lib, folder, &known, &paths, &new_path)?;
             paths.push(new_path.clone());
             mapped.push((s.schema.clone(), p, new_path));
         }
