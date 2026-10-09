@@ -69,8 +69,13 @@ const reset = async () => {
 };
 const amend = (rootIndex, indexes, patch) => {
   const st = categoryStage.get();
+  const clearMappings = (n) => ({ ...n, map_to: null,
+    children: (n.children || []).map(clearMappings) });
   const change = (node, steps) => {
-    if (!steps.length) return { ...node, ...patch };
+    if (!steps.length) {
+      const edited = { ...node, ...patch };
+      return "target" in patch ? { ...edited, children: (edited.children || []).map(clearMappings) } : edited;
+    }
     const [idx, ...rest] = steps;
     return { ...node, children: node.children.map((child, i) => i === idx ? change(child, rest) : child) };
   };
