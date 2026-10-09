@@ -352,6 +352,9 @@ pub fn undo(lib: &Library, mut journal: Value) -> Result<Value> {
             if file_hash(&saved)?.0 != expected { bail!("Recovery file {rel} failed verification."); }
         }
     }
+    journal["state"] = json!("interrupted");
+    journal["direction"] = json!("undo");
+    relayout::write(lib,&journal)?;
     for rel in &sources {
         let saved = safe(&recovery,rel)?;
         if saved.exists() {
