@@ -33,6 +33,17 @@ fn walk(root: &Path, rel: &str, out: &mut BTreeMap<String, Option<String>>) -> R
     Ok(())
 }
 
+fn archive_entry_hash(path:&Path,entry:&str)->Result<(String,u64)> {
+    use sha2::{Digest,Sha256};
+    use std::io::Read;
+    let mut z=zip::ZipArchive::new(std::fs::File::open(path)?)?;
+    let mut item=z.by_name(entry)?;
+    let mut digest=Sha256::new();
+    let mut buf=[0u8;65536];
+    let mut bytes=0u64;
+    loop {let n=item.read(&mut buf)?;if n==0{break;}digest.update(&buf[..n]);bytes+=n as u64;}
+    Ok((hex::encode(digest.finalize()),bytes))
+}
 pub fn plan(lib: &Library, ix: &Index, args: &Value) -> Result<Value> {
     let m = ix.get(s(args,"id")).ok_or_else(|| anyhow!("Read the library again: that model is gone."))?;
     let root = checked(lib.root(), m.rel())?;
@@ -81,9 +92,14 @@ pub fn plan(lib: &Library, ix: &Index, args: &Value) -> Result<Value> {
         let to = Path::new(logical).strip_prefix(&base)?.to_string_lossy().replace('\\',"/");
         if to == model::SIDECAR || to.starts_with("_thumbs/") || !used.insert(to.to_lowercase()) { bail!("Selected files have conflicting names in the new model."); }
         let file = if entry.is_some() { from.strip_suffix(&format!("!{}",entry.as_ref().unwrap())).unwrap().to_string() } else { from.clone() };
-        files.push(json!({"from":from,"to":to,"file":file,"entry":entry}));
+        let source_file=checked(&root,&file)?;
+        let (sha256,bytes)=if let Some(entry)=entry.as_deref() {
+            archive_entry_hash(&source_file,entry)?
+        } else {(hash(&source_file)?,std::fs::metadata(&source_file)?.len())};
+        files.push(json!({"from":from,"to":to,"file":file,"entry":entry,"sha256":sha256,"bytes":bytes}));
     }
-    Ok(json!({"dest":lib.relative(&dest),"files":files,"source":m.rel(),"source_id":m.id(),"name":name,"metadata":m.v,"schema":sid,"values":values}))
+    let bytes=files.iter().filter_map(|f|f["bytes"].as_u64()).sum::<u64>();
+    Ok(json!({"dest":lib.relative(&dest),"files":files,"count":files.len(),"bytes":bytes,"source":m.rel(),"source_id":m.id(),"name":name,"metadata":m.v,"schema":sid,"values":values}))
 }
 fn stop(cancel: &AtomicBool) -> Result<()> { if cancel.load(Ordering::Relaxed) { bail!("Stopped."); } Ok(()) }
 fn snapshot(root: &Path, keep: &Path, file: &str) -> Result<bool> {
@@ -106,6 +122,11 @@ pub fn execute(lib: &Library, plan: &Value, mode: &str, cancel: &AtomicBool, pro
     if dest.exists() { bail!("The destination is now taken. Preview it again."); }
     let current=model::read_sidecar(&src);
     if current["id"].is_string() && current["id"]!=plan["source_id"] { bail!("The source model changed. Preview it again."); }
+    for f in plan["files"].as_array().into_iter().flatten() {
+        let source_file=checked(&src,s(f,"file"))?;
+        let actual=if let Some(entry)=f["entry"].as_str() {archive_entry_hash(&source_file,entry)?.0} else {hash(&source_file)?};
+        if actual!=s(f,"sha256") {bail!("A selected file changed since review. Preview the extraction again.");}
+    }
     let id = relayout::new_id(lib)?;
     let keep = relayout::kept_dir(lib,&id);
     std::fs::create_dir_all(&keep)?;
@@ -142,6 +163,9 @@ pub fn execute(lib: &Library, plan: &Value, mode: &str, cancel: &AtomicBool, pro
             }
         }
         stop(cancel)?;
+        for f in files {
+            if hash(&stage.join(s(f,"to")))?!=s(f,"sha256") {bail!("A staged file did not match the reviewed source manifest.");}
+        }
         // Copy portable descriptive metadata, including unfamiliar custom fields, not identity.
         let mut side = if j["sidecar_before"].is_object() { j["sidecar_before"].clone() } else { json!({}) };
         for k in ["authors","tags","source","released"] {
