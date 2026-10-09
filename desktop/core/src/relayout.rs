@@ -23,7 +23,8 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
-/// Journals kept in a library (older ones are removed).
+/// Maximum number of disposable, completed history entries. Recovery-bearing and
+/// unfinished journals are never subject to this limit.
 const KEEP: usize = 20;
 
 fn journal_dir(lib: &Library) -> PathBuf {
@@ -391,15 +392,55 @@ fn begin(lib: &Library, id: &str, change: &Value, state: &str) -> Result<()> {
         j["finished"] = j["created"].clone();
     }
     write(lib, &j)?;
-    // keep the newest few
-    let dir = journal_dir(lib);
-    let mut all = list(lib);
-    for old in all.drain(KEEP.min(all.len())..) {
-        let old = old["id"].as_str().unwrap_or("x");
-        let _ = std::fs::remove_file(dir.join(format!("{old}.json")));
-        let _ = std::fs::remove_dir_all(kept_dir(lib, old));
-    }
+    prune_disposable_history(lib);
     Ok(())
+}
+
+/// No journal may expire while it holds recovery data or represents an
+/// unfinished operation. A deleted model also keeps its record even if its
+/// recovery folder is temporarily absent, so the missing copy stays visible
+/// and actionable rather than disappearing from the history.
+fn retains_recovery(lib: &Library, j: &Value) -> bool {
+    if !matches!(j["state"].as_str(), Some("done" | "undone" | "emptied")) {
+        return true;
+    }
+    if j["kind"] == "model_delete" && j["state"] != "undone" {
+        return true;
+    }
+    let Some(id) = j["id"].as_str() else { return true; };
+    if crate::library::valid_id(id).is_err() {
+        return true;
+    }
+    match std::fs::read_dir(kept_dir(lib, id)) {
+        Ok(mut contents) => contents.next().is_some(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(_) => true, // fail closed if recovery storage cannot be inspected
+    }
+}
+
+/// Keep the 20 newest *disposable* records, in addition to every retained
+/// recovery and every unfinished operation. Never remove a journal that might
+/// be needed to recover user data. Remove the kept folder before its metadata
+/// so a filesystem error cannot orphan a recovery directory.
+fn prune_disposable_history(lib: &Library) {
+    let dir = journal_dir(lib);
+    for old in list(lib)
+        .into_iter()
+        .filter(|j| !retains_recovery(lib, j))
+        .skip(KEEP)
+    {
+        let Some(id) = old["id"].as_str() else { continue; };
+        if crate::library::valid_id(id).is_err() {
+            continue;
+        }
+        let kept = kept_dir(lib, id);
+        match std::fs::remove_dir_all(&kept) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => continue, // preserve the journal if cleanup failed
+        }
+        let _ = std::fs::remove_file(dir.join(format!("{id}.json")));
+    }
 }
 
 pub(crate) fn write(lib: &Library, j: &Value) -> Result<()> {
@@ -494,6 +535,12 @@ fn blocked_by<'a>(newer: &'a [Value], j: &Value) -> Option<&'a Value> {
         .iter()
         .filter(|x| x["state"] != "undone" && x["id"] != j["id"])
         .find(|x| {
+            // Restoring a deleted model is independent of later unrelated
+            // operations. The restore handler still checks for reused paths
+            // and verifies the SHA-256 manifest before moving any folder.
+            if j["kind"] == "model_delete" {
+                return folders(x).iter().any(|a| mine.iter().any(|b| near(a, b)));
+            }
             if x["kind"] != "details" && j["kind"] != "details" {
                 return true;
             }
@@ -1140,6 +1187,50 @@ mod tests {
             side.get("schema").is_none() && side.get("path").is_none() && side["id"].is_string()
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn pruning_preserves_unfinished_and_recovery_backed_journals() {
+        let root = temp_dir("journal-retention");
+        let lib = Library::open(&root).unwrap();
+        // Archive and transfer journals use the same store as model deletion.
+        // An unfinished record without a recovery directory must also survive.
+        let cases = [
+            ("file_transfer", "running", true),
+            ("archive", "interrupted", true),
+            ("archive", "stopped", false),
+            ("file_transfer", "done", true),
+        ];
+        let mut preserved = vec![];
+        for (kind, state, with_copy) in cases {
+            let id = new_id(&lib).unwrap();
+            write(&lib, &json!({"id": id, "kind": kind, "state": state, "moves": []})).unwrap();
+            if with_copy {
+                let kept = kept_dir(&lib, &id);
+                std::fs::create_dir_all(&kept).unwrap();
+                std::fs::write(kept.join("source.bin"), b"recoverable content").unwrap();
+            }
+            preserved.push((id, with_copy));
+        }
+        for i in 0..27 {
+            let id = new_id(&lib).unwrap();
+            record(&lib, &id, &json!({"kind": "details", "label": format!("change {i}"), "models": []})).unwrap();
+        }
+        for (id, with_copy) in preserved {
+            assert!(read(&lib, &id).is_ok(), "lost protected journal {id}");
+            if with_copy {
+                assert_eq!(
+                    std::fs::read(kept_dir(&lib, &id).join("source.bin")).unwrap(),
+                    b"recoverable content"
+                );
+            }
+        }
+        assert_eq!(
+            list(&lib).iter().filter(|j| j["kind"] == "details").count(),
+            KEEP,
+            "retained journals must not consume the disposable history quota"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
