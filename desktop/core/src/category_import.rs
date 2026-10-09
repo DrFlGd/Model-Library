@@ -313,6 +313,24 @@ pub fn plan(lib: &Library, ix: &Index, proposal: &Value) -> Result<Value> {
         "bytes": p.items.iter().map(|i| i["bytes"].as_u64().unwrap_or(0)).sum::<u64>() }))
 }
 
+/// A commit must use the exact model paths and newly created category nodes
+/// shown in the final review, including the transfer mode. The client does
+/// not get to override anything: the server recreates and compares the plan.
+pub fn require_review(actual: &Value, reviewed: &Value, mode: &str) -> Result<()> {
+    if reviewed["reviewed_mode"] != mode {
+        bail!("Move or Copy changed since review. Review destinations again.");
+    }
+    let mut previous = reviewed.clone();
+    let Some(obj) = previous.as_object_mut() else {
+        bail!("Review the destination plan before importing.");
+    };
+    obj.remove("reviewed_mode");
+    if &previous != actual {
+        bail!("The reviewed import paths or category structure have changed. Review destinations again before importing.");
+    }
+    Ok(())
+}
+
 /// Hash every file of a completed model so an Undo never removes a changed copy.
 /// Missing/new/modified files all invalidate the saved manifest.
 pub fn destination_manifest(dir: &Path) -> Result<Value> {
