@@ -3095,4 +3095,74 @@ mod tests {
         drop(app);
         let _ = std::fs::remove_dir_all(&home);
     }
+
+    #[tokio::test]
+    async fn reviewed_category_import_commits_and_undoes_without_touching_staged_sources() {
+        let (app, home) = app("category-import");
+        let lib = home.join("Lib");
+        call(&app, "library_open", json!({ "path": lib.display().to_string() })).await;
+        let source = home.join("Collection");
+        std::fs::create_dir_all(source.join("Terrain")).unwrap();
+        std::fs::write(source.join("Terrain/Rock.stl"), b"rock").unwrap();
+        std::fs::write(source.join("Terrain/Picture.png"), b"picture").unwrap();
+        let proposal = call(&app, "category_import_scan", json!({
+            "paths": [source.display().to_string()]
+        })).await;
+        assert_eq!(proposal["roots"][0]["name"], "Collection");
+        assert!(!lib.join("Collection").exists(), "scan must not mutate the library");
+        let mut reviewed = json!({ "roots": proposal["roots"] });
+        // Mark Terrain as a category (by default it holds model-looking files).
+        reviewed["roots"][0]["children"][0]["kind"] = json!("category");
+        let p = call(&app, "category_import_plan", json!({ "proposal": reviewed })).await;
+        assert_eq!(p["models"], 2, "{p}");
+        assert!(p["conflicts"].as_array().unwrap().is_empty(), "{p}");
+        assert!(!lib.join("Collection").exists(), "review must not mutate the library");
+
+        let done = wait(&app, &call(&app, "category_import_commit", json!({
+            "proposal": reviewed, "mode": "copy"
+        })).await).await;
+        assert!(done["error"].is_null(), "{done}");
+        let r = &done["result"];
+        assert_eq!(r["imported"], 2, "{r}");
+        assert_eq!(std::fs::read(source.join("Terrain/Rock.stl")).unwrap(), b"rock");
+        assert_eq!(std::fs::read(lib.join("Collection/Terrain/Rock/Rock.stl")).unwrap(), b"rock");
+        assert!(lib.join("_library/schemas/collection.json").is_file());
+        let jid = r["journal"].as_str().unwrap();
+        let undone = wait(&app, &call(&app, "journal_undo", json!({ "id": jid })).await).await;
+        assert!(undone["error"].is_null(), "{undone}");
+        assert_eq!(undone["result"]["state"], "undone", "{undone}");
+        assert!(!lib.join("Collection").exists());
+        assert!(!lib.join("_library/schemas/collection.json").exists());
+        assert!(source.join("Terrain/Picture.png").is_file());
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[tokio::test]
+    async fn reviewed_category_import_keeps_modified_copy_on_conflicting_undo() {
+        let (app, home) = app("category-undo-conflict");
+        let lib = home.join("Lib");
+        call(&app, "library_open", json!({ "path": lib.display().to_string() })).await;
+        let source = home.join("New category");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("part.stl"), b"original").unwrap();
+        let scan = call(&app, "category_import_scan", json!({
+            "paths": [source.display().to_string()]
+        })).await;
+        let reviewed = json!({ "roots": scan["roots"] });
+        let done = wait(&app, &call(&app, "category_import_commit", json!({
+            "proposal": reviewed, "mode": "copy"
+        })).await).await;
+        assert!(done["error"].is_null(), "{done}");
+        assert_eq!(done["result"]["imported"], 1, "{done}");
+        let path = lib.join("New category/part/part.stl");
+        std::fs::write(&path, b"changed after import").unwrap();
+        let jid = done["result"]["journal"].as_str().unwrap();
+        let undo = wait(&app, &call(&app, "journal_undo", json!({ "id": jid })).await).await;
+        assert!(undo["error"].is_null(), "{undo}");
+        assert!(!undo["result"]["failed"].as_array().unwrap().is_empty(), "{undo}");
+        assert_eq!(std::fs::read(&path).unwrap(), b"changed after import");
+        assert!(source.join("part.stl").is_file());
+        assert!(lib.join("_library/schemas/new-category.json").is_file());
+        let _ = std::fs::remove_dir_all(home);
+    }
 }
