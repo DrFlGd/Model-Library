@@ -5,13 +5,13 @@ use serde_json::{json, Value};
 use std::{collections::BTreeMap, path::{Path, PathBuf}, sync::atomic::{AtomicBool, Ordering}};
 
 fn s<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
-fn safe(rel: &str) -> Result<PathBuf> {
+pub(crate) fn safe(rel: &str) -> Result<PathBuf> {
     if rel.is_empty() || rel.contains('\\') || rel.contains(':') || rel.split('/').any(|x| x.is_empty() || x == "." || x == "..") { bail!("Choose a path inside the model."); }
     let p = PathBuf::from(rel);
     if p.is_absolute() { bail!("Choose a path inside the model."); }
     Ok(p)
 }
-fn checked(root: &Path, rel: &str) -> Result<PathBuf> {
+pub(crate) fn checked(root: &Path, rel: &str) -> Result<PathBuf> {
     let p = safe(rel)?;
     let mut at = root.to_path_buf();
     for part in p.components() { at.push(part); if std::fs::symlink_metadata(&at).is_ok_and(|m| m.file_type().is_symlink()) { bail!("Links cannot be extracted."); } }
@@ -200,13 +200,13 @@ fn directories(root:&Path)->Result<Vec<String>> {
     }
     let mut out=vec![]; visit(root,root,&mut out)?; Ok(out)
 }
-fn hash(path:&Path)->Result<String> {
+pub(crate) fn hash(path:&Path)->Result<String> {
     use sha2::{Digest,Sha256}; use std::io::Read;
     let mut f=std::fs::File::open(path)?; let mut h=Sha256::new(); let mut b=vec![0;1<<20];
     loop { let n=f.read(&mut b)?; if n==0 {break;} h.update(&b[..n]); }
     Ok(hex::encode(h.finalize()))
 }
-fn hashes(root:&Path)->Result<Value> {
+pub(crate) fn hashes(root:&Path)->Result<Value> {
     fn collect(root:&Path,dir:&Path,out:&mut Value)->Result<()> {
         for e in std::fs::read_dir(dir)? { let e=e?; let p=e.path(); if e.file_type()?.is_symlink() {bail!("A link was added to the model.");} if p.is_dir() {collect(root,&p,out)?;} else {out[p.strip_prefix(root)?.to_string_lossy().replace('\\',"/")]=json!(hash(&p)?);} } Ok(())
     }
