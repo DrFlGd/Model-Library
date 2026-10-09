@@ -112,7 +112,7 @@ fn read_model(lib: &Library, dir: &Path, schema: Option<&Schema>, cats: &[String
             }
         }
     }
-    if let Some(cover) = summary["explicit_cover"].as_str() {
+    if let Some(cover) = summary["explicit_cover"].as_str().map(String::from) {
         summary["cover_modified"] = json!(model::modified(&dir.join(cover)));
     }
     if summary["cover"].is_null() && crate::thumb::has(dir) {
