@@ -103,6 +103,15 @@ fn read_model(lib: &Library, dir: &Path, schema: Option<&Schema>, cats: &[String
     };
     let files = model::list_files(dir);
     let mut summary = model::summarise(&files, &side);
+    // Each preview URL/cache key includes the underlying file's modification
+    // time, not just the model folder's time (nested edits leave that unchanged).
+    if let Some(previews) = summary["previews"].as_array_mut() {
+        for preview in previews {
+            if let Some(rel) = preview["file"].as_str() {
+                preview["modified"] = json!(model::modified(&dir.join(rel)));
+            }
+        }
+    }
     if summary["cover"].is_null() && crate::thumb::has(dir) {
         summary["cover"] = json!(crate::thumb::THUMB);
     }
