@@ -65,6 +65,7 @@ The UI pass in `docs/PLAN.md` ("UI pass design") is done: actions (0.5.1), undo 
 
 ## Unreleased
 
+- Agent A: Make the model workspace fill the resized window; dock Files directly beside collapsible navigation; add the resizable, persistent right-side Details ribbon with Save/Cancel and draft safeguards; preview Unsorted models’ folders, ZIPs and supported files beside the collection. Includes automated layout/selection checks and screenshot hooks.
 - Document the published 0.5.5 workspace and its validated screenshots.
 
 ## 0.5.5 (2026-10-08)
