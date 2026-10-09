@@ -512,6 +512,38 @@ mod tests {
     }
 
     #[test]
+    fn preview_composition_handles_zero_one_two_many_and_unknown_files() {
+        let as_files = |names: &[&str]| -> Vec<(String, u64)> {
+            names.iter().map(|name| (name.to_string(), 42)).collect()
+        };
+        let empty = summarise(&[], &json!({}));
+        assert_eq!(empty["previews"], json!([]));
+        assert_eq!(empty["previewable"], 0);
+
+        let one = summarise(&as_files(&["one.stl", "manual.max"]), &json!({}));
+        assert_eq!(one["count"], 2);
+        assert_eq!(one["previewable"], 1);
+        assert_eq!(one["previews"][0]["file"], "one.stl");
+
+        let two = summarise(&as_files(&["a.png", "b.stl"]), &json!({}));
+        assert_eq!(two["previews"].as_array().unwrap().len(), 2);
+        assert_ne!(two["previews"][0]["file"], two["previews"][1]["file"]);
+
+        let many = summarise(&as_files(&["a.stl", "b.stl", "c.stl", "d.stl", "e.stl", "notes.pdf", "opaque.ext"]), &json!({}));
+        assert_eq!(many["previewable"], 5);
+        assert_eq!(many["previews"].as_array().unwrap().len(), 4);
+        assert_eq!(many["count"], 7);
+        let paths: std::collections::HashSet<_> = many["previews"].as_array().unwrap()
+            .iter().filter_map(|v| v["file"].as_str()).collect();
+        assert_eq!(paths.len(), 4, "each preview is a different file");
+
+        let none = summarise(&as_files(&["a.pdf", "notes.7z", "opaque.xyz"]), &json!({}));
+        assert_eq!(none["previewable"], 0);
+        assert_eq!(none["count"], 3);
+        assert_eq!(none["previews"], json!([]));
+    }
+
+    #[test]
     fn sidecar_updates_keep_unknown_keys() {
         let dir = std::env::temp_dir().join(format!("modlib-sidecar-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
