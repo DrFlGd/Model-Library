@@ -2725,6 +2725,24 @@ mod tests {
         )
         .await;
         assert!(std::fs::read(&cover).unwrap().ends_with(b"one"));
+        // Automatic reset changes only metadata, keeps the image on disk and
+        // journals enough to recover the explicitly selected cover on Undo.
+        let auto = call(
+            &app,
+            "model_cover",
+            json!({ "id": hook, "automatic": true }),
+        )
+        .await;
+        assert!(auto["journal"].is_string(), "{auto}");
+        assert!(model::read_sidecar(&lib.join("Unsorted/Hook"))["cover"].is_null());
+        assert!(cover.is_file());
+        let undo_auto = wait(
+            &app,
+            &call(&app, "journal_undo", json!({ "id": auto["journal"] })).await,
+        )
+        .await;
+        assert_eq!(undo_auto["result"]["state"], "undone", "{undo_auto}");
+        assert_eq!(model::read_sidecar(&lib.join("Unsorted/Hook"))["cover"], "_media/cover.png");
         // Import: undone, the folder goes back as it was and the workspace has it again
         let src = home.join("Share");
         std::fs::create_dir_all(src.join("Bench")).unwrap();
