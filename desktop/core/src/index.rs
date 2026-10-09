@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::UNIX_EPOCH;
 
 pub const UNSORTED: &str = "Unsorted";
-const CACHE_FORMAT: u64 = 1;
+const CACHE_FORMAT: u64 = 2; // Preview summaries include source metadata and explicit cover mode.
 
 #[derive(Clone, Debug)]
 pub struct Model {
@@ -111,6 +111,9 @@ fn read_model(lib: &Library, dir: &Path, schema: Option<&Schema>, cats: &[String
                 preview["modified"] = json!(model::modified(&dir.join(rel)));
             }
         }
+    }
+    if let Some(cover) = summary["explicit_cover"].as_str() {
+        summary["cover_modified"] = json!(model::modified(&dir.join(cover)));
     }
     if summary["cover"].is_null() && crate::thumb::has(dir) {
         summary["cover"] = json!(crate::thumb::THUMB);
