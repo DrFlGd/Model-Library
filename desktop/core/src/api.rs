@@ -3215,6 +3215,113 @@ mod tests {
         let _ = std::fs::remove_dir_all(home);
     }
 
+
+    #[tokio::test]
+    async fn reviewed_destinations_must_not_change_after_approval() {
+        let (app, home) = app("category-reviewed-plan");
+        let lib = home.join("Lib");
+        call(&app, "library_open", json!({ "path": lib.display().to_string() })).await;
+        let target = call(&app, "schema_create", json!({ "schema": { "name": "Target" } })).await;
+        let source = home.join("Incoming");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("Rock.stl"), b"rock").unwrap();
+        let scan = call(&app, "category_import_scan", json!({
+            "paths": [source.display().to_string()]
+        })).await;
+        let mut proposed = json!({ "roots": scan["roots"] });
+        proposed["roots"][0]["target"] = json!({ "schema": target["id"], "values": [] });
+        let mut review = call(&app, "category_import_plan", json!({ "proposal": proposed })).await;
+        assert_eq!(review["items"][0]["rel"], "Target/Rock", "{review}");
+        review["reviewed_mode"] = json!("copy");
+        assert!(app.call("category_import_commit", json!({
+            "proposal": proposed, "mode": "move", "reviewed": review
+        })).await.is_err(), "Move requires a new review after Copy is approved");
+        std::fs::create_dir_all(lib.join("Target/Rock")).unwrap();
+        std::fs::write(lib.join("Target/Rock/other.txt"), b"unrelated").unwrap();
+        let r = app.call("category_import_commit", json!({
+            "proposal": proposed, "mode": "copy", "reviewed": review
+        })).await;
+        assert!(r.is_err(), "occupied reviewed destination must be rejected: {r:?}");
+        assert!(!lib.join("Target/Rock (2)").exists());
+        assert!(source.join("Rock.stl").is_file());
+        assert!(call(&app, "journals", json!({})).await.as_array().unwrap().is_empty(),
+            "no mutation journal is created for a stale review");
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[tokio::test]
+    async fn interrupted_category_moves_recover_after_restart_from_each_durable_phase() {
+        for stage in ["after_journal", "after_schema", "after_copy",
+                      "after_manifest", "during_cleanup", "after_first"] {
+            let (app, home) = app(&format!("recover-{stage}"));
+            let lib = home.join("Lib");
+            call(&app, "library_open", json!({ "path": lib.display().to_string() })).await;
+            let source = home.join("Incoming");
+            for file in ["One/a.stl", "Two/b.stl"] {
+                let path = source.join(file);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(&path, file.as_bytes()).unwrap();
+            }
+            let scan = call(&app, "category_import_scan", json!({
+                "paths": [source.display().to_string()]
+            })).await;
+            let proposed = json!({ "roots": scan["roots"] });
+            let mut review = call(&app, "category_import_plan", json!({
+                "proposal": proposed
+            })).await;
+            assert!(review["conflicts"].as_array().unwrap().is_empty(), "{stage}: {review}");
+            review["reviewed_mode"] = json!("move");
+            let start = call(&app, "category_import_commit", json!({
+                "proposal": proposed, "mode": "move", "reviewed": review,
+                "test_interrupt": stage
+            })).await;
+            let done = wait(&app, &start).await;
+            assert!(done["error"].is_string() || done["result"]["state"] == "stopped",
+                "{stage}: {done}");
+            let saved = call(&app, "journals", json!({})).await;
+            assert_eq!(saved.as_array().unwrap().len(), 1, "{stage}: {saved}");
+            let id = saved[0]["id"].as_str().unwrap().to_string();
+            let recovery = relayout::read(&app.library().unwrap(), &id).unwrap();
+            assert_eq!(recovery["category_import"], true, "{stage}");
+            assert_eq!(recovery["moves"].as_array().unwrap().len(), 2, "{stage}");
+            assert_eq!(recovery["created_schemas"].as_array().unwrap().len(), 1, "{stage}");
+            assert!(recovery["moves"][0]["source_manifest"].is_array(), "{stage}");
+            let paths = app.paths.clone();
+            drop(app); // interruption/restart: no old in-memory job or index
+            let again = App::new(paths).unwrap();
+            call(&again, "library_open", json!({ "path": lib.display().to_string() })).await;
+            let undo = wait(&again, &call(&again, "journal_undo", json!({ "id": id })).await).await;
+            assert!(undo["error"].is_null(), "{stage}: {undo}");
+            assert_eq!(undo["result"]["state"], "undone", "{stage}: {undo}");
+            for file in ["One/a.stl", "Two/b.stl"] {
+                assert_eq!(std::fs::read(source.join(file)).unwrap(), file.as_bytes(), "{stage}");
+            }
+            assert!(!lib.join("Incoming").exists(), "{stage}: imported category kept unexpectedly");
+            assert!(!lib.join("_library/schemas/incoming.json").exists(), "{stage}");
+            let _ = std::fs::remove_dir_all(home);
+        }
+    }
+
+    #[tokio::test]
+    async fn unfinished_category_import_journals_survive_history_pruning() {
+        let (app, home) = app("category-history-retention");
+        let lib = home.join("Lib");
+        call(&app, "library_open", json!({ "path": lib.display().to_string() })).await;
+        let library = app.library().unwrap();
+        let id = relayout::start(&library, &json!({
+            "kind": "import", "category_import": true, "mode": "copy",
+            "label": "Interrupted reviewed import", "moves": [], "created_schemas": []
+        })).unwrap();
+        for i in 0..30 {
+            let other = relayout::new_id(&library).unwrap();
+            relayout::record(&library, &other, &json!({
+                "kind": "details", "label": format!("Change {i}"), "models": []
+            })).unwrap();
+        }
+        assert_eq!(relayout::read(&library, &id).unwrap()["state"], "running");
+        let _ = std::fs::remove_dir_all(home);
+    }
+
     #[tokio::test]
     async fn reviewed_category_import_keeps_modified_copy_on_conflicting_undo() {
         let (app, home) = app("category-undo-conflict");
