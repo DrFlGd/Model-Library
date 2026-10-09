@@ -445,7 +445,7 @@ pub fn brief(j: &Value) -> Value {
     } else {
         j["moves"].as_array().or(j["models"].as_array()).map_or(0, Vec::len)
     };
-    json!({ "id": j["id"], "kind": j["kind"], "label": j["label"], "created": j["created"], "state": j["state"], "direction": j["direction"], "models": models, "error": j["error"] })
+    json!({ "id": j["id"], "kind": j["kind"], "label": j["label"], "created": j["created"], "state": j["state"], "direction": j["direction"], "models": models, "category_import": j["category_import"], "error": j["error"] })
 }
 
 /// The recorded changes for Home, newest first, each saying whether it can be
