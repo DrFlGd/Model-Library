@@ -256,6 +256,11 @@ pub fn execute(lib:&Library,plan:&Value,cancel:&AtomicBool,progress:&dyn Fn(usiz
     j["created"]=json!(crate::library::now()); j["state"]=json!("running");
     j["moves"]=json!([{"from":plan["source"],"to":plan["target"]}]);
     j["written"]=json!([]);j["removed"]=json!([]);j["retired"]=json!(false);
+    // Snapshot the target preview separately from its live content.
+    let target_thumb=target.join(thumb::THUMB);
+    if target_thumb.is_file() {std::fs::copy(&target_thumb,keep.join("target-thumb"))?;}
+    j["target_had_thumb"]=json!(target_thumb.is_file());
+    j["target_touched"]=json!(false);
     if let Some(src)=&source {
         j["source_dirs"]=json!(dirs(src)?);
         let side=src.join(model::SIDECAR);
@@ -317,6 +322,11 @@ pub fn execute(lib:&Library,plan:&Value,cancel:&AtomicBool,progress:&dyn Fn(usiz
                 let _=thumb::make(src);
             }
         }
+        // Invalidate stale generated previews without replacing an explicit cover.
+        j["target_touched"]=json!(true);relayout::write(lib,&j)?;
+        let _=std::fs::remove_file(target.join(thumb::THUMB));
+        let _=thumb::make(&target);
+        j["target_thumb_after"]=json!(extract::hash(&target.join(thumb::THUMB)).ok());
         j["source_after"]=json!(source.as_ref().map(|p|{
             if j["retired"]==true {model::read_sidecar(&keep.join("retired"))}else{model::read_sidecar(p)}
         }));
@@ -348,6 +358,9 @@ fn rollback(lib:&Library,j:&Value,strict:bool)->Result<()> {
     if strict {
         if model::read_sidecar(&dest)!=j["target_before"] {
             bail!("The destination model's details changed. Resolve this before Undo.");
+        }
+        if j["target_touched"]==true && json!(extract::hash(&dest.join(thumb::THUMB)).ok())!=j["target_thumb_after"] {
+            bail!("The destination preview changed; resolve this before Undo.");
         }
         if let Some(src)=&source {
             if j["retired"]==true {
@@ -421,6 +434,16 @@ fn rollback(lib:&Library,j:&Value,strict:bool)->Result<()> {
             if extract::hash(&output)?!=s(f,"sha256") {bail!("The destination changed during recovery.");}
             std::fs::remove_file(&output)?;
             trim_empty(&dest,&output);
+        }
+    }
+    if j["target_touched"]==true {
+        let preview=dest.join(thumb::THUMB);
+        if j["target_had_thumb"]==true {
+            std::fs::create_dir_all(preview.parent().unwrap())?;
+            std::fs::copy(keep.join("target-thumb"),preview)?;
+        } else {
+            let _=std::fs::remove_file(&preview);
+            let _=std::fs::remove_dir(preview.parent().unwrap());
         }
     }
     Ok(())
