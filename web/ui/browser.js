@@ -14,6 +14,7 @@ import { ModelDetails, SelectedPanel, PlaceSummary, Cover, size } from "./detail
 import { MODEL_ACTIONS, menuItems, openMenu, usePageKeys, runKey, letter, selectAllKey, editDetails, writable } from "./actions.js";
 import { categoryItems } from "./categories.js";
 import { PageHead, ViewSwitch, SortMenu, SearchNote } from "./layout.js";
+import { UnsortedPreview } from "./unsorted-preview.js";
 
 /** Open a model's own page. */
 const openModel = (m) => { location.hash = routeHash(`model:${m.id}`); };
@@ -124,6 +125,15 @@ export function Browser() {
   const [text, setText] = useState(s.q);
   const [result, setResult] = useState(null);
   const [limit, setLimit] = useState(PAGE);
+  const [previewNarrow, setPreviewNarrow] = useState(() => matchMedia("(max-width: 899px)").matches);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  useEffect(() => {
+    const query = matchMedia("(max-width: 899px)");
+    const changed = () => { setPreviewNarrow(query.matches); setPreviewOpen(false); };
+    query.addEventListener("change", changed);
+    return () => query.removeEventListener("change", changed);
+  }, []);
+  useEffect(() => { setPreviewOpen(false); }, [scope]);
   const seq = useRef(0);
   useLayoutEffect(() => { setText(s.q); }, [s.q]); // before paint, so nothing typed meanwhile is put back
   useEffect(() => { setLimit(PAGE); }, [scope, s.q, s.sort]);
@@ -199,6 +209,7 @@ export function Browser() {
   ];
   const View = s.layout === "list" ? Row : Card;
   const name = placeName(scope, s.overview);
+  const unsortedOne = scope === "unsorted" && picked.length === 1;
   // the answer for this place and search (the last one stays up while the next comes)
   const fresh = result && result.q === s.q && result.scope === scope ? result : null;
   const count = html`<span class="page-count" id="browse-count" data-q=${result ? result.q : null} data-scope=${result ? result.scope : null}>${result ? `${result.total} ${result.total === 1 ? "model" : "models"}` : ""}</span>`;
@@ -211,6 +222,7 @@ export function Browser() {
           <input id="search" data-search type="search" value=${text} placeholder="Search names, authors, tags… or author:jo tag:presupported" autocomplete="off" spellcheck="false"
             title="Search (/)" onInput=${(e) => setText(e.target.value)} /></label>
         <${SortMenu} id="sort" options=${SORTS} value=${s.sort} onChange=${(v) => setPref({ sort: v })} />
+        ${previewNarrow && unsortedOne ? html`<button type="button" class="ghost" id="unsorted-preview-open" onClick=${() => setPreviewOpen(true)}>Preview files</button>` : null}
         <${ViewSwitch} views=${VIEWS} value=${s.layout === "list" ? "list" : "grid"} onChange=${(v) => setPref({ layout: v })} />
       </div>
       ${chips.length ? html`<div class="filters" aria-label="Narrow down">${chips.map(([k, f]) => {
@@ -230,7 +242,9 @@ export function Browser() {
       </div>
     </div>
     ${picked.length > 1 ? html`<${SelectedPanel} models=${picked} />`
+      : unsortedOne ? (!previewNarrow || previewOpen ? html`<${UnsortedPreview} key=${picked[0].id} id=${picked[0].id} narrow=${previewNarrow} onClose=${() => setPreviewOpen(false)} />` : null)
       : html`<${ModelDetails} id=${picked[0]?.id || null} empty=${html`<${PlaceSummary} name=${name} result=${fresh} />`} />`}
+    ${previewNarrow && previewOpen && unsortedOne ? html`<button type="button" class="preview-shade" aria-label="Close model preview" onClick=${() => setPreviewOpen(false)}></button>` : null}
   </div>`;
 }
 
