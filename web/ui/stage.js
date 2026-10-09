@@ -38,7 +38,7 @@ export function WorkspaceStage({ src, model, files, contextActions }) {
     return () => removeEventListener("keydown", key);
   });
   const group = fileType(name).group;
-  const mesh = MESH.test(name), picture = group === "image", document = !p.entry && /\.(pdf|md|markdown|txt)$/i.test(name), video = !p.entry && /\.(mp4|webm|m4v|mov)$/i.test(name);
+  const mesh = MESH.test(name), picture = group === "image", document = /\.pdf$/i.test(name) || (!p.entry && /\.(md|markdown|txt)$/i.test(name)), video = !p.entry && /\.(mp4|webm|m4v|mov)$/i.test(name);
   return html`<section class="mp-stage workspace-stage" id="workspace-stage" aria-label="Selected file">
     <${Breadcrumb} model=${model} shown=${shown} />
     ${container ? html`<${Contents} key=${shown} src=${src} model=${model} files=${files} shown=${shown} archive=${archive} entries=${entries} error=${error} contextActions=${contextActions} />`
@@ -46,7 +46,7 @@ export function WorkspaceStage({ src, model, files, contextActions }) {
       : picture ? html`<${Pictures} key=${shown} src=${src} model=${model} pictures=${[current]} current=${current} setCurrent=${() => {}} />`
       : document ? html`<${Documents} key=${shown} src=${src} model=${model} docs=${[current]} current=${current} setCurrent=${() => {}} />`
       : video ? html`<${Videos} key=${shown} src=${src} model=${model} videos=${[current]} current=${current} setCurrent=${() => {}} />`
-      : html`<div class="workspace-no-view"><h2>${name.split("/").pop()}</h2><p><${TypeTag} name=${name} /> · ${size(f?.size || 0)}</p>${isDesktop() && !p.entry ? html`<button type="button" class="ghost" onClick=${() => openModelFile(model, p.file)}>Open in its own app</button>` : html`<p class="muted">No viewer for this file.</p>`}</div>`}
+      : html`<div class="workspace-no-view"><h2>${name.split("/").pop()}</h2><p><${TypeTag} name=${name} /> · ${size(f?.size || 0)}</p>${isDesktop() && !p.entry ? html`<button type="button" class="ghost" onClick=${() => openModelFile(model, p.file)}>Open externally</button>` : html`<p class="muted">No in-app viewer for this file.</p>`}</div>`}
     ${!container && siblings.length > 1 ? html`<div class="workspace-step"><button type="button" class="ghost" aria-label="Previous file" title="Previous file (←)" onClick=${() => step(-1)}>‹ Previous</button><button type="button" class="ghost" aria-label="Next file" title="Next file (→)" onClick=${() => step(1)}>Next ›</button></div>` : null}
   </section>`;
 }
