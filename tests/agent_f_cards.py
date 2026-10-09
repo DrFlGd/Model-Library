@@ -54,6 +54,11 @@ async def card_checks(pg, library, base, out, api, check, png, cube):
            and shapes["F card chosen"]["explicit_cover"] == "chosen.png"), shapes)
     await pg.goto(base + "#/browse/all")
     await pg.reload()
+    await pg.evaluate("""async () => {
+      const {ui, setPref} = await import('/ui/state.js');
+      ui.set({q: ''});
+      setPref({layout: 'grid', sort: 'name'});
+    }""")
     await pg.wait_for_selector('.card:has(.card-name:text-is("F card five"))')
     one = pg.locator('.card:has(.card-name:text-is("F card one"))')
     two = pg.locator('.card:has(.card-name:text-is("F card two"))')
@@ -113,7 +118,7 @@ async def card_checks(pg, library, base, out, api, check, png, cube):
     await pg.wait_for_selector("#details-more")
     await pg.click("#details-more")
     await pg.click('#context-menu [data-action="auto-cover"]')
-    await pg.wait_for_function("() => !document.querySelector('#details-more')?.disabled")
+    await pg.wait_for_function("() => document.querySelector('#toast')?.textContent.includes('automatic preview')")
     # The reset is journalled, and the chosen picture remains on disk.
     model = await api(pg, "model_get", {"id": "agent-f-chosen"})
     check("Agent F Use automatic preview removes only the metadata override",
