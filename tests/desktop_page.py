@@ -60,7 +60,7 @@ import urllib.request
 from pathlib import Path
 
 from playwright.async_api import async_playwright
-from model_workspace_panel import panel_workspace_checks
+from model_workspace_panel import panel_workspace_checks, details_refresh_checks
 from model_workspace_loose import loose_workspace_checks
 
 ap = argparse.ArgumentParser()
@@ -566,6 +566,7 @@ async def phase3(pg):
           and tiles == 1 and kept == "type", (every, on_disk, kinds, tiles, kept))
 
     await panel_workspace_checks(pg, check, out)
+    await details_refresh_checks(pg, check, out)
 
     # 23. library files can be read in ranges (videos seek)
     req = urllib.request.Request(B + "library/Unsorted/Knight%20Armour/README.md", headers={"Range": "bytes=2-7"})
