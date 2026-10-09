@@ -1479,7 +1479,7 @@ async def agent_c_pdf_archive_checks(pg):
           direct and "manual.pdf" in direct and "page=2" in fit
           and "view=Fit" in fit and "view=FitH" in width, (direct, fit, width))
     await pg.screenshot(path=str(out / "agent-c-pdf-browser.png"))
-    await pg.click('#part-tree [data-file="bundle.zip"]')
+    await pg.click('#part-tree [aria-label="Unfold bundle.zip"]')
     await pg.wait_for_selector('#part-tree [data-entry="good.pdf"]')
     await pg.click('#part-tree [data-entry="good.pdf"]')
     await pg.wait_for_selector('.pdf-viewer .pdf-frame[src^="blob:"]')
