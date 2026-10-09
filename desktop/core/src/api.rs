@@ -1264,7 +1264,11 @@ impl App {
                 lib.writable().map_err(e2s)?;
                 let jid = relayout::new_id(&lib).map_err(e2s)?;
                 let mut files = vec![];
-                let cover = match args["snapshot"].as_str() {
+                // An explicit reset removes the sidecar override; it never
+                // deletes a user-supplied image or the last complete file copy.
+                let cover = if args["automatic"] == json!(true) {
+                    Value::Null
+                } else { match args["snapshot"].as_str() {
                     Some(data) => {
                         use base64::Engine;
                         let b64 = data.split_once(',').map(|(_, b)| b).unwrap_or(data);
@@ -1288,12 +1292,12 @@ impl App {
                         json!("_media/cover.png")
                     }
                     None => args["file"].clone(),
-                };
+                }};
                 let name = v["name"].as_str().unwrap_or("");
                 Box::pin(self.call(
                     "model_update",
                     json!({ "id": v["id"], "patch": { "cover": cover }, "journal": jid, "files": files,
-                        "label": if args["snapshot"].is_string() { format!("Used the 3D view as {name}'s cover") } else { format!("Changed {name}'s cover") } }),
+                        "label": if args["automatic"] == json!(true) { format!("Restored {name}'s automatic preview") } else if args["snapshot"].is_string() { format!("Used the 3D view as {name}'s cover") } else { format!("Changed {name}'s cover") } }),
                 ))
                 .await
             }
