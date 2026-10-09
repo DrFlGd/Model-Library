@@ -460,8 +460,18 @@ async def phase3(pg):
     await pg.goto(B + "#/browse/unsorted")
     card = pg.locator(".card:has(.card-name:text-is('Knight Armour'))")
     await card.wait_for()
-    cover = await card.locator("img").get_attribute("src") or ""
-    check("a preview is drawn on import (a picture of the model is still its cover)", thumb and cover.endswith("/photo.png"), (thumb, cover))
+    await card.scroll_into_view_if_needed()
+    await pg.wait_for_function("""() => {
+      const card = [...document.querySelectorAll('.card')].find(e => e.querySelector('.card-name')?.textContent === 'Knight Armour');
+      const imgs = [...(card?.querySelectorAll('.cover-file img') || [])];
+      return imgs.some(i => i.src.includes('/photo.png') && i.complete && i.naturalWidth > 0)
+        && imgs.some(i => i.src.includes('~preview/') && i.complete && i.naturalWidth > 0);
+    }""", timeout=60000)
+    cover = await card.locator(".cover-file img").evaluate_all("imgs => imgs.map(i => i.src)")
+    check("import creates the model thumbnail and the automatic card shows its picture alongside 3D previews",
+          thumb and any("/photo.png" in src for src in cover)
+          and any("~preview/" in src for src in cover)
+          and await card.locator(".cover-composed").count() == 1, (thumb, cover))
 
     # 20. the model's page: 3D view, part tree, variants
     await card.dblclick()
@@ -569,10 +579,16 @@ async def phase3(pg):
     await pg.wait_for_function("() => /preview/.test(document.querySelector('.toast')?.textContent || '')", timeout=60000)
     msg = await pg.inner_text(".toast")
     await pg.goto(B + "#/browse/unsorted")
-    hand = pg.locator(".card:has(.card-name:text-is('Hand Made')) img")
-    await hand.wait_for()
-    src_ = await hand.get_attribute("src")
-    check("Make previews draws the missing ones, shown on the card", (library / "Unsorted/Hand Made/_thumbs/model.png").is_file() and src_.endswith("_thumbs/model.png"), (msg, src_))
+    hand = pg.locator(".card:has(.card-name:text-is('Hand Made'))")
+    await hand.scroll_into_view_if_needed()
+    await pg.wait_for_function("""() => {
+      const card = [...document.querySelectorAll('.card')].find(e => e.querySelector('.card-name')?.textContent === 'Hand Made');
+      return [...(card?.querySelectorAll('.cover-file img') || [])].some(i => i.complete && i.naturalWidth > 0);
+    }""", timeout=60000)
+    src_ = await hand.locator(".cover-file img").first.get_attribute("src")
+    check("Make previews draws the missing asset and the card uses a real automatic file preview",
+          (library / "Unsorted/Hand Made/_thumbs/model.png").is_file()
+          and "~preview/" in src_ and await hand.locator(".cover-composed").count() == 1, (msg, src_))
     await pg.screenshot(path=str(out / "14-previews.png"))
 
 
