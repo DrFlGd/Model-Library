@@ -67,7 +67,8 @@ export function ArchiveDialog({ request }) {
       <p class="muted">${{action === "compress" ? "Output ZIP:" : "Source archive:"} <code>${{plan.file}</code></p>
       <p class="muted">${{plan.metadata}</p>
       <details><summary>Review file paths (${{plan.files_count})</summary><ul>
-        ${{plan.files.map((f) => html`<li key=${{f.path}><code>${{f.path}</code> <span class="muted">${{size(f.size)}</span></li>`)}
+        ${{plan.files.slice(0, 250).map((f) => html`<li key=${{f.path}><code>${{f.path}</code> <span class="muted">${{size(f.size)}</span></li>`)}
+        ${plan.files_count > 250 ? html`<li class="muted">... and ${plan.files_count - 250} more files</li>` : null}
       </ul></details>
       <label class="archive-cleanup"><input type="checkbox" checked=${{remove} disabled=${{busy} onChange=${{(e) => setRemove(e.target.checked)} />
       ${{action === "compress" ? "Remove original content only after the ZIP passes hash verification" : "Remove source ZIP only after extracted files pass hash verification"}</label>
