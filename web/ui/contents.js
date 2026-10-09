@@ -5,7 +5,7 @@ import { ui, setPref } from "./state.js";
 import { extractionAction } from "./extract.js";
 import { ctx } from "./context.js";
 import { Icon } from "./icons.js";
-import { api, apiBytes, isDesktop, openModelFile } from "./library.js";
+import { api, apiBytes, isDesktop, openModelFile, openArchiveEntry } from "./library.js";
 import { size } from "./details.js";
 import { TypeTag, fileType } from "./filetypes.js";
 import { SortMenu, ViewSwitch } from "./layout.js";
@@ -102,7 +102,7 @@ export function Contents({ src, model, files, shown, archive, entries, error, co
   const order = rows.map((r) => r.key);
   const open = (row) => {
     pick(row.key);
-    if (!row.folder && !row.entry && !viewable(row.name) && isDesktop()) openModelFile(model, row.file);
+    if (!row.folder && !viewable(row.name) && isDesktop()) row.entry ? openArchiveEntry(src, row.file, row.entry) : openModelFile(model, row.file);
   };
   const select = (row, e) => { pickEvent(row.key, e, order); show(shown); };
   const menu = (e, row) => {
@@ -110,9 +110,9 @@ export function Contents({ src, model, files, shown, archive, entries, error, co
     const lib = ui.get().library;
     openMenu(e, [
       { id: "view", label: "Show here", icon: "eye", run: () => open(row) },
-      ...(!row.entry && isDesktop() ? [
-        ...(!row.folder ? [{ id: "open-own", label: "Open in its own app", icon: "external", run: () => openModelFile(model, row.file) }] : []),
-        { id: "folder", label: "Show in folder", icon: "folder", run: () => ctx.platform.library.openPath([lib.path, src.rel, row.folder ? row.rel : parentPath(row.rel)].filter(Boolean).join("/")) },
+      ...(isDesktop() ? [
+        ...(!row.folder ? [{ id: "open-own", label: "Open externally", icon: "external", run: () => row.entry ? openArchiveEntry(src, row.file, row.entry) : openModelFile(model, row.file) }] : []),
+        ...(!row.entry ? [{ id: "folder", label: "Show in folder", icon: "folder", run: () => ctx.platform.library.openPath([lib.path, src.rel, row.folder ? row.rel : parentPath(row.rel)].filter(Boolean).join("/")) }] : []),
       ] : []),
       ...(!row.entry && fileType(row.name).group === "image" ? [{ id: "cover", label: "Use as cover", icon: "image", disabled: lib?.read_only ? "The library is read-only." : false, run: () => useAsCover(src.id, row.file) }] : []),
       extractionAction(src, model),
