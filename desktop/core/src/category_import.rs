@@ -122,7 +122,7 @@ fn label(name: &str) -> Result<String> {
 fn model_name(name: &str) -> Result<String> {
     let n = name.trim();
     if n.is_empty() || n.starts_with('_') || n == "." || n == ".."
-        || n.contains('/') || n.contains('\\\\') || n.chars().any(char::is_control) {
+        || n.contains('/') || n.contains('\\') || n.chars().any(char::is_control) {
         bail!("Give every model a valid name.");
     }
     Ok(n.to_string())
