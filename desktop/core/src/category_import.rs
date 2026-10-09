@@ -280,6 +280,11 @@ pub fn plan(lib: &Library, ix: &Index, proposal: &Value) -> Result<Value> {
             (sid, values)
         } else {
             let name = label(&string(root, "name"))?;
+            // schema::create stores top-level category folders at max 60
+            // characters; refuse silent truncation of a reviewed destination.
+            if schema::clean_folder_name(&name, 60) != name {
+                bail!("The top-level category name is too long or cannot be used as a folder.");
+            }
             if name.eq_ignore_ascii_case("Unsorted") || !new_names.insert(name.to_lowercase())
                 || p.schemas.values().any(|s| s.folder.eq_ignore_ascii_case(&name))
                 || p.lib.root().join(&name).exists() {
