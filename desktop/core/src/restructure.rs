@@ -260,7 +260,7 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
             let folder = schema::clean_folder_name(name, 60);
             if folder.eq_ignore_ascii_case("Unsorted") || folder.starts_with('_')
                 || ix.schemas.iter().any(|s| s.folder.eq_ignore_ascii_case(&folder))
-                || lib.root().join(&folder).exists() {
+                || occupied_casefold(&lib.root().join(&folder))? {
                 bail!("The new category folder {} already exists or is protected.", folder);
             }
             let base = slug(name);
@@ -290,6 +290,7 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
                 let target_folder = p.iter().fold(lib.root().join(v["folder"].as_str().unwrap_or("")), |d, n| d.join(n));
                 if target_folder.exists() { bail!("A folder already occupies the proposed new target; choose or rename it explicitly."); }
                 schema::check_path(lib, v["folder"].as_str().unwrap_or(""), &existing, &p)?;
+                validate_destination_node(lib, v["folder"].as_str().unwrap_or(""), &existing, &existing, &p)?;
                 check_links(lib, &target_folder)?;
                 target_path = p;
                 let mut new_paths = existing;
@@ -303,6 +304,7 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
                         .cloned().ok_or_else(|| anyhow!("Choose an existing target subcategory."))?;
                 }
                 let target_folder = target_path.iter().fold(lib.root().join(v["folder"].as_str().unwrap_or("")), |d, n| d.join(n));
+                validate_destination_node(lib, v["folder"].as_str().unwrap_or(""), &existing, &existing, &target_path)?;
                 check_links(lib, &target_folder)?;
             }
         }
@@ -314,6 +316,9 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
         }
     } else if operation == "remove-up" {
         target_path = parent(&sources[0].path);
+        let sc = ix.schema(&sources[0].schema).ok_or_else(|| anyhow!("Missing category."))?;
+        let existing = schema::subcategories(&old[&sources[0].schema]);
+        validate_destination_node(lib, &sc.folder, &existing, &existing, &target_path)?;
     }
     // Remove selected sources other than a chosen existing target. That target
     // remains intact, keeping both its identity and existing child hierarchy.
