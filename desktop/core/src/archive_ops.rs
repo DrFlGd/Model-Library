@@ -29,6 +29,14 @@ fn safe(root: &Path, rel: &str) -> Result<PathBuf> {
     }
     Ok(at)
 }
+fn approved_root(lib: &Library, root: &Path) -> Result<()> {
+    let trusted = fs::canonicalize(lib.root())?;
+    let actual = fs::canonicalize(root)?;
+    if !actual.starts_with(&trusted) {
+        bail!("The model directory resolves outside the approved library root.");
+    }
+    Ok(())
+}
 fn hash_stream<R: Read>(mut reader: R, max: u64) -> Result<(String,u64)> {
     let mut hash = Sha256::new();
     let mut count = 0u64;
@@ -127,6 +135,7 @@ pub fn plan(lib: &Library, ix: &Index, args: &Value) -> Result<Value> {
     let m = ix.get(model_id).ok_or_else(|| anyhow!("Read the library again: that model is gone."))?;
     let root = lib.resolve(m.rel())?;
     if !root.is_dir() { bail!("The model directory is unavailable."); }
+    approved_root(lib,&root)?;
     let action = field(args, "action");
     if !matches!(action, "compress" | "extract") { bail!("Choose ZIP compression or extraction."); }
     let archive_file = field(args, "file");
@@ -173,6 +182,7 @@ pub fn plan(lib: &Library, ix: &Index, args: &Value) -> Result<Value> {
 fn validate(lib: &Library, plan: &Value) -> Result<PathBuf> {
     let root = lib.resolve(field(plan,"model"))?;
     if !root.is_dir() { bail!("The source model moved. Review the plan again."); }
+    approved_root(lib,&root)?;
     let side = model::read_sidecar(&root);
     if side["id"].as_str().is_some_and(|id| id != field(plan,"model_id")) {
         bail!("The model identity changed. Review the plan again.");
@@ -326,6 +336,7 @@ pub fn cleanup(lib: &Library, id: &str, cancel: &AtomicBool) -> Result<Value> {
     }
     if j["remove_sources"] == true { bail!("These sources were already put in recovery."); }
     let root = lib.resolve(field(&j,"model"))?;
+    approved_root(lib,&root)?;
     let plan = &j["plan"];
     let outputs = j["outputs"].as_array().ok_or_else(|| anyhow!("The ZIP verification record is missing."))?;
     for f in outputs {
@@ -384,6 +395,7 @@ pub fn undo(lib: &Library, mut journal: Value) -> Result<Value> {
     if journal["kind"] != "archive-op" { bail!("This is not a ZIP operation."); }
     if journal["state"] == "undone" { bail!("This ZIP operation was already undone."); }
     let root = lib.resolve(field(&journal,"model"))?;
+    approved_root(lib,&root)?;
     let id = field(&journal,"id").to_string();
     let outputs = journal["outputs"].as_array().cloned().unwrap_or_default();
     // Validate the entire undo before moving anything: no changed output is
