@@ -582,6 +582,28 @@ mod tests {
         assert!(reviewed_plan(&lib,&ix,&approved).is_err());
     }
     #[test]
+    fn recovery_sources_survive_more_than_twenty_journal_changes() {
+        let (lib,ix,id)=setup("archive-keep-after-retention");
+        let root=lib.root().join("Unsorted/Kit");
+        let p=plan(&lib,&ix,&json!({"id":id,"action":"compress","file":"Kit.zip"})).unwrap();
+        let result=execute(&lib,&p,false,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        let archive_journal=field(&result,"journal").to_string();
+        cleanup(&lib,&archive_journal,&AtomicBool::new(false)).unwrap();
+        let saved=relayout::kept_dir(&lib,&archive_journal).join("sources/Parts/body.stl");
+        assert!(saved.exists());
+        for i in 0..30 {
+            let later=relayout::new_id(&lib).unwrap();
+            relayout::record(&lib,&later,&json!({
+                "kind":"details","label":format!("Unrelated edit {i}"),"models":[]
+            })).unwrap();
+        }
+        assert!(saved.exists(), "Retention must never erase recovery content");
+        assert!(relayout::read(&lib,&archive_journal).is_ok(), "Recovery journal must survive pruning");
+        relayout::undo(&lib,&archive_journal,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert!(root.join("Parts/body.stl").is_file());
+        assert!(!root.join("Kit.zip").exists());
+    }
+    #[test]
     fn malicious_paths_and_corrupt_zip_preserve_sources() {
         let (lib,_,id)=setup("archive-unsafe");
         let root=lib.root().join("Unsorted/Kit");
