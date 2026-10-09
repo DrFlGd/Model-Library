@@ -205,6 +205,26 @@ async def details_refresh_checks(pg, check, out=None):
           await pg.locator('#workspace-details-form button[type=submit]').is_disabled())
     await pg.click('#details-load-latest')
 
+    # Undo from a separate editor while this ribbon has *real* local changes.
+    await pg.click('#mp-edit')
+    await pg.wait_for_selector('#details-dialog')
+    await pg.fill('#edit-tags', 'Agent A Undo while dirty')
+    await pg.click('#details-dialog button[type=submit]')
+    await pg.wait_for_selector('#details-dialog', state='detached')
+    await pg.wait_for_function("""() =>
+      document.querySelector('#workspace-edit-tags')?.value === 'Agent A Undo while dirty'
+    """)
+    await pg.fill('#workspace-edit-notes', 'Agent A draft retained through Undo')
+    await pg.evaluate("""async () => {
+      const {undoLast} = await import('./ui/library.js');
+      await undoLast();
+    }""")
+    await pg.wait_for_selector('#details-concurrent')
+    check('Undo preserves genuine draft, identifies conflict and blocks Save',
+          await pg.input_value('#workspace-edit-notes') == 'Agent A draft retained through Undo' and
+          await pg.locator('#workspace-details-form button[type=submit]').is_disabled())
+    await pg.click('#details-load-latest')
+
     # Return the test model to its original metadata for the rest of acceptance.
     await remote_update({'tags': tags_before, 'notes': notes_before})
     await pg.wait_for_function("""value =>
