@@ -23,6 +23,16 @@ if ui.exists():
     shutil.rmtree(ui)
 shutil.copytree(ROOT / "web", ui)
 
+# Tauri sniffs the first 1 KiB of an asset's content before considering the
+# extension. A JavaScript comment containing the PDF file signature can make
+# WebKitGTK reject the module as application/pdf and leave a blank app window.
+for script in ui.rglob("*"):
+    if script.suffix.lower() in (".js", ".mjs") and b"%PDF-" in script.read_bytes()[:1024]:
+        raise SystemExit(
+            f"{script.relative_to(ui)} contains a PDF magic header in its first 1024 bytes; "
+            "Tauri can serve this JavaScript module as application/pdf."
+        )
+
 FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/archivo/"
 index = ui / "index.html"
 html = index.read_text(encoding="utf-8")
