@@ -451,7 +451,7 @@ pub fn briefs(lib: &Library) -> Vec<Value> {
         .map(|(i, j)| {
             let mut b = brief(j);
             b["undo"] = match blocked_by(&all[..i], j) {
-                _ if j["state"] != "done" => json!(false),
+                _ if j["state"] != "done" && !(j["kind"] == "archive-op" && j["state"] == "interrupted") => json!(false),
                 Some(newer) => json!(format!(
                     "Undo the newer change first: {}.",
                     newer["label"].as_str().unwrap_or("")
@@ -653,7 +653,7 @@ pub fn apply(
     if j["state"] == "emptied" {
         bail!("Those copies were deleted already.");
     }
-    if matches!(j["kind"].as_str(), Some("details" | "import" | "extract" | "wrap_loose")) {
+    if matches!(j["kind"].as_str(), Some("details" | "import" | "extract" | "wrap_loose" | "archive-op")) {
         bail!("That change can't be made again from here.");
     }
     j["state"] = json!("running");
@@ -746,6 +746,7 @@ pub fn undo(
     match j["kind"].as_str() {
         Some("details") => return undo_details(lib, j),
         Some("extract") => return crate::extract::undo(lib, j),
+        Some("archive-op") => return crate::archive_ops::undo(lib, j),
         Some("wrap_loose") => return model::undo_loose(lib, id, cancel),
         Some("import") => return undo_import(lib, j, cancel, on_item),
         _ => {}
