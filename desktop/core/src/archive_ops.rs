@@ -80,11 +80,10 @@ fn check_outputs(root: &Path, paths: &[String]) -> Result<()> {
         if to.exists() || existing_case_conflict(root, rel)? {
             bail!("The destination is taken (including case-only names): {rel}. Choose another ZIP or destination.");
         }
-        for (i,c) in rel.char_indices().filter(|(_,c)| *c == '/') {
+        for (i,_) in rel.char_indices().filter(|(_,c)| *c == '/') {
             if sources.contains(&rel[..i].to_lowercase()) {
                 bail!("The ZIP contains both a file and its parent folder: {rel}");
             }
-            let _ = c;
         }
     }
     Ok(())
@@ -94,6 +93,7 @@ fn zip_entries(path: &Path) -> Result<Vec<Value>> {
     if z.len() > MAX_FILES + 500 { bail!("The ZIP has too many entries."); }
     let (mut files, mut total) = (vec![], 0u64);
     let mut names = HashSet::new();
+    let mut components = std::collections::HashMap::<String,String>::new();
     for i in 0..z.len() {
         let mut e = z.by_index(i).context("The ZIP contains an unsupported or encrypted entry.")?;
         let name = e.name().to_string();
@@ -103,6 +103,14 @@ fn zip_entries(path: &Path) -> Result<Vec<Value>> {
             bail!("The ZIP contains a symbolic link; links cannot be extracted.");
         }
         if !names.insert(rel.to_lowercase()) { bail!("ZIP entries collide (including letter case): {rel}"); }
+        let mut prefix = String::new();
+        for part in rel.split('/') {
+            if !prefix.is_empty() { prefix.push('/'); }
+            prefix.push_str(part);
+            if let Some(old) = components.insert(prefix.to_lowercase(), prefix.clone()) {
+                if old != prefix { bail!("ZIP paths differ only by case: {old} and {prefix}"); }
+            }
+        }
         if e.is_dir() { continue; }
         // This explanatory manifest does not become a second live model.json.
         if manifest_entry(rel) { continue; }
@@ -218,7 +226,10 @@ fn unpack_zip(root: &Path, plan: &Value, stage: &Path, cancel: &AtomicBool, prog
         fs::create_dir_all(dest.parent().unwrap())?;
         let mut entry = z.by_name(rel)?;
         let mut out = File::create(&dest)?;
-        std::io::copy(&mut entry, &mut out)?;
+        // Bound actual expanded output even if archive metadata is dishonest.
+        let limit = f["size"].as_u64().unwrap_or(0);
+        let written = std::io::copy(&mut entry.take(limit + 1), &mut out)?;
+        if written != limit { bail!("The ZIP entry expanded to an unexpected size: {rel}"); }
         out.sync_all()?;
         let (hash,len)=file_hash(&dest)?;
         if hash != field(f,"sha256") || len != f["size"].as_u64().unwrap_or(0) {
