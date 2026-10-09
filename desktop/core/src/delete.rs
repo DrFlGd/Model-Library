@@ -156,7 +156,7 @@ mod tests {
         let jid = s(&result, "journal").to_owned();
         let saved = relayout::kept_dir(&lib, &jid).join("models/0/unique.part");
         assert!(!dir.exists());
-        assert_eq!(std::fs::read(&saved).unwrap(), b"the only copy");
+        assert_eq!(std::fs::read(&saved).unwrap().as_slice(), b"the only copy");
 
         // Ordinary later changes used to evict the journal and recursively
         // erase the only copy. Unrelated newer changes must not block restore.
@@ -169,7 +169,7 @@ mod tests {
             ).unwrap();
         }
         assert_eq!(relayout::read(&lib, &jid).unwrap()["state"], "done");
-        assert_eq!(std::fs::read(&saved).unwrap(), b"the only copy");
+        assert_eq!(std::fs::read(&saved).unwrap().as_slice(), b"the only copy");
         let brief = relayout::briefs(&lib)
             .into_iter()
             .find(|j| j["id"] == jid)
@@ -177,7 +177,7 @@ mod tests {
         assert_eq!(brief["undo"], true, "restore was blocked: {brief}");
 
         relayout::undo(&lib, &jid, &AtomicBool::new(false), &|_, _, _| {}).unwrap();
-        assert_eq!(std::fs::read(dir.join("unique.part")).unwrap(), b"the only copy");
+        assert_eq!(std::fs::read(dir.join("unique.part")).unwrap().as_slice(), b"the only copy");
         assert_eq!(Index::build(&lib, None, true).models.len(), 1);
         let _ = std::fs::remove_dir_all(root);
     }
