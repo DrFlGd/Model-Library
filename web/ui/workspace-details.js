@@ -162,7 +162,7 @@ export function WorkspaceDetails({ model, onModelChange }) {
       <${FieldInput} field=${field} value=${fields[field.key]} onChange=${(value) => updateField(field.key, value)} /></label>`)}
     ${images.length ? html`<label class="field-block"><span>Cover picture</span><select value=${form.cover} disabled=${readOnly || busy} onChange=${change("cover")}>
       <option value="">Chosen for me</option>${images.map((f) => html`<option key=${f.rel} value=${f.rel}>${f.rel}</option>`)}</select></label>` : null}
-    <label class="field-block"><span>Notes</span><textarea rows="4" value=${form.notes} disabled=${readOnly || busy} onInput=${change("notes")}></textarea></label>
+    <label class="field-block"><span>Notes</span><textarea id="workspace-edit-notes" rows="4" value=${form.notes} disabled=${readOnly || busy} onInput=${change("notes")}></textarea></label>
     ${concurrent ? html`<div class="details-conflict" role="alert" id="details-concurrent">
       <strong>Model details changed elsewhere.</strong>
       <p>Your unsaved draft is preserved. Reload the latest details, or keep your edits on top of the latest values.</p>
