@@ -1450,6 +1450,65 @@ def big_library():
     shutil.rmtree(big, ignore_errors=True)
 
 
+
+async def agent_d_reviewed_import(pg):
+    """Direct Import controls, non-destructive staging, grouped models and Undo."""
+    src = home / "Agent D collection"
+    put(src / "Terrain/Rock.stl", cube(4))
+    put(src / "Terrain/Rock.png", PNG)
+    put(src / "Terrain/Mystery.max", b"unknown model format")
+    put(src / "Terrain/Detail/body.stl", cube(2))
+    put(src / "Terrain/Detail/photo.jpg", PNG)
+    await pg.goto(B + "#/import")
+    await pg.wait_for_selector("#sort-page[data-ready]")
+    controls = ["#import-sort", "#import-folder", "#import-file", "#import-categories"]
+    direct = all([await pg.is_visible(q) for q in controls])
+    await pg.set_viewport_size({"width": 700, "height": 600})
+    narrow = all([await pg.is_visible(q) for q in controls])
+    await pg.set_viewport_size({"width": 1400, "height": 900})
+    check("Import actions are directly visible at desktop and narrow widths", direct and narrow)
+    pick(src)
+    await pg.click("#import-categories")
+    await pg.wait_for_selector("#category-import .ci-tree")
+    staged = not (library / "Agent D collection").exists()
+    await pg.fill('.ci-node[data-depth="1"] .ci-name', "Landscape")
+    await pg.locator('.ci-node[data-depth="1"] .ci-check input').check()
+    await pg.fill('.ci-node[data-depth="1"] .ci-group-name', "Terrain files")
+    await pg.click("#ci-back")
+    await pg.click("#import-categories")
+    kept = await pg.input_value('.ci-node[data-depth="1"] .ci-name') == "Landscape"
+    await pg.click("#ci-review")
+    await pg.wait_for_selector(".ci-review")
+    names = await pg.locator(".ci-destinations tbody td:first-child").all_text_contents()
+    check("staging and reopening preserve edits without creating library nodes",
+          staged and kept and not (library / "Agent D collection").exists()
+          and sorted(names) == ["Detail", "Terrain files"], names)
+    await pg.screenshot(path=str(out / "36-category-import-review.png"), full_page=True)
+    await pg.click("#ci-commit")
+    await pg.wait_for_selector(".ci-results", timeout=60000)
+    copied = (library / "Agent D collection/Landscape/Terrain files/Mystery.max").is_file()
+    nested = (library / "Agent D collection/Landscape/Detail/body.stl").is_file()
+    originals = (src / "Terrain/Mystery.max").is_file()
+    check("reviewed import copies grouped unknown formats and nested model folders",
+          copied and nested and originals, (copied, nested, originals))
+    await pg.screenshot(path=str(out / "37-category-import-complete.png"), full_page=True)
+    journals = await api(pg, "journals")
+    entry = next((j for j in journals if j["label"].startswith("Imported 2 models as categories")), None)
+    check("reviewed category import is undoable", bool(entry))
+    if entry:
+        task = await api(pg, "journal_undo", {"id": entry["id"]})
+        status = None
+        for _ in range(100):
+            status = await api(pg, "job", {"id": task["job"]})
+            if status["done"]:
+                break
+            await pg.wait_for_timeout(100)
+        check("category import Undo removes only created categories and keeps originals",
+              status["done"] and status["error"] is None and status["result"]["state"] == "undone"
+              and not (library / "Agent D collection").exists()
+              and (src / "Terrain/Rock.stl").is_file(), status)
+    await pg.click("#ci-discard")
+
 async def main():
     server = start_server()
     try:
@@ -1498,6 +1557,7 @@ async def main():
             await import_follow_ups(pg)
             await loose_workspace_checks(pg, check, library, B, api, cube, PNG, out)
             await model_workspace_extract(pg)
+            await agent_d_reviewed_import(pg)
 
             # 3. renaming the library
             await pg.click('.sidebar a[href="#/settings"]')
