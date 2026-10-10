@@ -1,0 +1,141 @@
+warning: unused import: `BTreeMap`
+ --> core/src/archive_ops.rs:8:25
+  |
+8 | use std::{collections::{BTreeMap, HashSet}, fs::{self, File}, io::{Read, Write}, path::{Path, PathBuf}, sync::atomic::{AtomicBool, Or...
+  |                         ^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> core/src/archive_ops.rs:250:13
+    |
+250 |         let mut entry = z.by_name(rel)?;
+    |             ----^^^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling modlib-core v0.5.6 (/home/runner/work/Model-Library/Model-Library/desktop/core)
+warning: `modlib-core` (lib) generated 2 warnings (run `cargo fix --lib -p modlib-core` to apply 2 suggestions)
+warning: `modlib-core` (lib test) generated 2 warnings (2 duplicates)
+    Finished `release` profile [optimized] target(s) in 32.55s
+     Running unittests src/lib.rs (target/release/deps/modlib_core-3f8107cc772a2490)
+
+running 101 tests
+test api::tests::favourites_live_in_the_library ... ok
+test api::tests::first_start_asks_where_the_library_goes ... ok
+test api::tests::library_files_stay_inside ... ok
+test api::tests::imports_as_a_job_and_moves_between_categories ... ok
+test api::tests::finds_duplicates_and_sets_copies_aside ... ok
+test api::tests::opens_renames_and_remembers_libraries ... ok
+test api::tests::renames_a_category_undoes_it_and_edits_several_models ... ok
+test api::tests::reviewed_category_import_commits_and_undoes_without_touching_staged_sources ... ok
+test api::tests::reviewed_category_import_keeps_modified_copy_on_conflicting_undo ... ok
+test api::tests::reviewed_destinations_must_not_change_after_approval ... ok
+test api::tests::schemas_models_details_and_stars ... ok
+test api::tests::interrupted_category_moves_recover_after_restart_from_each_durable_phase ... ok
+test api::tests::shows_meshes_zips_readmes_and_previews ... ok
+test api::tests::moves_imports_and_details_are_journalled_and_undone ... ok
+test api::tests::unfinished_category_import_journals_survive_history_pruning ... ok
+test archive::tests::lists_and_reads_entries ... ok
+test archive_ops::tests::cancel_and_undo_refuse_modified_output ... ok
+test archive_ops::tests::malicious_paths_and_corrupt_zip_preserve_sources ... ok
+test archive_ops::tests::opt_in_cleanup_then_extract_and_undo ... ok
+test api::tests::subcategories_are_made_kept_renamed_and_removed ... ok
+test archive_ops::tests::reviewed_plan_rejects_added_or_changed_sources ... ok
+test archive_ops::tests::reviewed_plan_rejects_replaced_zip ... ok
+test api::tests::sorts_a_folder_into_the_library_over_two_sittings ... ok
+test archive_ops::tests::recovery_sources_survive_more_than_twenty_journal_changes ... ok
+test archive_ops::tests::undo_extraction_without_source_archive_preserves_extracted_files ... ok
+test archive_ops::tests::undo_missing_recovery_refuses_to_discard_archive ... ok
+test archive_ops::tests::undo_retained_sources_refuses_to_discard_only_zip ... ok
+test category_import::tests::exclusions_and_unsafe_symlinks_are_not_silent ... ok
+test archive_ops::tests::verified_compress_keep_identity_and_hashes ... ok
+test category_import::tests::map_to_existing_requires_explicit_choice_and_detects_changed_sources ... ok
+test category_import::tests::read_only_scan_and_editable_nested_plan_preserve_files ... ok
+test docs::tests::markdown_without_raw_html ... ok
+test delete::tests::delete_and_restore_two_models_without_deleting_category ... ok
+test dupes::tests::same_prints_compares_contents ... ok
+test extract::tests::cancellation_after_first_removal_restores_every_original ... ok
+test delete::tests::deletion_remains_restorable_after_more_than_twenty_changes ... ok
+test extract::tests::cancelled_multi_file_stage_leaves_source_whole ... ok
+test dupes::tests::finds_copies_sets_them_aside_and_undoes ... ok
+test extract::tests::copy_undo_refuses_external_changes_and_newer_changes ... ok
+test extract::tests::source_without_sidecar_keeps_id_and_undo_removes_added_details ... ok
+test extract::tests::whole_model_copy_leaves_source_untouched ... ok
+test extract::tests::force_copy_move_and_exact_undo ... ok
+test extract::tests::zip_entries_copy_out_and_undo_preserves_zip ... ok
+test fileops::tests::adding_mixed_external_files_keeps_originals_and_can_undo ... ok
+test extract::tests::whole_model_move_retires_the_card_and_undo_restores_everything ... ok
+test fileops::tests::copies_and_resolves_case_insensitive_collisions ... ok
+test fileops::tests::moving_zip_entries_requires_archive_rewrite ... ok
+test fileops::tests::destination_failure_and_modified_undo_cannot_lose_files ... ok
+test import::tests::moves_models_between_categories ... ok
+test fileops::tests::sends_nested_folder_and_undoes_without_changing_target_identity ... ok
+test import::tests::plans_destinations ... ok
+test import::tests::imports_by_move_and_by_checked_copy ... ok
+test import::tests::proposes_models_from_a_messy_folder ... ok
+test index::tests::loose_files_are_only_direct_children_of_categories_and_unsorted ... ok
+test index::tests::finds_models_by_schema_depth_and_sidecars ... ok
+test index::tests::refresh_gives_a_new_sidecar_its_id ... ok
+test index::tests::searches_words_filters_and_places ... ok
+test library::tests::creates_a_library_and_keeps_its_id ... ok
+test library::tests::dates ... ok
+test library::tests::favourites_round_trip ... ok
+test library::tests::newer_format_is_read_only ... ok
+test library::tests::opening_a_folder_of_models_leaves_them_alone ... ok
+test library::tests::paths_stay_inside ... ok
+test library::tests::slugs ... ok
+test mesh::tests::reads_3mf_with_components_in_other_files ... ok
+test mesh::tests::reads_obj ... ok
+test mesh::tests::reads_stl_both_ways ... ok
+test model::tests::files_summary_and_cover ... ok
+test model::tests::kinds_by_extension ... ok
+test model::tests::lone_stl_and_zip_imports_each_have_a_model_folder ... ok
+test model::tests::loose_wrap_preserves_category_matches_longest_stem_and_undo_restores_files ... ok
+test model::tests::preview_composition_handles_zero_one_two_many_and_unknown_files ... ok
+test model::tests::sidecar_updates_keep_unknown_keys ... ok
+test relayout::tests::older_categories_with_levels_still_move ... ok
+test index::tests::cache_rereads_only_what_changed ... ok
+test relayout::tests::pruning_preserves_unfinished_and_recovery_backed_journals ... ok
+test restructure::tests::cross_category_merge_requires_explicit_collision_choice ... ok
+test relayout::tests::renames_merges_moves_edits_and_undoes ... ok
+test restructure::tests::existing_target_selection_adopts_canonical_path_case ... ok
+test restructure::tests::matching_children_at_several_depths_use_existing_target_case_and_undo ... ok
+test restructure::tests::incoming_merge_children_cannot_occupy_models_unmanaged_dirs_or_case_aliases ... ok
+test restructure::tests::merge_into_new_top_category_and_undo ... ok
+test restructure::tests::merge_into_named_new_subcategory_and_undo ... ok
+test restructure::tests::merges_into_selected_existing_category_without_replacing_its_identity ... ok
+test restructure::tests::reject_cycles_and_ancestor_sources_without_mutation ... ok
+test restructure::tests::portable_case_only_model_folder_collision_is_numbered ... ok
+test restructure::tests::remove_moves_children_up_and_undo_restores_tree_and_ids ... ok
+test restructure::tests::unsorted_removal_preserves_descendants_and_rejects_unknown_files ... ok
+test schema::tests::folder_names_are_cleaned ... ok
+test schema::tests::folder_names_parse_by_template ... ok
+test schema::tests::paths_follow_an_edit_of_the_tree ... ok
+test schema::tests::schemas_are_created_and_listed ... ok
+test restructure::tests::reparented_children_cannot_occupy_models_unmanaged_dirs_or_case_aliases ... ok
+test sort::tests::files_of_a_group_are_found_by_their_place_in_it ... ok
+test sort::tests::makes_every_folder_at_a_level_a_model ... ok
+test sort::tests::reads_a_folder_tree_as_it_is ... ok
+test sort::tests::sends_groups_joins_splits_and_keeps_choices ... ok
+test thumb::tests::draws_a_model_into_its_folder ... ok
+test watch::tests::reports_settled_changes_once_and_skips_the_apps_folder ... ok
+test index::tests::ten_thousand_models ... ok
+test api::tests::notices_folders_changed_outside_the_app ... ok
+
+test result: ok. 101 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.15s
+
+     Running unittests src/bin/modlib-cli.rs (target/release/deps/modlib_cli-e281a8ee09da76c5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests modlib_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

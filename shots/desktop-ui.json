@@ -1,0 +1,16 @@
+{
+ "report": {
+  "platform": "desktop",
+  "title": "Model Library",
+  "library": {
+   "path": "/home/runner/work/_temp/home2/Model Library",
+   "_library": true,
+   "_library/schemas": true,
+   "Unsorted": true,
+   "library.json": true
+  },
+  "settings_path": "/home/runner/work/_temp/home2/Model Library",
+  "theme": "night"
+ },
+ "failures": []
+}
