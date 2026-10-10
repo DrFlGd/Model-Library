@@ -1,0 +1,41 @@
+    Updating crates.io index
+     Locking 475 packages to highest compatible versions
+      Adding base64 v0.22.1 (available: v0.23.1)
+      Adding generic-array v0.14.7 (available: v0.14.9)
+      Adding sha2 v0.10.9 (available: v0.11.0)
+      Adding toml v0.8.2 (available: v0.8.23)
+      Adding toml_datetime v0.6.3 (available: v0.6.11)
+      Adding toml_edit v0.20.2 (available: v0.20.7)
+      Adding zip v2.4.2 (available: v9.0.1)
+ Downloading crates ...
+  Downloaded syn v3.0.7
+   Compiling syn v3.0.7
+   Compiling thiserror-impl v2.0.21
+   Compiling tokio-macros v2.7.2
+   Compiling serde_derive v1.0.229
+   Compiling displaydoc v0.2.7
+   Compiling serde v1.0.229
+   Compiling thiserror v2.0.21
+   Compiling tokio v1.53.2
+   Compiling zip v2.4.2
+   Compiling modlib-core v0.5.6 (D:\a\Model-Library\Model-Library\desktop\core)
+warning: unused import: `BTreeMap`
+ --> core\src\archive_ops.rs:8:25
+  |
+8 | use std::{collections::{BTreeMap, HashSet}, fs::{self, File}, io::{Read, Write}, path::{Path, PathBuf}, sync::atomic::{AtomicBool, Or...
+  |                         ^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> core\src\archive_ops.rs:250:13
+    |
+250 |         let mut entry = z.by_name(rel)?;
+    |             ----^^^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `modlib-core` (lib) generated 2 warnings (run `cargo fix --lib -p modlib-core` to apply 2 suggestions)
+    Finished `release` profile [optimized] target(s) in 1m 23s

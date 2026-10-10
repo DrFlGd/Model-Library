@@ -1,0 +1,131 @@
+        Info Looking up installed tauri packages to check mismatched versions...
+ Downloading crates ...
+  Downloaded cc v1.7.0
+  Downloaded serde_spanned v1.1.2
+  Downloaded smallvec v1.16.3
+  Downloaded tauri v2.12.2
+  Downloaded toml v1.1.8+spec-1.1.0
+  Downloaded toml_datetime v1.1.2+spec-1.1.0
+  Downloaded toml_writer v1.1.3+spec-1.1.0
+  Downloaded toml_parser v1.1.5+spec-1.1.0
+  Downloaded uuid v1.28.0
+   Compiling syn v3.0.7
+   Compiling smallvec v1.16.3
+   Compiling toml_parser v1.1.5+spec-1.1.0
+   Compiling toml_datetime v1.1.2+spec-1.1.0
+   Compiling parking_lot_core v0.9.12
+   Compiling serde_spanned v1.1.2
+   Compiling parking_lot v0.12.5
+   Compiling toml_writer v1.1.3+spec-1.1.0
+   Compiling string_cache v0.9.0
+   Compiling toml v1.1.8+spec-1.1.0
+   Compiling uuid v1.28.0
+   Compiling web_atoms v0.2.6
+   Compiling cfb v0.14.0
+   Compiling markup5ever v0.39.0
+   Compiling html5ever v0.39.0
+   Compiling infer v0.22.0
+   Compiling cc v1.7.0
+   Compiling synstructure v0.14.0
+   Compiling darling_core v0.24.1
+   Compiling vswhom-sys v0.1.3
+   Compiling zerofrom-derive v0.1.8
+   Compiling yoke-derive v0.8.4
+   Compiling displaydoc v0.2.7
+   Compiling zerovec-derive v0.11.6
+   Compiling serde_derive v1.0.229
+   Compiling thiserror-impl v2.0.21
+   Compiling zerofrom v0.1.8
+   Compiling yoke v0.8.3
+   Compiling zerotrie v0.2.5
+   Compiling zerovec v0.11.8
+   Compiling darling_macro v0.24.1
+   Compiling thiserror v2.0.21
+   Compiling darling v0.24.1
+   Compiling tinystr v0.8.4
+   Compiling potential_utf v0.1.6
+   Compiling serde_with_macros v3.24.0
+   Compiling icu_locale_core v2.3.0
+   Compiling icu_collections v2.3.0
+   Compiling cssparser-macros v0.7.1
+   Compiling cssparser v0.37.0
+   Compiling icu_provider v2.3.1
+   Compiling icu_normalizer v2.3.0
+   Compiling icu_properties v2.3.0
+   Compiling serde v1.0.229
+   Compiling selectors v0.38.0
+   Compiling jsonptr v0.7.1
+   Compiling indexmap v1.9.3
+   Compiling idna_adapter v1.2.2
+   Compiling cargo-platform v0.1.9
+   Compiling json-patch v4.2.0
+   Compiling dom_query v0.28.0
+   Compiling idna v1.1.0
+   Compiling cargo_metadata v0.19.2
+   Compiling url v2.5.8
+   Compiling plist v1.10.1
+   Compiling schemars v0.8.22
+   Compiling urlpattern v0.6.0
+   Compiling serde_with v3.24.0
+   Compiling vswhom v0.1.0
+   Compiling embed-resource v3.0.12
+   Compiling tauri-winres v0.3.6
+   Compiling tauri-utils v2.10.1
+   Compiling cargo_toml v1.0.1
+   Compiling webview2-com-sys v0.39.1
+   Compiling dpi v0.1.2
+   Compiling tauri-build v2.7.1
+   Compiling tauri-plugin v2.7.1
+   Compiling webview2-com v0.39.1
+   Compiling tauri v2.12.2
+   Compiling tokio-macros v2.7.2
+   Compiling tao v0.37.1
+   Compiling tokio v1.53.2
+   Compiling tauri-codegen v2.7.1
+   Compiling wry v0.57.0
+   Compiling tauri-runtime v2.12.1
+   Compiling tauri-plugin-fs v2.6.0
+   Compiling keyboard-types v0.8.3
+   Compiling serialize-to-javascript v0.1.2
+   Compiling tauri-runtime-wry v2.12.1
+   Compiling muda v0.20.0
+   Compiling tauri-macros v2.7.1
+   Compiling serde_repr v0.1.21
+   Compiling tauri-plugin-opener v2.7.0
+   Compiling tauri-plugin-dialog v2.8.1
+   Compiling zip v2.4.2
+   Compiling model-library v0.5.6 (D:\a\Model-Library\Model-Library\desktop\src-tauri)
+   Compiling modlib-core v0.5.6 (D:\a\Model-Library\Model-Library\desktop\core)
+warning: unused import: `BTreeMap`
+ --> core\src\archive_ops.rs:8:25
+  |
+8 | use std::{collections::{BTreeMap, HashSet}, fs::{self, File}, io::{Read, Write}, path::{Path, PathBuf}, sync::atomic::{AtomicBool, Or...
+  |                         ^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> core\src\archive_ops.rs:250:13
+    |
+250 |         let mut entry = z.by_name(rel)?;
+    |             ----^^^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `modlib-core` (lib) generated 2 warnings (run `cargo fix --lib -p modlib-core` to apply 2 suggestions)
+    Finished `release` profile [optimized] target(s) in 3m 39s
+       Built application at: D:\a\Model-Library\Model-Library\desktop\target\release\model-library.exe
+        Info Patching D:\a\Model-Library\Model-Library\desktop\target\release\model-library.exe with bundle type information: nsis
+        Info Verifying NSIS package
+ Downloading https://github.com/tauri-apps/binary-releases/releases/download/nsis-3.11/nsis-3.11.zip
+        Info validating hash
+        Info extracting NSIS
+ Downloading https://github.com/tauri-apps/nsis-tauri-utils/releases/download/nsis_tauri_utils-v0.5.3/nsis_tauri_utils.dll
+        Info validating hash
+        Info Target: x64
+     Running makensis to produce D:\a\Model-Library\Model-Library\desktop\target\release\bundle\nsis\Model Library_0.5.6_x64-setup.exe
+    Finished 1 bundle at:
+        D:\a\Model-Library\Model-Library\desktop\target\release\bundle\nsis\Model Library_0.5.6_x64-setup.exe (3.99 MiB)
+
