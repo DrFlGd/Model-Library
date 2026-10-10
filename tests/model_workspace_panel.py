@@ -67,12 +67,31 @@ async def panel_workspace_checks(pg, check, out=None):
 
     # The navigation and both workspace ribbons are independent.
     await pg.wait_for_selector('#details-panel-open')
+    async def settled_navigation(collapsed):
+        # Click completion does not wait for Preact or the sidebar's width
+        # transition. Observe its final state and attached edge, not a delay.
+        await pg.wait_for_function("""collapsed => {
+          const nav = document.querySelector('.sidebar');
+          const files = document.querySelector('#model-page #file-panel');
+          if (!nav || !files || nav.classList.contains('collapsed') !== collapsed) return false;
+          const edge = nav.getBoundingClientRect().right;
+          const left = files.getBoundingClientRect().left;
+          return !nav.getAnimations().some(a => a.playState === 'running' || a.pending)
+            && Math.abs(edge - left) <= 1;
+        }""", arg=collapsed)
+
+    await settled_navigation(False)
     before = await pg.locator('#file-panel').bounding_box()
     await pg.click('.nav-burger')
+    await settled_navigation(True)
     after = await pg.locator('#file-panel').bounding_box()
     check('collapsing navigation moves Files with its attached edge',
           after['x'] < before['x'] and after['x'] >= 45, (before, after))
     await pg.click('.nav-burger')
+    await settled_navigation(False)
+    expanded = await pg.locator('#file-panel').bounding_box()
+    check('expanding navigation restores the attached Files edge',
+          abs(expanded['x'] - before['x']) <= 1, (before, expanded))
 
     await pg.click('#details-panel-open')
     await pg.wait_for_selector('#workspace-edit-name')
