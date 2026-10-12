@@ -35,6 +35,7 @@ impl Model {
     }
 }
 
+#[derive(Clone)]
 pub struct Index {
     /// The library folder it was read from.
     pub root: PathBuf,

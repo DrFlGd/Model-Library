@@ -7,10 +7,11 @@ import { ctx, routeHash } from "./context.js";
 import { api, followJob, loadOverview, toast, undoable, undoChange } from "./library.js";
 import { treeList } from "./category.js";
 import { size } from "./details.js";
+import { runCheck, checkedText } from "./checking.js";
 
 export const categoryStage = createStore({
   library: null, open: false, proposal: null, plan: null,
-  mode: "copy", busy: false, error: "", results: null, job: null,
+  mode: "copy", busy: false, error: "", results: null, job: null, checking: null,
 });
 const saveKey = (path) => `ml-category-staging:${path}`;
 const save = (proposal) => {
@@ -20,6 +21,16 @@ const save = (proposal) => {
 const setProposal = (proposal) => {
   categoryStage.set({ proposal, plan: null, error: "", results: null });
   save(proposal);
+};
+// Scanning and reviewing read and hash every file: a job that shows progress and Stop.
+const check = async (cmd, args, label) => {
+  const c = runCheck(cmd, args, label, (progress) => categoryStage.set({ checking: { progress, stop: c.stop } }));
+  categoryStage.set({ checking: { progress: null, stop: c.stop } });
+  try {
+    const r = await c.done;
+    if (r === null) throw new Error("Stopped before every file was checked. Nothing was changed.");
+    return r;
+  } finally { categoryStage.set({ checking: null }); }
 };
 const run = async (name, fn) => {
   categoryStage.set({ busy: true, error: "" });
@@ -43,7 +54,7 @@ export async function openCategoryImport() {
   const picked = await ctx.platform.library.pickFolder("Choose a folder to import as categories");
   if (!picked) return;
   await run("scan", async () => {
-    const fresh = await api("category_import_scan", { paths: [picked] });
+    const fresh = await check("category_import_scan", { paths: [picked] }, "Checking the folder");
     categoryStage.set({ library: path, open: true, mode: "copy" });
     setProposal({ roots: fresh.roots });
   });
@@ -54,7 +65,7 @@ const pickMore = async () => {
   await run("scan", async () => {
     const old = categoryStage.get().proposal;
     const paths = [...(old?.roots || []).map((r) => r.source), picked];
-    const fresh = await api("category_import_scan", { paths });
+    const fresh = await check("category_import_scan", { paths }, "Checking the folders");
     const original = new Map((old?.roots || []).map((r) => [r.source, r]));
     setProposal({ roots: fresh.roots.map((r) => original.get(r.source) || r) });
   });
@@ -63,7 +74,7 @@ const reset = async () => {
   const roots = categoryStage.get().proposal?.roots;
   if (!roots?.length) return;
   await run("scan", async () => {
-    const fresh = await api("category_import_scan", { paths: roots.map((r) => r.source) });
+    const fresh = await check("category_import_scan", { paths: roots.map((r) => r.source) }, "Checking the folders");
     setProposal({ roots: fresh.roots });
   });
 };
@@ -178,7 +189,7 @@ export function CategoryImport() {
   if (!s.proposal) return null;
   const back = () => categoryStage.set({ open: false });
   const review = () => run("plan", async () => {
-    const plan = await api("category_import_plan", { proposal: s.proposal });
+    const plan = await check("category_import_plan", { proposal: s.proposal }, "Checking the import");
     categoryStage.set({ plan: { ...plan, reviewed_mode: categoryStage.get().mode } });
   });
   const commit = () => run("commit", async () => {
@@ -204,7 +215,10 @@ export function CategoryImport() {
     <div class="ci-heading"><div><h2>Import folders as categories</h2><p class="muted">Stage a folder tree, review every destination, then commit.</p></div>
       <button type="button" class="ghost" id="ci-back" onClick=${back}>Return to sorting</button></div>
     ${s.error ? html`<p class="form-error" role="alert">${s.error}</p>` : null}
-    ${s.busy ? html`<p role="status">Working… ${s.job ? html`<button type="button" class="ghost" onClick=${() => api("job_cancel", { id: s.job })}>Stop at a safe point</button>` : null}</p>` : null}
+    ${s.checking ? html`<p class="check-progress" role="status"><span class="dot busy"></span>Checking files: ${checkedText(s.checking.progress)}
+      ${s.checking.progress?.name ? html` <span class="muted">${s.checking.progress.name}</span>` : null}
+      <button type="button" class="ghost" id="check-stop" onClick=${() => s.checking.stop()}>Stop</button></p>`
+    : s.busy ? html`<p role="status">Working… ${s.job ? html`<button type="button" class="ghost" onClick=${() => api("job_cancel", { id: s.job })}>Stop at a safe point</button>` : null}</p>` : null}
     ${s.results ? html`<${Results} results=${s.results} onReset=${discard} />` : html`
       <div class="ci-toolbar">
         <button type="button" class="ghost" id="ci-add" disabled=${s.busy} onClick=${pickMore}>Add another folder…</button>

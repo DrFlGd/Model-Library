@@ -9,6 +9,7 @@ import { Dialog, close } from "./dialogs.js";
 import { CategoryPicker } from "./category.js";
 import { fileSel, pickedFiles, keyParts, clear, show } from "./filesel.js";
 import { sendFilesAction } from "./fileops.js";
+import { useCheck } from "./checking.js";
 
 export function extractionReason(src, model = src?.model, keys = fileSel.get().picked) {
   if (writable() !== true) return writable();
@@ -74,7 +75,6 @@ export function ExtractDialog({ model, keys }) {
   const [values, setValues] = useState([]);
   const [keep, setKeep] = useState(true);
   const [mode, setMode] = useState("move");
-  const [planState, setPlan] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useLayoutEffect(() => {
@@ -83,18 +83,13 @@ export function ExtractDialog({ model, keys }) {
   const selection = pickedFiles(keys);
   const args = { id: model.id, ...selection, name: name.trim(), schema, values };
   const signature = JSON.stringify(args);
-  const plan = planState?.signature === signature ? planState.plan : null;
+  const check = useCheck("model_extract_plan", args, signature, { enabled: !!args.name });
+  const plan = check.result;
   const sc = overview?.schemas?.find((s) => s.id === schema);
   const where = sc ? [sc.name, ...values].join(" › ") : "Unsorted";
   const original = overview?.schemas?.find((s) => s.id === model.schema);
   const originalPlace = original ? [original.name, ...(model.path || [])].join(" › ") : "Unsorted";
-  useLayoutEffect(() => {
-    let live = true;
-    setError("");
-    if (!args.name) { setPlan(null); return; }
-    const timer = setTimeout(() => api("model_extract_plan", args).then((p) => { if (live) setPlan({ signature, plan: p }); }, (e) => { if (live) setError(e.message || String(e)); }), 180);
-    return () => { live = false; clearTimeout(timer); };
-  }, [signature]);
+  useLayoutEffect(() => setError(""), [signature]);
   const submit = async () => {
     if (busy || !plan?.files?.length || plan.error || readOnly || !args.name) return;
     setBusy(true); setError("");
@@ -116,7 +111,7 @@ export function ExtractDialog({ model, keys }) {
     finally { setBusy(false); }
   };
   const n = plan?.files?.length || 0;
-  return html`<${Dialog} title="Make a new model" id="extract-dialog" onSubmit=${submit} busy=${busy || !n || !!plan?.error || !!readOnly} error=${error || plan?.error || (readOnly ? "The library is read-only." : "")} submitLabel=${`Make model (${n} ${n === 1 ? "file" : "files"})`}>
+  return html`<${Dialog} title="Make a new model" id="extract-dialog" onSubmit=${submit} busy=${busy || !n || !!plan?.error || !!readOnly} error=${error || check.error || plan?.error || (readOnly ? "The library is read-only." : "")} submitLabel=${`Make model (${n} ${n === 1 ? "file" : "files"})`}>
     <label class="field-block"><span>Name</span><input id="extract-name" required maxlength="200" value=${name} disabled=${busy} onInput=${(e) => setName(e.target.value)} /></label>
     <div class="field-block"><span class="field-label">Where</span>
       <label><input type="radio" name="extract-where" checked=${keep} disabled=${busy} onChange=${() => { setKeep(true); setSchema(model.schema || null); setValues([...(model.path || [])]); }} /> Keep in ${originalPlace}</label>
@@ -126,7 +121,7 @@ export function ExtractDialog({ model, keys }) {
     <label class="field-block"><span>Move or copy</span><select id="extract-mode" value=${mode} disabled=${busy} onChange=${(e) => setMode(e.target.value)}><option value="move">Move — files leave this model</option><option value="copy">Copy — keep files in both models</option></select></label>
     ${selection.entries.length ? html`<p class="muted">Selected ZIP entries are unpacked into the new model. The ZIP stays unchanged.</p>` : null}
     <div class="field-block"><span class="field-label">Preview</span>
-      ${plan ? html`<code class="preview-path" id="extract-destination">${plan.dest}/</code><ul class="extract-preview" id="extract-preview">${(plan.files || []).map((f) => html`<li key=${f.to}><code>${f.to}</code></li>`)}</ul>` : html`<p class="muted">${args.name ? "Checking the destination…" : "Enter a name to see the destination."}</p>`}
+      ${plan ? html`<code class="preview-path" id="extract-destination">${plan.dest}/</code><ul class="extract-preview" id="extract-preview">${(plan.files || []).map((f) => html`<li key=${f.to}><code>${f.to}</code></li>`)}</ul>` : check.view || html`<p class="muted">${args.name ? "Checking the destination…" : "Enter a name to see the destination."}</p>`}
     </div>
   <//>`;
 }
