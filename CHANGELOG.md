@@ -69,8 +69,14 @@ The UI pass in `docs/PLAN.md` ("UI pass design") is done: actions (0.5.1), undo 
 
 ## Unreleased
 
-- CI tests Windows only: the acceptance test now runs on Windows, and the Linux app and the Linux-to-Windows library check run only when asked for. Release notes now come from this section instead of the list of commit subjects.
 - **Big reviews show progress and can be stopped.** Before Send to another model, Add files, Delete models, Compress to ZIP or Extract archive, Make a new model and Import folders as categories show their review, every file is read and checked. That now says how many files and how much has been read, with Stop (and Check again), in the dialog and the status bar; the rest of the app stays usable meanwhile.
+
+## 0.5.7 (2026-10-12)
+
+Testing moves to Windows (the owner's main platform).
+
+- CI tests Windows only: the acceptance test now runs on Windows, and the Linux app and the Linux-to-Windows library check run only when asked for. Release notes now come from this section instead of the list of commit subjects.
+- The acceptance test runs on Windows in UTF-8 mode, and its import check no longer uses a model name that only differs in case from one already in the library (the same folder on Windows).
 
 ## 0.5.6 (2026-10-10)
 
