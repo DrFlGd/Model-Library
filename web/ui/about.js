@@ -8,6 +8,7 @@ import { ui } from "./state.js";
 import { ctx } from "./context.js";
 import { PageHead } from "./layout.js";
 
+const OS = { windows: "Windows", linux: "Linux", macos: "macOS" };
 const RELEASES = "https://github.com/DrFlGd/Model-Library/releases";
 
 export const TREE = `_library/                  the app's own files
@@ -120,7 +121,7 @@ export function About() {
   const b = files?.build;
   const rows = [
     ["Model Library", version || "unknown"],
-    ["Running on", info.os || "unknown"],
+    ["Running on", OS[info.os] || info.os || "unknown"],
     ["Library format", `${info.library_format ?? "?"} (this app writes)${lib?.format != null ? ` · the open library: ${lib.format}` : ""}`],
     ...(b ? [["Built", [b.date, b.commit].filter(Boolean).join(" · ")]] : []),
     ...(b?.parts || []).map((p) => [p.name, p.version]),

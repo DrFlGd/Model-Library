@@ -1,4 +1,6 @@
-// An in-place editor for the model workspace's right Details ribbon.
+// An in-place editor for the model workspace's right Details ribbon. As in the
+// library's details panel, leaving a box (or Enter in a one-line box) saves it,
+// with Undo in the message; Esc puts back what hasn't been saved.
 import { html, useState, useEffect, useLayoutEffect, useRef } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui } from "./state.js";
@@ -74,6 +76,10 @@ export function WorkspaceDetails({ model, onModelChange }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const errorRef = useRef(null);
+  // save() runs from focus and key events, after the render that took the
+  // last keystroke; it reads the newest state from here.
+  const now = useRef(null);
+  now.current = { editor, latest, dirty, concurrent, busy };
 
   useLayoutEffect(() => {
     setEditor((prior) => {
@@ -119,11 +125,13 @@ export function WorkspaceDetails({ model, onModelChange }) {
       baseline: latest, modelId: model.id,
     });
     setError("");
+    setTimeout(save);
   };
 
-  const submit = async (event) => {
-    event.preventDefault();
+  const save = async () => {
+    const { editor: draft, dirty, concurrent, busy } = now.current;
     if (busy || readOnly || !dirty || concurrent) return;
+    const { form, fields, baseline } = draft;
     setBusy(true); setError("");
     try {
       // Check once more immediately before writing. A newer watcher response
@@ -131,7 +139,7 @@ export function WorkspaceDetails({ model, onModelChange }) {
       const fresh = await api("model_get", { id: model.id });
       if (!sameDetails(detailsSnapshot(fresh), baseline)) {
         onModelChange?.(fresh);
-        setError("The model changed before Save. Review the new values before trying again.");
+        setError("The model changed before your change was saved. Choose which details to keep below.");
         return;
       }
       const patch = { ...form, fields: { ...(fresh.fields || {}), ...fields } };
@@ -142,7 +150,12 @@ export function WorkspaceDetails({ model, onModelChange }) {
       // the page's model with a partial object.
       const full = await api("model_get", { id: result.id });
       const saved = detailsSnapshot(full);
-      setEditor({ ...saved, baseline: saved, modelId: full.id });
+      // Keep anything typed while it saved, on top of what was saved.
+      setEditor((s) => ({
+        form: rebaseEditedFields(form, s.form, saved.form),
+        fields: rebaseEditedFields(fields, s.fields, saved.fields),
+        baseline: saved, modelId: full.id,
+      }));
       // Saving can give a legacy model its first persistent ID. Clear the
       // navigation guard before the existing follow-IDs route replacement.
       ui.set({ workspaceDirty: false });
@@ -156,24 +169,32 @@ export function WorkspaceDetails({ model, onModelChange }) {
     }
   };
   const images = (model.files_list || []).filter((f) => f.kind === "image");
-  return html`<form class="workspace-details-form" id="workspace-details-form" onSubmit=${submit} aria-label="Edit model details">
+  const field = (t) => ["INPUT", "SELECT", "TEXTAREA"].includes(t?.tagName);
+  const leave = (e) => { if (field(e.target)) setTimeout(save); };
+  const key = (e) => {
+    if (!field(e.target)) return;
+    if (e.key === "Escape" && now.current.dirty) { e.preventDefault(); e.stopPropagation(); discard(); }
+    else if (e.key === "Enter" && e.target.tagName === "INPUT") { e.preventDefault(); setTimeout(save); }
+  };
+  return html`<form class="workspace-details-form" id="workspace-details-form" onSubmit=${(e) => { e.preventDefault(); setTimeout(save); }} onfocusout=${leave} onKeyDown=${key}
+    aria-label="Edit model details" data-dirty=${dirty ? "true" : "false"} data-blocked=${concurrent ? "true" : "false"} aria-busy=${busy ? "true" : "false"}>
     <${Cover} model=${model} cls="insp-thumb" />
     <p class="insp-sub"><${PlaceLinks} m=${model} overview=${overview} /></p>
-    <p class="muted details-save-note">Changes are saved only when you choose Save; closing Details keeps your draft.</p>
-    <label class="field-block"><span>Name</span><input id="workspace-edit-name" required maxlength="200" type="text" value=${form.name} disabled=${readOnly || busy} onInput=${change("name")} /></label>
-    <label class="field-block"><span>Authors</span><input id="workspace-edit-authors" type="text" placeholder="Separate several with commas" value=${form.authors} disabled=${readOnly || busy} onInput=${change("authors")} /></label>
-    <label class="field-block"><span>Released</span><input type="date" value=${form.released} disabled=${readOnly || busy} onInput=${change("released")} /></label>
-    <label class="field-block"><span>Licence</span><input type="text" value=${form.license} disabled=${readOnly || busy} onInput=${change("license")} /></label>
-    <label class="field-block"><span>Source</span><input type="url" placeholder="https://…" value=${form.source} disabled=${readOnly || busy} onInput=${change("source")} /></label>
-    <label class="field-block"><span>Tags</span><input id="workspace-edit-tags" type="text" placeholder="tag one, tag two" value=${form.tags} disabled=${readOnly || busy} onInput=${change("tags")} /></label>
+    <p class="muted details-save-note">${readOnly ? "This library is read-only." : "Changes are saved when you leave a box. Esc puts it back."}</p>
+    <label class="field-block"><span>Name</span><input id="workspace-edit-name" required maxlength="200" type="text" value=${form.name} disabled=${readOnly} onInput=${change("name")} /></label>
+    <label class="field-block"><span>Authors</span><input id="workspace-edit-authors" type="text" placeholder="Separate several with commas" value=${form.authors} disabled=${readOnly} onInput=${change("authors")} /></label>
+    <label class="field-block"><span>Released</span><input type="date" value=${form.released} disabled=${readOnly} onInput=${change("released")} /></label>
+    <label class="field-block"><span>Licence</span><input type="text" value=${form.license} disabled=${readOnly} onInput=${change("license")} /></label>
+    <label class="field-block"><span>Source</span><input type="url" placeholder="https://…" value=${form.source} disabled=${readOnly} onInput=${change("source")} /></label>
+    <label class="field-block"><span>Tags</span><input id="workspace-edit-tags" type="text" placeholder="tag one, tag two" value=${form.tags} disabled=${readOnly} onInput=${change("tags")} /></label>
     ${(schema?.fields || []).map((field) => html`<label class="field-block" key=${field.key}><span>${field.label}</span>
       <${FieldInput} field=${field} value=${fields[field.key]} onChange=${(value) => updateField(field.key, value)} /></label>`)}
-    ${images.length ? html`<label class="field-block"><span>Cover picture</span><select value=${form.cover} disabled=${readOnly || busy} onChange=${change("cover")}>
+    ${images.length ? html`<label class="field-block"><span>Cover picture</span><select value=${form.cover} disabled=${readOnly} onChange=${change("cover")}>
       <option value="">Chosen for me</option>${images.map((f) => html`<option key=${f.rel} value=${f.rel}>${f.rel}</option>`)}</select></label>` : null}
-    <label class="field-block"><span>Notes</span><textarea id="workspace-edit-notes" rows="4" value=${form.notes} disabled=${readOnly || busy} onInput=${change("notes")}></textarea></label>
+    <label class="field-block"><span>Notes</span><textarea id="workspace-edit-notes" rows="4" value=${form.notes} disabled=${readOnly} onInput=${change("notes")}></textarea></label>
     ${concurrent ? html`<div class="details-conflict" role="alert" id="details-concurrent">
       <strong>Model details changed elsewhere.</strong>
-      <p>Your unsaved draft is preserved. Reload the latest details, or keep your edits on top of the latest values.</p>
+      <p>Your change isn't saved yet. Use the latest details, or keep your edits on top of them (that saves them).</p>
       ${overlaps.length ? html`<p><strong>Both versions changed:</strong> ${overlaps.join(", ")}. Keeping yours will overwrite these particular values.</p>` : null}
       <div class="details-conflict-actions">
         <button type="button" class="ghost" id="details-load-latest" disabled=${busy} onClick=${discard}>Use latest details</button>
@@ -181,10 +202,5 @@ export function WorkspaceDetails({ model, onModelChange }) {
       </div>
     </div>` : null}
     ${error ? html`<p class="form-error" role="alert" tabindex="-1" ref=${errorRef}>${error}</p>` : null}
-    <div class="workspace-details-actions">
-      <button type="button" class="ghost" disabled=${busy || !dirty} onClick=${discard}>Cancel changes</button>
-      <button type="submit" class="primary" disabled=${busy || readOnly || !dirty || concurrent}>${busy ? "Saving…" : "Save"}</button>
-    </div>
-    ${readOnly ? html`<p class="muted">This library is read-only.</p>` : null}
   </form>`;
 }

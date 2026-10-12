@@ -136,7 +136,7 @@ export function DuplicatesPage() {
    <div class="pages dupes-page">
     <${PageHead} title="Duplicates" count=${count}
       sub="Models whose 3D, slicer and archive files are all the same as another model's, and files found in more than one model. Files are compared by what's in them, not by their names.">
-      <button type="button" class="primary" id="dupes-find" disabled=${busy} onClick=${find}>${Icon.search(15)} Look for duplicates</button>
+      <button type="button" class=${data?.found ? "ghost" : "primary"} id="dupes-find" disabled=${busy} onClick=${find}>${Icon.search(15)} Look for duplicates</button>
     </${PageHead}>
     ${error ? html`<p class="warn-note" role="alert">${error}</p>` : null}
     ${job ? html`<div class="home-actions"><span class="dupes-progress" id="dupes-progress" role="status">${progressText(job.progress)}</span>

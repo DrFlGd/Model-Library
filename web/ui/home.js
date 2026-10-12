@@ -145,7 +145,7 @@ export function Home() {
   }
   const count = ov ? html`<span class="page-count" id="home-counts">${plural(ov.all, "model", "models")}${ov.unsorted ? `, ${ov.unsorted} unsorted` : ""}</span>` : null;
   return html`<div class="home">
-    <${PageHead} title=${lib.name} count=${count} sub=${html`Your library is in <b>${lib.path}</b>. How its folders are laid out is in Settings.`}
+    <${PageHead} title=${lib.name} count=${count} sub=${html`Your library is in <b>${lib.path}</b>. How its folders are laid out is in <a href="#/about" id="home-layout-link">About</a>.`}
       menu=${{ id: "library-menu", label: "Library", icon: "folder", title: "Show in folder, read again, make previews, open another library", items: () => libraryItems(lib) }} />
     ${s.error ? html`<p class="warn-note" role="alert">${s.error}</p>` : null}
     ${lib.read_only ? html`<p class="warn-note" role="alert">${lib.read_only}</p>` : null}

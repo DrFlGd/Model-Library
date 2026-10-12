@@ -69,6 +69,16 @@ Jerred's second round of requirements (R1–R17, `docs/PLAN.md`, "Requirements r
 
 ## Unreleased
 
+Fixes from the first UI review of 0.5.9 (Requirements round 2, R17; design in docs/PLAN.md, "UI review 1 (0.5.10)").
+
+- **Details on a model's page save when you leave a box** (or press Enter), with Undo in the message, as in the library's details panel; Esc puts the box back. Save and Cancel changes are gone. A change that clashes with a newer one made elsewhere still isn't saved until you choose Use latest details or Keep my edits.
+- **The same words for the same thing:** Select shown (n) and Select all (n) in the file panel and the viewing area; Make a model… for selected files and Make this folder a model / Make every folder here a model on Import; Category, Start over and Close without importing in Import folders as categories; Edit details… with its dots on Import.
+- **A model's page:** the file panel's views are Folders, All files and By type (only the viewing area has List), and a model with more than three variants picks one from a menu instead of a row of buttons that wrapped.
+- **Fixes:** Save and Cancel stay at the foot of a long dialog (Edit category hid them below the window); messages sit above the viewer's bar, Import's Move/Copy bar and the status bar; Home points to About for the folder layout; "All 2 entrys" now counts files and folders; About names the system properly (Windows).
+- **One yellow button at a time:** Sort a folder… on Import only while the workspace is empty, and Import n models only while nothing is selected (Set category is the next step then); Look for duplicates only until it has looked.
+
+## 0.5.9 (2026-10-12)
+
 Group 1 of the second round of requirements (design in docs/PLAN.md, "Requirements round 2" and "Group 1 design").
 
 - **The same file actions in every view of a model**: Make a new model… and Send to another model… are on the right-click menu of the viewing area's grid and list (Send was missing there), the file panel and the selection bar, and now also in the Unsorted preview beside the collection, which gets the selection bar too.

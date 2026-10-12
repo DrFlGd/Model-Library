@@ -122,7 +122,7 @@ function Node({ node, rootIndex, indexes = [], depth = 0, overview, rootTarget, 
         disabled=${locked} onInput=${(e) => update({ name: e.target.value })} />
       ${folder && !root ? html`<select aria-label=${`Treat ${node.name} as`} value=${node.kind} disabled=${locked}
         onChange=${(e) => update({ kind: e.target.value, map_to: null })}>
-        <option value="category">Category container</option><option value="model">One model (with its folders)</option>
+        <option value="category">Category</option><option value="model">A model (with its folders)</option>
       </select>` : null}
       <span class="muted ci-size">${size(node.bytes || 0)}</span>
     </div>
@@ -144,7 +144,7 @@ function Node({ node, rootIndex, indexes = [], depth = 0, overview, rootTarget, 
         ${node.group ? html`<input class="ci-group-name" type="text" aria-label="Grouped model name" placeholder="Model name" value=${node.group_name || ""}
           onInput=${(e) => update({ group_name: e.target.value })} />` : null}` : null}
     </div>` : null}
-    ${folder && model ? html`<p class="ci-note" style=${`--ci-depth:${depth + 1}`}>All ${plural((node.children || []).length, "entry")} stay inside this model, including its internal folders and companion files.</p>` : null}
+    ${folder && model ? html`<p class="ci-note" style=${`--ci-depth:${depth + 1}`}>${(node.children || []).length === 1 ? "Its one file or folder stays" : `All ${(node.children || []).length} of its files and folders stay`} inside this model, including the folders inside them.</p>` : null}
     ${folder && !model && node.children?.length ? html`<ol class="ci-children">
       ${node.children.map((child, i) => html`<${Node} key=${child.source} node=${child} rootIndex=${rootIndex}
         indexes=${[...indexes,i]} depth=${depth + 1} overview=${overview} rootTarget=${rootTarget} inherited=${locked} />`)}
@@ -222,8 +222,8 @@ export function CategoryImport() {
     ${s.results ? html`<${Results} results=${s.results} onReset=${discard} />` : html`
       <div class="ci-toolbar">
         <button type="button" class="ghost" id="ci-add" disabled=${s.busy} onClick=${pickMore}>Add another folder…</button>
-        <button type="button" class="ghost" id="ci-rescan" disabled=${s.busy} onClick=${reset}>Scan again (reset edits)</button>
-        <button type="button" class="ghost" id="ci-discard" disabled=${s.busy} onClick=${discard}>Discard stage</button>
+        <button type="button" class="ghost" id="ci-rescan" disabled=${s.busy} onClick=${reset} title="Read the folder again and drop the changes made here">Start over</button>
+        <button type="button" class="ghost" id="ci-discard" disabled=${s.busy} onClick=${discard}>Close without importing</button>
       </div>
       <${Proposal} proposal=${s.proposal} overview=${overview} />
       <div class="ci-footer">

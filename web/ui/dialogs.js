@@ -32,10 +32,12 @@ export function Dialog({ title, id, onSubmit, busy, error, submitLabel, danger =
       <div class="dialog-head"><h2>${title}</h2>
         <button type="button" class="ghost" aria-label="Close" title="Close (Esc)" onClick=${close}>${Icon.close(15)}</button></div>
       ${children}
-      ${error ? html`<p class="form-error" role="alert">${error}</p>` : null}
-      <div class="dialog-actions">
-        <button type="button" class="ghost" onClick=${close}>Cancel</button>
-        <button type="submit" class=${danger ? "primary danger" : "primary"} disabled=${busy}>${submitLabel}</button>
+      <div class="dialog-foot">
+        ${error ? html`<p class="form-error" role="alert">${error}</p>` : null}
+        <div class="dialog-actions">
+          <button type="button" class="ghost" onClick=${close}>Cancel</button>
+          <button type="submit" class=${danger ? "primary danger" : "primary"} disabled=${busy}>${submitLabel}</button>
+        </div>
       </div>
     </form>
   </div>`;
