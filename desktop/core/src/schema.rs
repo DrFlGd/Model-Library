@@ -783,7 +783,7 @@ pub fn edited(lib: &Library, old: &Schema, spec: &Value) -> Result<(Value, Vec<R
 
 /// Icons follow their subcategory through an edit: a renamed or moved one keeps
 /// its icon, a removed one loses it (see [`set_icon`]).
-fn carry_icons(v: &mut Value, maps: &[Remap]) {
+pub fn carry_icons(v: &mut Value, maps: &[Remap]) {
     let Some(old) = v["icons"].as_object().cloned() else {
         return;
     };

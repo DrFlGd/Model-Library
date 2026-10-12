@@ -33,9 +33,13 @@ function Title({ scope, overview }) {
   const [id, ...values] = scope.slice(7).split("/").map(decodeURIComponent);
   const schema = overview?.schemas?.find((s) => s.id === id);
   const crumbs = [[schema?.name || id, []], ...values.map((v, i) => [v, values.slice(0, i + 1)])];
-  const icon = iconOf(schema, values);
-  return html`<h1 class="crumbs">${icon ? html`<${CatIcon} icon=${icon} size=${22} />` : null}${crumbs.map(([label, path], i) => html`${i ? html`<span class="crumb-sep"> › </span>` : null}${
-    i === crumbs.length - 1 ? label : html`<a href=${routeHash(`browse:${schemaScope(id, path)}`)}>${label}</a>`}`)}</h1>`;
+  // the place's own name large, the categories above it as a smaller line of links
+  const [label] = crumbs[crumbs.length - 1];
+  const up = crumbs.slice(0, -1);
+  return html`<div class="title-stack">
+    ${up.length ? html`<p class="crumbs-up" id="crumbs-up">${up.map(([name, path], i) => html`${i ? html`<span class="crumb-sep"> › </span>` : null}<a href=${routeHash(`browse:${schemaScope(id, path)}`)}>${name}</a>`)}</p>` : null}
+    <h1 class="crumbs" title=${crumbs.map(([n]) => n).join(" › ")}><${CatIcon} icon=${iconOf(schema, values)} size=${22} fallback="layers" /><span class="crumbs-name">${label}</span></h1>
+  </div>`;
 }
 
 /** The place's name in words (the last of its crumbs). */
@@ -68,7 +72,7 @@ function placeOf(scope, overview) {
   return { schema, path, node };
 }
 
-const SHOW = [["subs", "Subcategories", "layers"], ["models", "Models", "grid"]];
+const SHOW = [["subs", "Subcategories", "layers"], ["models", "Models", "box"]];
 
 /** A subcategory as a tile: its icon, name, how many models it holds, and four of their covers (R3). */
 function SubTile({ schema, path, node, rev }) {
@@ -86,7 +90,7 @@ function SubTile({ schema, path, node, rev }) {
     onContextMenu=${(e) => openMenu(e, categoryItems(schema.id, path))}
     onKeyDown=${(e) => { if ((e.shiftKey && e.key === "F10") || e.key === "ContextMenu") { e.preventDefault(); e.stopPropagation(); openMenu(e.currentTarget, categoryItems(schema.id, path)); } }}>
     <span class=${`subcat-pics subcat-pics-${Math.max(1, models?.length || 0)}`}>${models?.length
-      ? models.map((m) => html`<${Cover} key=${m.id} model=${m} cls="subcat-pic" />`)
+      ? models.map((m) => html`<${Cover} key=${m.id} model=${m} cls="subcat-pic" single=${true} />`)
       : html`<span class="subcat-empty">${icon ? html`<${CatIcon} icon=${icon} size=${34} />` : Icon.folder(34)}</span>`}</span>
     <span class="subcat-name">${icon ? html`<${CatIcon} icon=${icon} size=${15} />` : null}<span>${node.value}</span></span>
     <span class="subcat-meta">${node.count} ${node.count === 1 ? "model" : "models"}${subs ? ` · ${subs} ${subs === 1 ? "subcategory" : "subcategories"}` : ""}</span>
@@ -194,6 +198,14 @@ export function Browser() {
     api("models_query", { scope, q, sort: s.sort, limit, direct }).then((r) => { if (n === seq.current) setResult({ ...r, q, scope, direct }); },
       (e) => { if (n === seq.current) { setResult({ total: 0, items: [], facets: {}, q, scope, direct, error: e.message || String(e) }); } });
   }, [scope, s.q, s.sort, limit, s.rev, s.favs.length, s.library?.path, direct]);
+  // what the summary beside the tiles describes: everything below, not only the models filed here
+  const [whole, setWhole] = useState(null);
+  useEffect(() => {
+    if (!s.library || !direct) return;
+    let live = true;
+    api("models_query", { scope, q: "", sort: s.sort, limit: 1 }).then((r) => { if (live) setWhole({ ...r, scope }); }, () => {});
+    return () => { live = false; };
+  }, [scope, direct, s.rev, s.library?.path]);
   // typing searches after a short pause
   useEffect(() => {
     if (text === s.q) return;
@@ -276,9 +288,9 @@ export function Browser() {
           <input id="search" data-search type="search" value=${text} placeholder="Search names, authors, tags… or author:jo tag:presupported" autocomplete="off" spellcheck="false"
             title="Search (/)" onInput=${(e) => setText(e.target.value)} /></label>
         <${SortMenu} id="sort" options=${SORTS} value=${s.sort} onChange=${(v) => setPref({ sort: v })} />
-        ${subs.length ? html`<${ViewSwitch} id="cat-show" label="Show" views=${SHOW} value=${show} onChange=${(v) => setPref({ catShow: { ...catShow, [scope]: v } })} />` : null}
+        ${subs.length ? html`<${ViewSwitch} id="cat-show" label="Show" views=${SHOW} value=${s.q ? "models" : show} onChange=${(v) => setPref({ catShow: { ...catShow, [scope]: v } })} />` : null}
         ${previewNarrow && unsortedOne ? html`<button type="button" class="ghost" id="unsorted-preview-open" onClick=${() => { ui.set({ navOpen: false }); setPreviewOpen(true); }}>Preview files</button>` : null}
-        <${ViewSwitch} views=${VIEWS} value=${s.layout === "list" ? "list" : "grid"} onChange=${(v) => setPref({ layout: v })} />
+        <${ViewSwitch} id="layout-switch" views=${VIEWS} value=${s.layout === "list" ? "list" : "grid"} onChange=${(v) => setPref({ layout: v })} />
       </div>
       ${chips.length ? html`<div class="filters" aria-label="Narrow down">${chips.map(([k, f]) => {
         const on = isOn(k, f.value);
@@ -286,10 +298,11 @@ export function Browser() {
           onClick=${() => toggleFilter(k, f.value)} title=${on ? "Show them all again" : `Only ${k === "author" ? "by" : "tagged"} ${f.value}`}>${k === "tag" ? "#" : ""}${f.value} ${on ? html`<span aria-hidden="true">×</span>` : html`<span class="muted">${f.count}</span>`}</button>`;
       })}</div>` : null}
       <div class="browse-scroll">
-        <${SearchNote} q=${s.q} found=${fresh ? `${fresh.total} found in ${name}` : ""} wider=${wider} onClear=${() => { setText(""); ui.set({ q: "" }); }} />
+        <${SearchNote} q=${s.q} found=${fresh ? `${fresh.total} found in ${name}${subs.length ? " and its subcategories" : ""}` : ""} wider=${wider} onClear=${() => { setText(""); ui.set({ q: "" }); }} />
         ${result?.error ? html`<p class="warn-note" role="alert">${result.error}</p>` : null}
         ${direct ? html`<div class="subcat-tiles" id="subcat-tiles" aria-label="Subcategories">${subs.map((n) => html`<${SubTile} key=${n.value} schema=${place.schema} path=${[...place.path, n.value]} node=${n} rev=${s.rev} />`)}</div>
-          ${items.length ? html`<h2 class="here-head" id="here-head">Here in ${name}</h2>` : null}` : null}
+          ${items.length ? html`<h2 class="here-head" id="here-head">Here in ${name}</h2>` : null}
+          ${result && !place.node.count ? html`<div class="empty" id="no-results">${emptyNote}</div>` : null}` : null}
         ${result && !items.length && !result.error && !direct ? html`<div class="empty" id="no-results">${emptyNote}</div>` : null}
         ${s.layout === "list" && items.length ? html`<${ListHead} sort=${s.sort} />` : null}
         <div class=${`results ${s.layout === "list" ? "list-view" : "grid-view"}${picked.length > 1 ? " picking" : ""}`} role="listbox" aria-multiselectable="true" aria-label="Models">
@@ -300,7 +313,7 @@ export function Browser() {
     </div>
     ${picked.length > 1 ? html`<${SelectedPanel} models=${picked} />`
       : unsortedOne ? (!previewNarrow || previewOpen ? html`<${UnsortedPreview} key=${picked[0].id} id=${picked[0].id} narrow=${previewNarrow} onClose=${() => setPreviewOpen(false)} />` : null)
-      : html`<${ModelDetails} id=${picked[0]?.id || null} empty=${html`<${PlaceSummary} name=${name} result=${fresh} />`} />`}
+      : html`<${ModelDetails} id=${picked[0]?.id || null} empty=${html`<${PlaceSummary} name=${name} result=${direct ? (fresh && whole?.scope === scope ? whole : null) : fresh} here=${direct && fresh ? fresh.total : null} />`} />`}
     ${previewNarrow && previewOpen && unsortedOne ? html`<button type="button" class="preview-shade" aria-label="Close model preview" onClick=${() => setPreviewOpen(false)}></button>` : null}
   </div>`;
 }

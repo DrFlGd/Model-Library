@@ -160,7 +160,7 @@ fn owned_contents(lib: &Library, ix: &Index, source: &Node, old: &Schema) -> Res
             let mut child = at.to_vec();
             child.push(name);
             if !ty.is_dir() {
-                bail!("{} contains a file outside any model. Move it into a model before restructuring.", dir.display());
+                bail!("{} has a file that isn't in a model ({}). Make a model of it or move it out, then try again.", dir.display(), e.file_name().to_string_lossy());
             }
             if contains(tree, &child) {
                 let (n, b) = walk(lib, ix, old, tree, &child, &e.path())?;
@@ -174,7 +174,7 @@ fn owned_contents(lib: &Library, ix: &Index, source: &Node, old: &Schema) -> Res
                 counts.0 += n;
                 counts.1 += b;
             } else {
-                bail!("Unindexed folder {} must be reviewed before restructuring.", e.path().display());
+                bail!("The folder {} isn't a model or a subcategory. Make it a model or move it out, then try again.", e.path().display());
             }
         }
         Ok(counts)
@@ -183,6 +183,15 @@ fn owned_contents(lib: &Library, ix: &Index, source: &Node, old: &Schema) -> Res
         bail!("The source category folder is missing or linked: {}.", dir.display());
     }
     walk(lib, ix, old, &tree, &source.path, &dir)
+}
+
+/// Refuse a change that would leave files behind: everything in a subcategory's
+/// folder must be in a model or a subcategory below it (used by Rename or move).
+pub fn check_contents(lib: &Library, ix: &Index, old: &Schema, path: &[String]) -> Result<()> {
+    let source = Node { schema: old.id.clone(), path: path.to_vec() };
+    let dir = path.iter().fold(lib.root().join(&old.folder), |p, n| p.join(n));
+    if !dir.exists() { return Ok(()); }
+    owned_contents(lib, ix, &source, old).map(|_| ())
 }
 
 /// Validate node references and proposed paths without a filesystem write. Also
@@ -417,6 +426,9 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
             "to": format!("{} › {}", target_id, to.join(" › "))
         })).collect()
     };
+    let removed: Vec<Node> = sources.iter()
+        .filter(|s| !(merging && s.schema == target_id && same(&s.path, &target_path))).cloned().collect();
+    carry_icons(&old, &mut after, &removed, &mapped, if merging { &target_id } else { &sources[0].schema }, operation == "remove-up");
     let mut moves = vec![];
     let mut taken: HashSet<PathBuf> = HashSet::new();
     for m in &ix.models {
@@ -470,6 +482,42 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
         "operation": operation, "schemas": schemas, "moves": moves, "nodes": nodes,
         "files": sizes.0, "bytes": sizes.1, "child_collisions": node_collisions,
         "target_path": target_path, "node_mappings": node_mappings }))
+}
+
+/// Icons follow their subcategories (docs/PLAN.md, "UI review 2"): kept where a
+/// node stays, carried along `mapped` to where it went (a target keeps its own),
+/// and dropped with a node that is really gone. The node being removed doesn't
+/// hand its icon to the parent it empties into.
+fn carry_icons(
+    old: &BTreeMap<String, Value>, after: &mut BTreeMap<String, Value>,
+    sources: &[Node], mapped: &[(String, Vec<String>, Vec<String>)], target: &str, up: bool,
+) {
+    let icon_of = |sid: &str, p: &[String]| old.get(sid).and_then(|v| v["icons"].get(p.join("/"))).cloned();
+    let mut icons: BTreeMap<String, serde_json::Map<String, Value>> = BTreeMap::new();
+    for (sid, v) in after.iter() {
+        if v.is_null() { continue; }
+        let tree = schema::subcategories(v);
+        let kept = old.get(sid).and_then(|o| o["icons"].as_object()).into_iter().flatten()
+            .filter(|(key, _)| {
+                let p: Vec<String> = if key.is_empty() { vec![] } else { key.split('/').map(String::from).collect() };
+                !sources.iter().any(|s| &s.schema == sid && schema::starts_with(&p, &s.path))
+                    && (p.is_empty() || contains(&tree, &p))
+            })
+            .map(|(k, i)| (k.clone(), i.clone()));
+        icons.insert(sid.clone(), kept.collect());
+    }
+    for (sid, from, to) in mapped {
+        if up && sources.iter().any(|s| &s.schema == sid && same(&s.path, from)) { continue; }
+        if let (Some(icon), Some(set)) = (icon_of(sid, from), icons.get_mut(target)) {
+            set.entry(to.join("/")).or_insert(icon);
+        }
+    }
+    for (sid, set) in icons {
+        let v = after.get_mut(&sid).unwrap();
+        if let Some(o) = v.as_object_mut() {
+            if set.is_empty() { o.shift_remove("icons"); } else { o.insert("icons".into(), Value::Object(set)); }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -777,6 +825,46 @@ mod tests {
         assert!(plan(&lib,&ix,&json!({"operation":"merge","sources":[
             {"schema":"one","path":["Parent"]},{"schema":"one","path":["Parent","Child"]}],
             "target":{"schema":"one","path":[]}})).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn icons_follow_rename_remove_and_merge() {
+        let root = temp_dir("icons-follow");
+        let lib = Library::open(&root).unwrap();
+        let sid = schema::create(&lib, &json!({"name":"Home", "subcategories":[
+            {"name":"Kitchen","subcategories":[{"name":"Cups"}]}, {"name":"Office"}, {"name":"Den"}]})).unwrap().id;
+        let p = |x: &[&str]| x.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        for (path, icon) in [(p(&["Kitchen"]), "builtin:cup"), (p(&["Kitchen", "Cups"]), "builtin:star"),
+                             (p(&["Office"]), "builtin:lamp"), (p(&["Den"]), "builtin:chair")] {
+            schema::set_icon(&lib, &sid, &path, Some(icon), None).unwrap();
+        }
+        file(&root, "Home/Kitchen/Cups/Mug/mug.stl");
+        let icons = || schema::list(&lib).into_iter().find(|s| s.id == sid).unwrap().to_json()["icons"].clone();
+        // Rename or move: the icon goes with the name, the old name keeps none
+        let run = |c: Value| {
+            let ix = Index::build(&lib, None, true);
+            let plan = relayout::plan(&lib, &ix, &c).unwrap();
+            let id = relayout::start(&lib, &plan).unwrap();
+            assert_eq!(relayout::apply(&lib, &id, &AtomicBool::new(false), &|_,_,_|{}).unwrap()["state"], "done");
+            id
+        };
+        let renamed = run(json!({"kind":"category","schema":sid,"from":["Kitchen"],"to":["Galley"]}));
+        assert_eq!(icons(), json!({"Galley":"builtin:cup","Galley/Cups":"builtin:star","Office":"builtin:lamp","Den":"builtin:chair"}));
+        relayout::undo(&lib, &renamed, &AtomicBool::new(false), &|_,_,_|{}).unwrap();
+        assert_eq!(icons()["Kitchen"], json!("builtin:cup"));
+        // a loose file in the folder stops a rename rather than being left behind
+        std::fs::write(root.join("Home/Kitchen/notes.txt"), "keep").unwrap();
+        let ix = Index::build(&lib, None, true);
+        let err = relayout::plan(&lib, &ix, &json!({"kind":"category","schema":sid,"from":["Kitchen"],"to":["Galley"]})).unwrap_err();
+        assert!(err.to_string().contains("notes.txt"), "{err}");
+        std::fs::remove_file(root.join("Home/Kitchen/notes.txt")).unwrap();
+        // Remove (up a level): its children keep theirs, the parent doesn't inherit its icon
+        execute(&lib, json!({"operation":"remove-up", "source":{"schema":sid,"path":["Kitchen"]}}));
+        assert_eq!(icons(), json!({"Cups":"builtin:star","Office":"builtin:lamp","Den":"builtin:chair"}));
+        // Merge: the target keeps its own icon
+        execute(&lib, json!({"operation":"merge", "sources":[{"schema":sid,"path":["Office"]},{"schema":sid,"path":["Den"]}],
+            "target":{"schema":sid,"path":["Den"]}}));
+        assert_eq!(icons(), json!({"Cups":"builtin:star","Den":"builtin:chair"}));
         std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -10,6 +10,7 @@ import { api, isDesktop, openLibrary, showLibraryFolder, rescan, followJob, load
 import { sortFolder } from "./sort.js";
 import { Cover } from "./details.js";
 import { PageHead } from "./layout.js";
+import { CatIcon, iconOf } from "./caticons.js";
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
@@ -126,7 +127,7 @@ function Waiting({ lib, ov }) {
 function Categories({ ov }) {
   return html`<section class="home-card" id="home-categories">
     <h2>Categories</h2>
-    ${ov.schemas.length ? html`<ul class="ls-list">${ov.schemas.map((sc) => html`<li key=${sc.id}><span><a href=${routeHash(`browse:${schemaScope(sc.id)}`)}>${sc.name}</a></span><span class="muted">${plural(sc.count, "model", "models")}</span></li>`)}</ul>`
+    ${ov.schemas.length ? html`<ul class="ls-list">${ov.schemas.map((sc) => html`<li key=${sc.id}><span class="home-cat"><${CatIcon} icon=${iconOf(sc)} fallback="layers" /><a href=${routeHash(`browse:${schemaScope(sc.id)}`)}>${sc.name}</a></span><span class="muted">${plural(sc.count, "model", "models")}</span></li>`)}</ul>`
       : html`<p>No categories yet: make one with <b>New category…</b> in the menu, then put model folders under its folder.</p>`}
   </section>`;
 }

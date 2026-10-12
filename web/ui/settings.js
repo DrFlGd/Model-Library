@@ -77,11 +77,12 @@ export function Settings() {
           <${RenameForm} lib=${lib} key=${lib.path} /></div>
         <div class="field-block"><span class="field-label">Folder</span>
           <div class="pick-row"><span class="pick-path" id="library-path">${lib.path}</span>
-            ${isDesktop() ? html`<button type="button" class="ghost" onClick=${showLibraryFolder}>Show in folder</button>` : null}</div>
+            ${isDesktop() ? html`<button type="button" class="ghost" onClick=${showLibraryFolder}>Show in folder</button>
+              <button type="button" class="ghost" id="open-library" title="Open a library, or make a new one in an empty folder" onClick=${() => openLibrary()}>Open another library…</button>` : null}</div>
           <small class="muted">Everything about your models is kept in this folder, so you can move, copy or sync it and open it again here.</small>
         </div>
         <${VariantFolders} lib=${lib} />` : html`<p class="muted">No library is open.</p>`}
-      ${isDesktop() ? html`<div><button type="button" class="ghost" id="open-library" title="Open a library, or make a new one in an empty folder" onClick=${() => openLibrary()}>Open another library…</button></div>` : null}
+      ${!lib && isDesktop() ? html`<div><button type="button" class="ghost" id="open-library" title="Open a library, or make a new one in an empty folder" onClick=${() => openLibrary()}>Open another library…</button></div>` : null}
       ${others.length ? html`<h3>Libraries opened before</h3>
         <ul class="ls-list" id="recent-libraries">${others.map((p) => html`<li key=${p}><span>${p}</span>
           <button type="button" class="ghost" onClick=${() => openLibrary(p)}>Open</button></li>`)}</ul>` : null}

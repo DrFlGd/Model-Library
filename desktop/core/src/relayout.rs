@@ -118,6 +118,8 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
             if wanted.is_empty() && !tree.iter().any(|p| schema::starts_with(p, &from)) {
                 bail!("There's nothing in {}.", from.join(" › "));
             }
+            // its folder moves model by model, so nothing else may be left behind in it
+            crate::restructure::check_contents(lib, ix, &old, &from)?;
             if !schema::in_tree(&tree, &to) {
                 schema::check_path(lib, &old.folder, &tree, &to)?;
             }
@@ -131,6 +133,7 @@ pub fn plan(lib: &Library, ix: &Index, change: &Value) -> Result<Value> {
                 tree.iter().map(|p| schema::remap(p, &maps)).collect();
             moved.push(to.clone());
             schema::set_subcategories(&mut v, &moved);
+            schema::carry_icons(&mut v, &maps);
             (what, Schema::from_value(&v))
         }
         "schema" => {

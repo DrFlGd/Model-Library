@@ -16,6 +16,9 @@ import { SubcategoryTree, editorTree, treeSpec, treeReady, treeList, nodeAt, ori
 import { writable } from "./actions.js";
 import { BUILTIN, CatIcon, iconOf } from "./caticons.js";
 import { isDesktop } from "./library.js";
+import { size } from "./details.js";
+
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 const KEY = "\u001f";
 const placeName = (sc, path) => [sc.name, ...path].join(" › ");
@@ -53,7 +56,7 @@ export function categoryItems(schemaId, path) {
     { id: "merge-categories", label: "Merge categories…", icon: "move", disabled: off, run: () => ui.set({ dialog: { type: "merge-categories", schemaId, path } }) },
     { sep: true },
     path.length
-      ? { id: "delete-subcategory", label: "Delete subcategory…", icon: "trash", danger: true, disabled: off, run: () => ui.set({ dialog: { type: "delete-subcategory", schemaId, path } }) }
+      ? { id: "delete-subcategory", label: "Remove subcategory…", icon: "trash", danger: true, disabled: off, run: () => ui.set({ dialog: { type: "delete-subcategory", schemaId, path } }) }
       : { id: "delete-category", label: "Delete category…", icon: "trash", danger: true, disabled: off, run: () => ui.set({ dialog: { type: "delete-schema", schemaId } }) },
   ];
 }
@@ -78,9 +81,9 @@ export function ChangePreview({ change, onPlan }) {
     <p><b>${plan.moving ? `${plan.moving} ${plan.moving === 1 ? "model folder moves" : "model folders move"}` : "No model folders move"}</b>${plan.models > plan.moving ? `, ${plan.models - plan.moving} stay where they are` : ""}.${" "}
       ${plan.clashes ? html` <span class="warn-text">${plan.clashes} ${plan.clashes === 1 ? "lands" : "land"} on a folder that's already there and ${plan.clashes === 1 ? "gets" : "get"} a number, such as "(2)".</span>` : null}
       It can be undone.</p>
-    ${plan.nodes != null ? html`<p class="muted">Affected subcategories: ${plan.nodes}; files: ${plan.files ?? 0}; bytes: ${(plan.bytes ?? 0).toLocaleString()}.</p>` : null}
-    ${plan.child_collisions ? html`<p class="warn-note">${plan.child_collisions} overlapping child names use your selected mapping.</p>` : null}
-    ${plan.node_mappings?.length ? html`<details class="muted"><summary>Review ${plan.node_mappings.length} category path mappings</summary>
+    ${plan.nodes != null ? html`<p class="muted">${plural(plan.nodes, "subcategory", "subcategories")} · ${plural(plan.files ?? 0, "file", "files")} · ${size(plan.bytes ?? 0)}</p>` : null}
+    ${plan.child_collisions ? html`<p class="warn-note">${plan.child_collisions} ${plan.child_collisions === 1 ? "subcategory has a name" : "subcategories have names"} that's there already: they follow your choice below.</p>` : null}
+    ${plan.node_mappings?.length ? html`<details class="muted"><summary>Where ${plural(plan.node_mappings.length, "subcategory goes", "subcategories go")}</summary>
       <ul class="move-sample" style="max-height:220px;overflow:auto">${plan.node_mappings.map((m, i) => html`<li key=${i}><span class="preview-path">${m.from}</span> → <span class="preview-path">${m.to}</span></li>`)}</ul></details>` : null}
     ${plan.sample.length ? html`<ul class="move-sample">${plan.sample.map((m) => html`<li key=${m.from}><span class="preview-path">${m.from}</span><span class="muted"> → </span><span class="preview-path">${m.to}</span></li>`)}
       ${plan.moving > plan.sample.length ? html`<li class="muted">and ${plan.moving - plan.sample.length} more</li>` : null}</ul>` : null}
@@ -186,10 +189,11 @@ export function ChooseIcon({ schemaId, path }) {
     if (file) apply({ file });
   };
   return html`<${Dialog} title=${`Icon for ${placeName(sc, path)}`} id="icon-dialog" onSubmit=${() => apply({ icon: pick })} busy=${busy || pick === now} error=${error} submitLabel="Use this icon">
-    <input type="search" id="icon-search" placeholder="Search icons (castle, tool, plant…)" aria-label="Search icons" value=${q} onInput=${(e) => setQ(e.target.value)} />
+    <input type="search" id="icon-search" placeholder="Search icons (castle, tool, plant…)" aria-label="Search icons" value=${q} onInput=${(e) => setQ(e.target.value)}
+      onKeyDown=${(e) => { if (e.key === "Enter") { e.preventDefault(); if (shown.length) setPick(`builtin:${shown[0][0]}`); } }} />
     <div class="icon-grid" role="group" aria-label="Icons">
       <button type="button" class="icon-choice" data-icon="" aria-pressed=${!pick ? "true" : "false"} title="No icon" onClick=${() => setPick(null)}><span class="icon-none">${Icon.close(16)}</span><span>None</span></button>
-      ${pick?.startsWith("file:") ? html`<button type="button" class="icon-choice" data-icon=${pick} aria-pressed="true" title="Your picture"><${CatIcon} icon=${pick} size=${22} /><span>Yours</span></button>` : null}
+      ${now?.startsWith("file:") ? html`<button type="button" class="icon-choice" data-icon=${now} aria-pressed=${pick === now ? "true" : "false"} title="Your picture" onClick=${() => setPick(now)}><${CatIcon} icon=${now} size=${22} /><span>Yours</span></button>` : null}
       ${shown.map(([name, [label]]) => html`<button type="button" key=${name} class="icon-choice" data-icon=${`builtin:${name}`} aria-pressed=${pick === `builtin:${name}` ? "true" : "false"} title=${label}
         onClick=${() => setPick(`builtin:${name}`)} onDblClick=${() => apply({ icon: `builtin:${name}` })}><${CatIcon} icon=${`builtin:${name}`} size=${22} /><span>${label}</span></button>`)}
     </div>
@@ -218,7 +222,7 @@ export function AddSubcategory({ schemaId, path }) {
       setBusy(false);
     }
   };
-  return html`<${Dialog} title="Add a subcategory" id="subcat-dialog" onSubmit=${submit} busy=${busy || !name.trim()} error=${error} submitLabel="Add">
+  return html`<${Dialog} title="Add subcategory" id="subcat-dialog" onSubmit=${submit} busy=${busy || !name.trim()} error=${error} submitLabel="Add">
     <p class="muted">A new subcategory in ${[sc.name, ...path].join(" › ")}. Its folder is made now, so it's there to import or move models into, even before it has any.</p>
     <label class="field-block"><span>Name</span><input id="subcat-name" type="text" required maxlength="80" value=${name} onInput=${(e) => setName(e.target.value)} /></label>
     <div class="field-block"><span class="field-label">Folder</span><code class="preview-path">${[sc.folder, ...path, name.trim() || "…"].join(" / ")}</code></div>
@@ -305,22 +309,22 @@ export function DeleteSubcategory({ schemaId, path }) {
   const submit = () => run(change, setBusy, setError, (r) => {
     if (showing(sc.id, path)) mode === "remove-unsorted" ? location.hash = routeHash("browse:unsorted") : goTo(sc.id, parent);
     changed(r, mode === "remove-unsorted"
-      ? `Deleted the subcategory ${name}; its models are in Unsorted.`
-      : `Deleted the subcategory ${name}; its models and child subcategories moved up one level.`, [sc.id, path]);
+      ? `Removed the subcategory ${name}; its models are in Unsorted.`
+      : `Removed the subcategory ${name}; what was in it moved up into ${placeName(sc, parent)}.`, [sc.id, path]);
   });
-  return html`<${Dialog} title=${`Delete subcategory ${name}`} id="delete-subcategory-dialog"
-    onSubmit=${submit} busy=${busy || !plan} error=${error} submitLabel="Delete subcategory" danger=${true}>
-    <p>This removes the subcategory, not its models. Files, IDs and details are preserved.</p>
-    <div class="field-block"><span class="field-label">Where should its contents go?</span>
-      <label class="check-row"><input type="radio" name="remove-mode" checked=${mode === "remove-up"}
+  return html`<${Dialog} title=${`Remove subcategory ${name}`} id="delete-subcategory-dialog"
+    onSubmit=${submit} busy=${busy || !plan} error=${error} submitLabel="Remove subcategory" danger=${true}>
+    <p>Its models aren't deleted, and they keep their details and stars. Where should they go?</p>
+    <div class="field-block" role="radiogroup" aria-label="Where its models go">
+      <label class="check-row long"><input type="radio" name="remove-mode" checked=${mode === "remove-up"}
         onChange=${() => { setMode("remove-up"); setPlan(null); }} />
-        Move contents up one level: direct models move to ${placeName(sc, parent)}, while child subcategories stay nested.</label>
-      <label class="check-row"><input type="radio" name="remove-mode" checked=${mode === "remove-unsorted"}
+        <span>Up into ${placeName(sc, parent)} (its subcategories come too)</span></label>
+      <label class="check-row long"><input type="radio" name="remove-mode" checked=${mode === "remove-unsorted"}
         onChange=${() => { setMode("remove-unsorted"); setPlan(null); }} />
-        Move contents to Unsorted: all descendant models move there, and this subtree is removed.</label>
+        <span>To Unsorted (with the models in its subcategories, which go too)</span></label>
     </div>
     <${ChangePreview} change=${change} onPlan=${setPlan} />
-    <p class="muted">Files or unknown folders outside model ownership block removal until reviewed.</p>
+    <p class="muted">A file or folder in it that isn't a model has to be made a model or moved out first.</p>
   <//>`;
 }
 
@@ -354,36 +358,36 @@ export function MergeCategories({ schemaId, path }) {
   });
   return html`<${Dialog} title="Merge categories and subcategories" id="merge-categories-dialog"
     onSubmit=${submit} busy=${busy || !plan} error=${error} submitLabel="Merge categories">
-    <p>Choose two or more source nodes and a target. Existing targets keep their identity; models keep their IDs and metadata.</p>
-    <div class="field-block"><span class="field-label">Sources</span>
+    <p>Choose two or more to merge, and where they go. Their models keep their details and stars.</p>
+    <div class="field-block"><span class="field-label">Merge these</span>
       <div id="merge-sources" role="group" aria-label="Source categories" style="max-height:180px;overflow:auto">
         ${choices.map((c) => html`<label class="check-row" key=${key(c)}>
           <input type="checkbox" checked=${selected.includes(key(c))} onChange=${(e) => {
             setSelected(e.target.checked ? [...selected, key(c)] : selected.filter((k) => k !== key(c))); setPlan(null);
-          }} />${c.label}</label>`)}
+          }} /><span>${c.label}</span></label>`)}
       </div>
-      <small class="muted">Do not choose a category together with one of its descendants.</small>
+      <small class="muted">Don't choose a category together with a subcategory inside it.</small>
     </div>
-    <label class="field-block"><span>Target type</span><select id="merge-target-kind" value=${kind} onChange=${(e) => { setKind(e.target.value); setPlan(null); }}>
-      <option value="existing">Existing category or subcategory</option>
-      <option value="new-subcategory">New subcategory</option>
-      <option value="new-category">New top-level category</option>
+    <label class="field-block"><span>Into</span><select id="merge-target-kind" value=${kind} onChange=${(e) => { setKind(e.target.value); setPlan(null); }}>
+      <option value="existing">One that's already there</option>
+      <option value="new-subcategory">A new subcategory</option>
+      <option value="new-category">A new category</option>
     </select></label>
-    ${kind !== "new-category" ? html`<label class="field-block"><span>Target or new subcategory's parent</span>
+    ${kind !== "new-category" ? html`<label class="field-block"><span>${kind === "existing" ? "Which one" : "Inside"}</span>
       <select id="merge-target" value=${target} onChange=${(e) => { setTarget(e.target.value); setPlan(null); }}>
         ${choices.map((c) => html`<option key=${key(c)} value=${key(c)}>${c.label}</option>`)}
       </select></label>` : null}
     ${kind !== "existing" ? html`<label class="field-block"><span>New name</span>
       <input id="merge-name" maxlength="80" value=${name} onInput=${(e) => { setName(e.target.value); setPlan(null); }} /></label>` : null}
-    <label class="field-block"><span>Matching child subcategory names</span>
+    <label class="field-block"><span>If both have a subcategory with the same name</span>
       <select id="merge-child-conflicts" value=${conflicts} onChange=${(e) => { setConflicts(e.target.value); setPlan(null); }}>
-        <option value="cancel">Cancel until resolved</option>
-        <option value="merge">Merge matching children</option>
-        <option value="rename">Keep both with numbered names</option>
+        <option value="cancel">Stop and ask me</option>
+        <option value="merge">Merge them</option>
+        <option value="rename">Keep both, numbering the new one</option>
       </select></label>
-    ${!change && sources.length < 2 ? html`<p class="warn-note" role="status">Select at least two sources.</p>` : null}
+    ${!change && sources.length < 2 ? html`<p class="warn-note" role="status">Choose at least two to merge.</p>` : null}
     ${change ? html`<${ChangePreview} change=${change} onPlan=${setPlan} />` : null}
-    <p class="muted">Model folder collisions keep both with numbered paths. Unowned content and cyclic targets are blocked.</p>
+    <p class="muted">If two models' folders have the same name, both are kept and one gets a number. A file or folder that isn't a model has to be made a model or moved out first.</p>
   <//>`;
 }
 

@@ -16,6 +16,7 @@ import { ExtractionBar, fileActions, installExtractKeys } from "./extract.js";
 import { ActionRow, MODEL_ACTIONS, usePageKeys, runKey, letter, editDetails, writable, typing } from "./actions.js";
 import { PageHead } from "./layout.js";
 import { PlaceLinks } from "./details.js";
+import { Icon } from "./icons.js";
 
 const CTX = { page: "model" };
 
@@ -43,6 +44,12 @@ export function ModelPage({ id }) {
     api("model_get", { id }).then((v) => { if (live) { setM(v); setError(""); } }, (e) => { if (live) setError(e.message || String(e)); });
     return () => { live = false; };
   }, [id, s.rev]);
+  // the category panel beside the menu follows the model's place
+  const placeKey = m?.schema ? JSON.stringify([m.schema, m.path || []]) : null;
+  useEffect(() => {
+    ui.set({ modelPlace: placeKey ? { schema: m.schema, path: m.path || [] } : null });
+    return () => ui.set({ modelPlace: null });
+  }, [placeKey]);
   usePageKeys((e) => {
     if (!m) return;
     const l = letter(e);
@@ -92,6 +99,7 @@ function ModelWorkspace({ model, names, narrow, onModelChange }) {
     const key = (e) => {
       if (e.defaultPrevented || typing(e) || ui.get().dialog || ui.get().menu) return;
       if (e.key === "[") { e.preventDefault(); toggle(); }
+      if (e.key === "]") { e.preventDefault(); toggleDetails(); }
       if (e.key === "Escape") { clear(); if (narrow) ui.set({ mobilePanel: null }); }
     };
     addEventListener("keydown", key);
@@ -112,8 +120,8 @@ function ModelWorkspace({ model, names, narrow, onModelChange }) {
       ${model.details?.notes ? html`<details class="workspace-notes"><summary>Notes</summary><p>${model.details.notes}</p></details>` : null}
     </section>
     <aside id="workspace-details-panel" class=${`details-panel${detailsOpen ? "" : " collapsed"}${narrow ? " drawer" : ""}`} style=${{ width: detailsOpen ? `${detailWidth}px` : "36px" }} aria-label="Model details">
-      ${!detailsOpen ? html`<button type="button" class="ghost details-panel-tab" id="details-panel-open" title="Open Details" aria-label="Open Details" onClick=${toggleDetails}>Details</button>` :
-        html`<header class="details-panel-head"><strong>Details</strong><button type="button" class="ghost" id="details-panel-close" title="Collapse Details" aria-label="Collapse Details" onClick=${toggleDetails}>›</button></header>`}
+      ${!detailsOpen ? html`<button type="button" class="ghost panel-strip" id="details-panel-open" title="Show details (])" aria-label="Show details (])" onClick=${toggleDetails}>${Icon.chevronsLeft(14)}<span class="panel-strip-name">Details</span></button>` :
+        html`<header class="details-panel-head"><strong>Details</strong><button type="button" class="ghost panel-fold" id="details-panel-close" title="Hide details (])" aria-label="Hide details (])" onClick=${toggleDetails}>${Icon.chevronsRight(14)}</button></header>`}
       <div class="details-body" aria-hidden=${!detailsOpen}><${WorkspaceDetails} model=${model} onModelChange=${onModelChange} /></div>
       ${detailsOpen && !narrow ? html`<div class="details-panel-resize" role="separator" aria-label="Details panel width" aria-orientation="vertical" aria-valuemin="280" aria-valuemax="460" aria-valuenow=${detailWidth} tabIndex="0" onPointerDown=${beginDetailsResize} onKeyDown=${(e) => { if (["ArrowLeft", "ArrowRight"].includes(e.key)) { e.preventDefault(); setPref({ detailsPanelWidth: Math.max(280, Math.min(460, detailWidth + (e.key === "ArrowLeft" ? 20 : -20))) }); } }}></div>` : null}
     </aside>

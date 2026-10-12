@@ -63,11 +63,23 @@ The sandbox has a network allowlist and is reset between sessions.
 
 ### Next (roadmap)
 
-Jerred's second round of requirements (R1–R17, `docs/PLAN.md`, "Requirements round 2") is being built in the agreed order of groups; groups 1 and 2 are built (the style study for R16 is waiting on the owner's pick), group 3 (gray default render, 3MF colours and thumbnails) is next, and a UI review follows each group. Before that: the UI pass in `docs/PLAN.md` ("UI pass design") is done: actions (0.5.1), undo and asking (0.5.2) and one layout (0.5.3). The model file workspace followed (0.5.5), then six parallel packages A–F (0.5.6, PRs #3–#8 merged in #9). Phase 6 (Docker with sign-in) is on hold until the owner says the UI is ready; ask before starting it.
+Jerred's second round of requirements (R1–R17, `docs/PLAN.md`, "Requirements round 2") is being built in the agreed order of groups; groups 1 and 2 are built and both UI reviews' items fixed; group 3 (gray default render, 3MF colours and thumbnails) is next, then skins for R16 (the owner picked Drafting Sheet as the default look and wants Parts Bin and Layer Line as selectable skins too; the style study's source is in the project files, style-study/), and a UI review follows each group. Before that: the UI pass in `docs/PLAN.md` ("UI pass design") is done: actions (0.5.1), undo and asking (0.5.2) and one layout (0.5.3). The model file workspace followed (0.5.5), then six parallel packages A–F (0.5.6, PRs #3–#8 merged in #9). Phase 6 (Docker with sign-in) is on hold until the owner says the UI is ready; ask before starting it.
 
 ---
 
 ## Unreleased
+
+Fixes from the second UI review of 0.5.11 (Requirements round 2, R17; all 23 items, design in docs/PLAN.md, "UI review 2 (0.5.12)").
+
+- **Category changes keep what belongs to them:** icons now follow Rename or move…, Remove subcategory and Merge categories (and come back with Undo). A rename stops and names the file when a subcategory's folder holds something that isn't a model, instead of leaving it behind as a new "model".
+- **Right counts:** beside the subcategory tiles the summary counts every model below, and says how many are filed right there.
+- **Choose icon…:** Enter in the search picks the first match without closing; your own picture stays a choice.
+- **Side panels fold the same way:** « and » buttons named Hide and Show, a strip with the panel's name, [ for the left panel and ] for Details. The category panel's edge is easier to grab, and it stays beside a model's page when the model is filed in a category.
+- **The same words and icons:** Remove subcategory… (no models are deleted) and Add subcategory everywhere; Models has its own icon; a category without an icon shows the layers icon everywhere its name does, also on Home; Remove subcategory and Merge categories are in plain words.
+- **The Unsorted preview** has one action row in its head (greyed out in a read-only library); Move to category… from Unsorted asks where first instead of warning.
+- **Layout:** long titles show the place's name large with the categories above it; medium windows start with the category panel folded and no empty summary; the folded menu keeps the categories as icons; subcategory tiles show one picture per model; an empty category with subcategories says how to fill it; Open another library… is beside Show in folder.
+
+## 0.5.11 (2026-10-12)
 
 Requirements round 2, group 2 (R5, R3, R4, review items 11–14; design in docs/PLAN.md, "Group 2 design").
 

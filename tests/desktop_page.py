@@ -756,12 +756,12 @@ async def phase4(pg):
     await pg.wait_for_selector("#delete-subcategory-dialog", state="detached", timeout=60000)
     await pg.wait_for_function("() => !location.hash.includes('Orks')")
     gone = not (t / "Orks").exists()
-    await toast_text(pg, "^Deleted the subcategory Orks")
+    await toast_text(pg, "^Removed the subcategory Orks")
     await pg.click(".toast .toast-action")
     await toast_text(pg, "^Undone")
     back = (t / "Orks").is_dir()
     check("subcategories are added at any depth, kept with no models, and deleted with Undo", made and gone and back and "Orks" in w40k and "Aeldari" in w40k
-          and items == ["Add subcategory…", "Edit category…", "Choose icon…", "Rename or move…", "Merge categories…", "Delete subcategory…"], (made, gone, back, w40k, items))
+          and items == ["Add subcategory…", "Edit category…", "Choose icon…", "Rename or move…", "Merge categories…", "Remove subcategory…"], (made, gone, back, w40k, items))
     # one with models in it: they move up a level, after a list of what moves
     model_folder("Tabletop/Terrain/Buildings/Ruins/Tower", {"tower.stl": cube(6)})
     await api(pg, "library_scan", {"full": False})
@@ -775,7 +775,7 @@ async def phase4(pg):
     await pg.click("#delete-subcategory-dialog button[type=submit]")
     await pg.wait_for_selector("#delete-subcategory-dialog", state="detached", timeout=60000)
     up = (library / "Tabletop/Terrain/Buildings/Tower/tower.stl").is_file() and (library / "Tabletop/Terrain/Buildings/Gothic").is_dir() and not (library / "Tabletop/Terrain/Buildings/Ruins").exists()
-    await toast_text(pg, "^Deleted the subcategory Ruins")
+    await toast_text(pg, "^Removed the subcategory Ruins")
     await pg.keyboard.press("Control+z")
     await toast_text(pg, "^Undone", 60000)
     down = (library / "Tabletop/Terrain/Buildings/Ruins/Tower/tower.stl").is_file() and (library / "Tabletop/Terrain/Buildings/Ruins/Gothic").is_dir()
@@ -943,16 +943,15 @@ async def ui_pass(pg):
     await count(pg)
     first = pg.locator(".results .card").first
     await first.click()
-    await pg.click("#unsorted-tab-details")
-    await pg.wait_for_selector("#model-details .action-row")
-    row = await labels_of(pg, "#model-details .action-row button")
+    await pg.wait_for_selector("#unsorted-preview .action-row")
+    row = await labels_of(pg, "#unsorted-preview .action-row button")
     await first.click(button="right")
     await pg.wait_for_selector("#context-menu")
     menu = await labels_of(pg, "#context-menu .menu-label")
     await pg.screenshot(path=str(out / "24-right-click.png"))
     await pg.keyboard.press("Escape")
     await pg.wait_for_selector("#context-menu", state="detached")
-    await pg.click("#details-more")
+    await pg.click("#unsorted-more")
     more = await labels_of(pg, "#context-menu .menu-label")
     await pg.keyboard.press("Escape")
     check("the details panel and the right-click menu have the same actions, in the same order",
@@ -1222,7 +1221,7 @@ async def ui_pass3(pg):
     await pg.wait_for_selector("#place-summary #place-counts")
     summary = await pg.inner_text("#place-summary #place-counts")
     await pg.click(".card:has(.card-name:text-is('Knight Armour'))")
-    await pg.click("#unsorted-tab-details")
+    await pg.click('#unsorted-tabs [data-view="details"]')
     await pg.wait_for_function("() => document.querySelector('#details-name')?.value === 'Knight Armour'")
     side = library / "Unsorted/Knight Armour/model.json"
     before = json.loads(side.read_text()).get("authors") or []
@@ -1783,6 +1782,64 @@ async def group2(pg):
     note = await pg.inner_text("#no-results")
     check("an empty category says how to add models to it", "Drop model files" in note and await pg.locator('#no-results a[href="#/import"]').count() == 1, note)
 
+async def review2(pg):
+    """UI review 2 (docs/PLAN.md, "UI review 2 (0.5.12)")."""
+    # 1. beside the tiles, the summary counts everything below
+    await pg.goto(B + "#/browse/schema/household")
+    await pg.wait_for_selector("#subcat-tiles .subcat-tile")
+    every = (await api(pg, "models_query", {"scope": "schema:household", "limit": 1}))["total"]
+    await pg.wait_for_selector("#place-summary #place-counts")
+    counts = await pg.inner_text("#place-summary #place-counts")
+    here = await pg.inner_text("#place-here") if await pg.locator("#place-here").count() else ""
+    check("beside the subcategory tiles, the summary counts every model below", counts.startswith(f"{every} models") and "subcategor" in here, (counts, here, every))
+
+    # 4, 5. Enter in Choose icon's search picks the first match, and your own picture stays a choice
+    await pg.evaluate("async () => { const {ui} = await import('/ui/state.js'); ui.set({dialog: {type: 'choose-icon', schemaId: 'household', path: ['Kitchen']}}); }")
+    await pg.wait_for_selector("#icon-dialog")
+    await pg.fill("#icon-search", "cup")
+    await pg.press("#icon-search", "Enter")
+    await pg.wait_for_timeout(200)
+    still_open = await pg.locator("#icon-dialog").count() == 1
+    cup = await pg.get_attribute('#icon-dialog .icon-choice[data-icon="builtin:cup"]', "aria-pressed")
+    yours = await pg.locator('#icon-dialog .icon-choice[data-icon^="file:"]').count()
+    await pg.keyboard.press("Escape")
+    await pg.wait_for_selector("#icon-dialog", state="detached")
+    check("Enter in the icon search picks the first match without closing, and your own picture stays a choice",
+          still_open and cup == "true" and yours == 1, (still_open, cup, yours))
+
+    # 15. an empty category with subcategories says how to fill it, under its tiles
+    await pg.goto(B + "#/browse/schema/workshop")
+    await pg.wait_for_selector("#subcat-tiles .subcat-tile")
+    await pg.wait_for_selector("#no-results")
+    check("an empty category with subcategories says how to fill it", "Drop model files" in await pg.inner_text("#no-results"))
+
+    # 16. Move to category… from Unsorted starts with the question
+    await pg.goto(B + "#/browse/unsorted")
+    await count(pg)
+    await pg.locator(".results .card").first.click()
+    await pg.click("#unsorted-move")
+    await pg.wait_for_selector("#move-dialog")
+    start = await pg.input_value("#move-schema")
+    warned = await pg.locator("#move-dialog #change-preview").count()
+    await pg.keyboard.press("Escape")
+    await pg.wait_for_selector("#move-dialog", state="detached")
+    check("Move to category… from Unsorted starts by asking where, not with a warning", start == "?" and warned == 0, (start, warned))
+
+    # 19, 20. the folded menu keeps the categories as icons; a filed model's page keeps the panel
+    await pg.goto(B + "#/browse/schema/household/Kitchen")
+    await pg.wait_for_selector("#browse-count")
+    await pg.locator(".results .card").first.dblclick()
+    await pg.wait_for_selector("#model-page")
+    panel = await pg.locator("#category-panel").count()
+    await pg.click(".nav-burger")
+    await pg.wait_for_selector(".sidebar.collapsed")
+    icons = await pg.locator(".sidebar.collapsed #schema-tree .cat-icon").count()
+    visible = await pg.locator(".sidebar.collapsed #schema-tree a.nav-link").first.is_visible()
+    await pg.click(".nav-burger")
+    await pg.wait_for_selector(".sidebar:not(.collapsed)")
+    check("a filed model's page keeps the category panel, and the folded menu keeps the categories as icons",
+          panel == 1 and icons >= 3 and visible, (panel, icons, visible))
+
 async def group1(pg):
     """Group 1 (docs/PLAN.md, "Group 1 design"): the same file actions in every
     view of a model, Add subcategory under the one shown, and the About page."""
@@ -1972,6 +2029,7 @@ async def main():
             await group1(pg)
             await review1(pg)
             await group2(pg)
+            await review2(pg)
             await review_checks(pg)
 
             # 3. renaming the library

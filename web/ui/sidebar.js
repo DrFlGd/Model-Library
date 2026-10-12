@@ -15,16 +15,17 @@ import { categoryItems, addSubcategory } from "./categories.js";
 import { toast } from "./library.js";
 
 const NARROW = "(max-width: 900px)";
-function useNarrow() {
-  const [narrow, setNarrow] = useState(() => matchMedia(NARROW).matches);
+function useMedia(query) {
+  const [on, setOn] = useState(() => matchMedia(query).matches);
   useEffect(() => {
-    const q = matchMedia(NARROW);
-    const changed = () => setNarrow(q.matches);
+    const q = matchMedia(query);
+    const changed = () => setOn(q.matches);
     q.addEventListener("change", changed);
     return () => q.removeEventListener("change", changed);
-  }, []);
-  return narrow;
+  }, [query]);
+  return on;
 }
+const useNarrow = () => useMedia(NARROW);
 
 /** The category a route shows: { id, path } or null. */
 export function routeCategory(route) {
@@ -84,7 +85,7 @@ function TreeRows({ schema, nodes, values, depth, current, open, canAdd }) {
     const route = `browse:${schemaScope(schema.id, path)}`;
     const icon = iconOf(schema, path);
     return html`<${NavLink} key=${key} route=${route} label=${n.value} count=${n.count} depth=${depth} current=${current} toggle=${toggle}
-        icon=${icon ? html`<${CatIcon} icon=${icon} />` : null} menu=${() => categoryItems(schema.id, path)} />
+        icon=${icon || Object.keys(schema.icons || {}).some(Boolean) ? html`<${CatIcon} icon=${icon} fallback="blank" />` : null} menu=${() => categoryItems(schema.id, path)} />
       ${unfolded ? html`<${TreeRows} schema=${schema} nodes=${n.children} values=${path} depth=${depth + 1} current=${current} open=${open} canAdd=${canAdd} />` : null}
       ${canAdd && current === route ? html`<${AddRow} key=${`${key}+`} schemaId=${schema.id} path=${path} depth=${depth + 1} openKey=${key} />` : null}`;
   });
@@ -107,11 +108,23 @@ function useOpenTo(schemaId, path) {
 /** The category's tree beside the menu: resizable, folds to a strip with its name. */
 function CategoryPanel({ schema, path, route, open, canAdd }) {
   const prefs = useStore(ui, (s) => [s.catPanel, s.catPanelWidth]);
-  const folded = prefs[0] === "folded";
+  const medium = useMedia("(max-width: 1250px)");
+  const folded = prefs[0] === "folded" || (prefs[0] == null && medium);
   const width = Math.max(180, Math.min(420, prefs[1] || 230));
   const stopResize = useRef(null);
   useEffect(() => () => stopResize.current?.(), []);
   useOpenTo(schema.id, path);
+  useEffect(() => {
+    const key = (e) => {
+      if (e.key !== "[" || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || ui.get().dialog || ui.get().menu) return;
+      const t = e.target;
+      if (t && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName))) return;
+      e.preventDefault();
+      setPref({ catPanel: document.querySelector("#category-panel.folded") ? "open" : "folded" });
+    };
+    addEventListener("keydown", key);
+    return () => removeEventListener("keydown", key);
+  }, []);
   const top = `browse:${schemaScope(schema.id)}`;
   const resize = (e) => {
     e.preventDefault();
@@ -124,8 +137,8 @@ function CategoryPanel({ schema, path, route, open, canAdd }) {
   };
   if (folded) {
     return html`<aside class="category-panel folded" id="category-panel" aria-label=${`${schema.name}'s subcategories`}>
-      <button type="button" class="ghost cat-panel-strip" id="category-panel-open" title=${`Show ${schema.name}'s subcategories`} onClick=${() => setPref({ catPanel: "open" })}>
-        ${Icon.chevronsRight(14)}<span class="cat-panel-strip-name">${schema.name}</span></button>
+      <button type="button" class="ghost panel-strip" id="category-panel-open" title="Show subcategories ([)" aria-label="Show subcategories ([)" onClick=${() => setPref({ catPanel: "open" })}>
+        ${Icon.chevronsRight(14)}<span class="panel-strip-name">${schema.name}</span></button>
     </aside>`;
   }
   return html`<aside class="category-panel" id="category-panel" style=${{ width: `${width}px` }} aria-label=${`${schema.name}'s subcategories`}>
@@ -133,7 +146,7 @@ function CategoryPanel({ schema, path, route, open, canAdd }) {
       <a class=${`cat-panel-title${route === top ? " active" : ""}`} href=${routeHash(top)} title=${schema.name}
         onContextMenu=${(e) => openMenu(e, categoryItems(schema.id, []))}><${CatIcon} icon=${iconOf(schema)} size=${17} fallback="layers" /><span>${schema.name}</span>
         <span class="nav-count">${schema.count}</span></a>
-      <button type="button" class="ghost cat-panel-fold" id="category-panel-close" title="Fold the subcategories away" aria-label="Fold the subcategories away" onClick=${() => setPref({ catPanel: "folded" })}>${Icon.chevronsLeft(14)}</button>
+      <button type="button" class="ghost panel-fold" id="category-panel-close" title="Hide subcategories ([)" aria-label="Hide subcategories ([)" onClick=${() => setPref({ catPanel: "folded" })}>${Icon.chevronsLeft(14)}</button>
     </header>
     <ul class="nav-list cat-panel-tree" id="category-tree">
       <${TreeRows} schema=${schema} nodes=${schema.tree} values=${[]} depth=${0} current=${route} open=${open} canAdd=${canAdd} />
@@ -146,11 +159,12 @@ function CategoryPanel({ schema, path, route, open, canAdd }) {
 }
 
 export function Sidebar() {
-  const s = useStore(ui, (st) => ({ route: st.route, navOpen: st.navOpen, overview: st.overview, open: st.open, library: st.library, navCollapsed: st.navCollapsed }));
+  const s = useStore(ui, (st) => ({ route: st.route, navOpen: st.navOpen, overview: st.overview, open: st.open, library: st.library, navCollapsed: st.navCollapsed, modelPlace: st.modelPlace }));
   const narrow = useNarrow();
   const ov = s.overview;
   const canAdd = !!s.library && !s.library.read_only;
-  const shown = routeCategory(s.route);
+  // a category's page, or the page of a model filed in one
+  const shown = routeCategory(s.route) || (s.route.startsWith("model:") && s.modelPlace ? { id: s.modelPlace.schema, path: s.modelPlace.path } : null);
   const panelSchema = !narrow && shown ? ov?.schemas?.find((sc) => sc.id === shown.id) : null;
   return html`${s.navOpen ? html`<div class="nav-backdrop" onClick=${() => ui.set({ navOpen: false })}></div>` : null}
     <nav class=${`sidebar${s.navOpen ? " open" : ""}${s.navCollapsed ? " collapsed" : ""}`} aria-label="Library">

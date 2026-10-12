@@ -190,14 +190,15 @@ function MoveModels({ models }) {
   const overview = useStore(ui, (s) => s.overview);
   const first = models[0];
   const same = models.every((m) => m.schema === first.schema);
-  const [schema, setSchema] = useState(same ? first.schema : null);
+  // models from Unsorted start with the question, not on the place they're in already
+  const [schema, setSchema] = useState(same && first.schema ? first.schema : undefined);
   const [values, setValues] = useState(same ? [...(first.path || [])] : []);
   const [plan, setPlan] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const sc = overview?.schemas?.find((s) => s.id === schema);
-  const where = sc ? [sc.folder, ...values].join(" / ") : "Unsorted";
-  const change = { kind: "move", ids: models.map((m) => m.id), schema: schema || null, values };
+  const where = sc ? [sc.folder, ...values].join(" / ") : schema === null ? "Unsorted" : "";
+  const change = schema === undefined ? null : { kind: "move", ids: models.map((m) => m.id), schema: schema || null, values };
   const n = plan?.moving || 0;
   const submit = async () => {
     setBusy(true);
@@ -217,8 +218,8 @@ function MoveModels({ models }) {
     <p class="muted">${models.length === 1 ? "Its folder moves" : "Their folders move"} into the subcategory's folder and ${models.length === 1 ? "keeps its" : "keep their"} name. A new subcategory is added to the category.</p>
     <div class="field-block"><span class="field-label">Category</span>
       <${CategoryPicker} overview=${overview} schema=${schema} values=${values} idPrefix="move" onChange=${(s, v) => { setSchema(s); setValues(v); }} /></div>
-    <div class="field-block"><span class="field-label">Goes to</span><code class="preview-path" id="move-preview">${where} / …</code></div>
-    <${ChangePreview} change=${change} onPlan=${setPlan} />
+    ${change ? html`<div class="field-block"><span class="field-label">Goes to</span><code class="preview-path" id="move-preview">${where} / …</code></div>
+      <${ChangePreview} change=${change} onPlan=${setPlan} />` : null}
   <//>`;
 }
 
