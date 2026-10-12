@@ -6,6 +6,7 @@ import { SelectionRows } from "./parts.js";
 import { ViewSwitch } from "./layout.js";
 import { size } from "./details.js";
 import { fileSel } from "./filesel.js";
+import { Icon } from "./icons.js";
 
 export function FilePanel({ src, model, files, variants, variant, setVariant, open, toggle, narrow, contextActions }) {
   const prefs = useStore(ui);
@@ -26,8 +27,8 @@ export function FilePanel({ src, model, files, variants, variant, setVariant, op
     addEventListener("pointermove", move); addEventListener("pointerup", stop); addEventListener("pointercancel", stop);
   };
   return html`<aside id="file-panel" class=${`file-panel${open ? "" : " collapsed"}${narrow ? " drawer" : ""}`} style=${{ width: open ? `${width}px` : "36px" }} aria-label="Model files">
-    ${!open ? html`<button type="button" class="ghost panel-open" id="file-panel-open" title="Open files ([)" aria-label="Open files ([)" onClick=${toggle}>›</button>` : html`
-      <header class="file-panel-head"><div><strong>Files</strong><span class="muted">${files.length} · ${size(files.reduce((sum, f) => sum + (f.size || 0), 0))}</span></div><button type="button" class="ghost" id="file-panel-close" title="Collapse files ([)" aria-label="Collapse files ([)" onClick=${toggle}>‹</button></header>
+    ${!open ? html`<button type="button" class="ghost panel-strip" id="file-panel-open" title="Show files ([)" aria-label="Show files ([)" onClick=${toggle}>${Icon.chevronsRight(14)}<span class="panel-strip-name">Files</span></button>` : html`
+      <header class="file-panel-head"><div><strong>Files</strong><span class="muted">${files.length} · ${size(files.reduce((sum, f) => sum + (f.size || 0), 0))}</span></div><button type="button" class="ghost panel-fold" id="file-panel-close" title="Hide files ([)" aria-label="Hide files ([)" onClick=${toggle}>${Icon.chevronsLeft(14)}</button></header>
       ${variants.length > 3 ? html`<label class="variant-pick"><span>Variant</span><select id="variants" aria-label="Variant" value=${variant ?? ""} onChange=${(e) => setVariant(e.target.value || null)}>${variants.map((v) => html`<option key=${v} value=${v}>${v}</option>`)}<option value="">All</option></select></label>`
         : variants.length ? html`<div class="seg variant-seg" role="group" aria-label="Variant" id="variants">${variants.map((v) => html`<button type="button" key=${v} aria-pressed=${variant === v} onClick=${() => setVariant(v)}>${v}</button>`)}<button type="button" aria-pressed=${variant === null} onClick=${() => setVariant(null)}>All</button></div>` : null}
       <input type="search" class="parts-filter" placeholder="Search files" aria-label="Search files" value=${q} onInput=${(e) => setQ(e.target.value)} />

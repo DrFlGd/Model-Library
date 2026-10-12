@@ -115,7 +115,7 @@ export function automaticTiles(model) {
 }
 
 /** Shared by grid cards, list rows, Home and model details. */
-export function Cover({ model, cls = "" }) {
+export function Cover({ model, cls = "", single = false }) {
   const files = model.files || {};
   const explicit = files.explicit_cover;
   const missing = !!files.cover_missing;
@@ -132,7 +132,10 @@ export function Cover({ model, cls = "" }) {
         alt="" loading="lazy" onError=${() => setBroken(true)} />
     </span>`;
   }
-  const { tiles, more } = automaticTiles(model);
+  // `single`: one picture only (a subcategory tile shows one per model, not a picture of pictures)
+  const auto = automaticTiles(model);
+  const tiles = single ? auto.tiles.slice(0, 1) : auto.tiles;
+  const more = single ? 0 : auto.more;
   return html`<span class=${`thumb cover-composed ${cls}`} title=${title} role="img" aria-label=${title}>
     <span class=${`cover-tiles cover-tiles-${tiles.length}`}>
       ${tiles.map((tile, i) => tile.type === "preview"

@@ -34,7 +34,7 @@ export function nodeAt(sc, path) {
 const parts = (t) => t.split("/").map((s) => s.trim()).filter(Boolean);
 const KEY = "\u001f";
 
-/** `schema` (id or null), `values` (the path of subcategories, maybe ending in new
+/** `schema` (id, null for Unsorted, or undefined while nothing is chosen yet), `values` (the path of subcategories, maybe ending in new
  *  ones); `onChange(schema, values)`. A list of the category's subcategories, and a
  *  box for a new one inside the chosen one ("/" makes several levels). */
 export function CategoryPicker({ overview, schema, values = [], onChange, idPrefix = "" }) {
@@ -57,8 +57,9 @@ export function CategoryPicker({ overview, schema, values = [], onChange, idPref
   const sel = values.slice(0, at);
   const id = (s) => (idPrefix ? `${idPrefix}-${s}` : null);
   return html`<div class="cat-picker">
-    <select class="cat-schema" id=${id("schema")} aria-label="Category" value=${schema || ""}
+    <select class="cat-schema" id=${id("schema")} aria-label="Category" value=${schema === undefined ? "?" : schema || ""}
       onChange=${(e) => { setFresh(""); onChange(e.target.value || null, []); }}>
+      ${schema === undefined ? html`<option value="?" disabled>Choose a category…</option>` : null}
       <option value="">Unsorted</option>
       ${schemas.map((s) => html`<option value=${s.id} key=${s.id}>${s.name}</option>`)}
     </select>
@@ -167,13 +168,13 @@ export function SubcategoryTree({ nodes, onChange, id = "subcat-tree", counts = 
         <button type="button" class="ghost st-add" title="Add a subcategory inside this one" aria-label=${`Add inside ${n.name || "this one"}`} onClick=${() => add(n.uid)}>${Icon.plus(13)}</button>
         <button type="button" class="ghost st-out" title="Move out a level" aria-label=${`Move ${n.name || "this one"} out a level`} disabled=${!depth} onClick=${() => outdent(n.uid)}>←</button>
         <button type="button" class="ghost st-in" title="Move into the one above" aria-label=${`Move ${n.name || "this one"} into the one above`} disabled=${!i} onClick=${() => indent(n.uid)}>→</button>
-        <button type="button" class="ghost st-remove" title=${n.count ? `Remove it: its ${n.count} ${n.count === 1 ? "model moves" : "models move"} up a level` : "Remove it"} aria-label=${`Remove ${n.name || "this one"}`} onClick=${() => remove(n.uid)}>${Icon.close(13)}</button>
+        <button type="button" class="ghost st-remove" title=${n.count ? `Remove subcategory: its ${n.count} ${n.count === 1 ? "model moves" : "models move"} up a level` : "Remove subcategory"} aria-label=${`Remove ${n.name || "this one"}`} onClick=${() => remove(n.uid)}>${Icon.close(13)}</button>
       </div>
       ${n.children.length ? html`<ul class="st-list">${n.children.map((c, j) => row(c, j, n.children, depth + 1, p))}</ul>` : null}
     </li>`;
   };
   return html`<div class="st" id=${id}>
     ${nodes.length ? html`<ul class="st-list st-top">${nodes.map((n, i) => row(n, i, nodes, 0, []))}</ul>` : html`<p class="muted st-empty">No subcategories yet: models go straight into the top folder.</p>`}
-    <div><button type="button" class="ghost" id=${`${id}-add`} onClick=${() => add(null)}>${Icon.plus(13)} Add a subcategory</button></div>
+    <div><button type="button" class="ghost" id=${`${id}-add`} onClick=${() => add(null)}>${Icon.plus(13)} Add subcategory</button></div>
   </div>`;
 }

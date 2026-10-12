@@ -59,13 +59,14 @@ export const BUILTIN = {
 
 const builtinName = (icon) => (typeof icon === "string" && icon.startsWith("builtin:") ? icon.slice(8) : null);
 
-/** A category's or subcategory's icon: built-in, its own picture, or `fallback` (an Icon name, or none). */
+/** A category's or subcategory's icon: built-in, its own picture, or `fallback` (an Icon name, "blank" for its space, or none). */
 export function CatIcon({ icon, size = 15, fallback = null }) {
   const b = builtinName(icon);
   if (b && BUILTIN[b]) return html`<span class="cat-icon" data-icon=${icon}>${svg(BUILTIN[b][2], size)}</span>`;
   if (typeof icon === "string" && icon.startsWith("file:")) {
     return html`<span class="cat-icon" data-icon=${icon}><img src=${libraryUrl(icon.slice(5))} alt="" width=${size} height=${size} /></span>`;
   }
+  if (fallback === "blank") return html`<span class="cat-icon" style=${{ width: `${size}px` }}></span>`; // keeps names in line
   return fallback ? html`<span class="cat-icon">${Icon[fallback](size)}</span>` : null;
 }
 
