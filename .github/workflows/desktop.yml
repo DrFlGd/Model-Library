@@ -165,6 +165,8 @@ jobs:
       - name: Front end
         run: python tools/build_desktop.py --out build/desktop --fetch-fonts
       - name: Acceptance test (the page and the app's backend)
+        env:
+          PYTHONUTF8: "1"   # the console and open() default to cp1252 on Windows
         run: |
           pip install playwright
           python -m playwright install chromium 2>&1 | tail -2
