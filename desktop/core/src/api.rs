@@ -1103,6 +1103,7 @@ impl App {
                 j(json!({
                     "version": crate::VERSION,
                     "os": std::env::consts::OS,
+                    "library_format": crate::library::FORMAT,
                     "library": lib.as_ref().ok().map(Library::info),
                     "library_error": lib.err().filter(|_| !first_run),
                     "first_run": first_run,
@@ -2274,6 +2275,7 @@ mod tests {
         let info = call(&app, "app_info", json!({})).await;
         assert_eq!(info["library"]["name"], "Models B");
         assert_eq!(info["recent_libraries"].as_array().unwrap().len(), 2);
+        assert_eq!(info["library_format"], crate::library::FORMAT);
         let _ = std::fs::remove_dir_all(&home);
     }
 

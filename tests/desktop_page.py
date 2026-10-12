@@ -177,7 +177,7 @@ async def phase1(pg):
     await library_menu(pg, "rescan")
     await pg.wait_for_function("() => document.querySelector('#home-counts')?.textContent.includes('4 models')")
     await pg.click('.sidebar a[href="#/browse/schema/wargames/Warhammer%2040k"]')
-    tree = await pg.eval_on_selector_all("#schema-tree .nav-link", "els => els.map(e => e.textContent.trim())")
+    tree = await pg.eval_on_selector_all("#schema-tree a.nav-link", "els => els.map(e => e.textContent.trim())")
     await pg.goto(B + "#/browse/schema/wargames/Warhammer%2040k/Tyranid")
     n = await count(pg)
     names = await pg.eval_on_selector_all(".card .card-name", "els => els.map(e => e.textContent)")
@@ -1251,8 +1251,9 @@ async def ui_pass3(pg):
     await clear_toast(pg)
     await pg.screenshot(path=str(out / "30-home.png"))
     await pg.goto(B + "#/settings")
-    tree = await pg.inner_text("#settings-about .folder-tree")
-    check("Home has recently added models, what's waiting and the Library menu; the layout is in Settings",
+    await pg.click("#settings-about-link")
+    tree = await pg.inner_text("#about-layout .folder-tree")
+    check("Home has recently added models, what's waiting and the Library menu; the layout is on About (from Settings)",
           added == 6 and lib_menu == ["Show in folder", "Read again", "Make missing previews", "Open another library…"] and "Unsorted" in waiting and "model.json" in tree,
           (added, lib_menu, waiting))
 
@@ -1646,6 +1647,109 @@ async def agent_d_reviewed_import(pg):
               and (src / "Terrain/Rock.stl").is_file(), status)
     await pg.locator(".ci-results button").click()
 
+async def group1(pg):
+    """Group 1 (docs/PLAN.md, "Group 1 design"): the same file actions in every
+    view of a model, Add subcategory under the one shown, and the About page."""
+    both = ["Make a new model…", "Send to another model…"]
+
+    async def menu_at(target):
+        await pg.locator(target).first.click(button="right")
+        await pg.wait_for_selector("#context-menu")
+        labels = await labels_of(pg, "#context-menu .menu-label")
+        await pg.keyboard.press("Escape")
+        await pg.wait_for_selector("#context-menu", state="detached")
+        return labels
+
+    async def show_folder(key, model="group-one"):
+        # after the page has shown the model's main file, so it doesn't replace this
+        await pg.wait_for_function("""async id => {
+            const {fileSel} = await import('/ui/filesel.js');
+            return fileSel.get().src?.id === id && fileSel.get().shown === 'f:base.stl';
+        }""", arg=model)
+        await pg.evaluate("""async key => {
+            const {fileSel} = await import('/ui/filesel.js');
+            fileSel.set({shown: key, picked: [], anchor: null});
+        }""", key)
+        await pg.wait_for_selector("#contents-views")
+
+    # R1. a model's files: the same actions in the file panel, the viewing area's grid and list, and the bar
+    source = library / "Unsorted" / "Group one kit"
+    put(source / "Parts/arm.stl", cube(4))
+    put(source / "Parts/leg.stl", cube(5))
+    put(source / "base.stl", cube(6))
+    put(source / "model.json", json.dumps({"id": "group-one", "name": "Group one kit"}))
+    await api(pg, "library_scan", {"full": True})
+    await pg.goto(B + "#/model/group-one")
+    await pg.wait_for_selector('#model-page[data-model="group-one"]')
+    await show_folder("d:")
+    await pg.wait_for_selector('#workspace-stage [data-key="f:base.stl"]')
+    await pg.click('#contents-views [data-view="grid"]')
+    grid = await menu_at('#workspace-stage .file-tile[data-key="f:base.stl"]')
+    bar = await labels_of(pg, "#extraction-bar button")
+    await pg.click('#contents-views [data-view="list"]')
+    await pg.wait_for_selector('#workspace-stage .contents-row[data-key="d:Parts"]')
+    listed = await menu_at('#workspace-stage .contents-row[data-key="d:Parts"]')
+    panel = await menu_at('.file-panel [data-key="f:Parts/arm.stl"]')
+    check("a model's files have the same actions in the viewing area's grid and list, the file panel and the selection bar",
+          all(all(x in m for x in both) for m in (grid, listed, panel)) and bar == both + ["Clear"], (grid, listed, panel, bar))
+
+    # ... and so does the Unsorted preview beside the collection
+    await pg.goto(B + "#/browse/unsorted")
+    card = pg.locator(".results .card").filter(has=pg.locator('.card-name:text-is("Group one kit")'))
+    await card.click()
+    await pg.wait_for_selector('#unsorted-preview .unsorted-file-tree [data-key="f:base.stl"]')
+    preview_row = await menu_at('#unsorted-preview .unsorted-file-tree [data-key="f:base.stl"]')
+    preview_bar = await labels_of(pg, "#unsorted-preview #extraction-bar button")
+    await show_folder("d:")
+    await pg.wait_for_selector('#unsorted-preview .unsorted-preview-stage [data-key="d:Parts"]')
+    preview_stage = await menu_at('#unsorted-preview .unsorted-preview-stage [data-key="d:Parts"]')
+    check("the Unsorted preview has the same file actions and selection bar",
+          all(x in preview_row for x in both) and all(x in preview_stage for x in both) and preview_bar == both + ["Clear"],
+          (preview_row, preview_stage, preview_bar))
+    await pg.screenshot(path=str(out / "40-unsorted-file-actions.png"))
+
+    # R2. Add subcategory under the category or subcategory shown
+    await api(pg, "schema_create", {"schema": {"name": "Workshop", "subcategories": [{"name": "Tools"}]}})
+    await pg.evaluate("async () => { const {loadOverview} = await import('/ui/library.js'); await loadOverview(); }")
+    tree = pg.locator("#schema-tree")
+    await tree.locator('a.nav-link[aria-label="Workshop"]').click()
+    await pg.wait_for_selector("#nav-add-subcategory")
+    rows = await labels_of(pg, "#schema-tree .nav-label")
+    under_top = rows.index("Add subcategory") == rows.index("Workshop") + 2  # after its subcategory Tools
+    await tree.locator('a.nav-link[aria-label="Tools"]').click()
+    await pg.wait_for_function("() => location.hash.includes('Tools')")
+    rows = await labels_of(pg, "#schema-tree .nav-label")
+    under_sub = rows.count("Add subcategory") == 1 and rows.index("Add subcategory") == rows.index("Tools") + 1
+    await pg.click("#nav-add-subcategory")
+    await pg.fill("#nav-subcategory-name", "Clamps")
+    await pg.keyboard.press("Enter")
+    await pg.wait_for_function("() => document.querySelector('#toast')?.textContent.includes('Added Clamps')")
+    made = (library / "Workshop" / "Tools" / "Clamps").is_dir()
+    rows = await labels_of(pg, "#schema-tree .nav-label")
+    shown = rows.index("Clamps") == rows.index("Tools") + 1 and rows.index("Add subcategory") == rows.index("Clamps") + 1
+    await pg.screenshot(path=str(out / "41-add-subcategory.png"))
+    await pg.locator('#toast button:text-is("Undo")').click()
+    await pg.wait_for_function("() => ![...document.querySelectorAll('#schema-tree .nav-label')].some(e => e.textContent === 'Clamps')")
+    undone = not (library / "Workshop" / "Tools" / "Clamps").exists()
+    await pg.click("#nav-add-subcategory")
+    await pg.fill("#nav-subcategory-name", "Nothing")
+    await pg.keyboard.press("Escape")
+    cancelled = await pg.locator("#nav-subcategory-name").count() == 0 and not (library / "Workshop" / "Tools" / "Nothing").exists()
+    check("Add subcategory sits under the category or subcategory shown, adds in place with Undo, and Esc cancels",
+          under_top and under_sub and made and shown and undone and cancelled, (under_top, under_sub, made, shown, undone, cancelled, rows))
+
+    # R14. the About page: versions, the changelog with this version open, the licences
+    await pg.click('.sidebar a[href="#/about"]')
+    await pg.wait_for_selector("#about-changelog details")
+    versions = await pg.inner_text("#about-versions")
+    releases = await labels_of(pg, "#about-changelog summary strong")
+    opened = await pg.locator("#about-changelog details[open]").count()
+    third = await pg.inner_text("#about-licences")
+    agents = await pg.locator("#about-changelog :text('For agents')").count()
+    check("About shows the versions, the changelog newest first with one release open, and the licences",
+          "Library format" in versions and "three.js" in versions and "r" in versions and len(releases) >= 5 and "0.5.6 (2026-10-10)" in releases
+          and opened == 1 and "Preact" in third and "MIT" in third and agents == 0, (versions, releases[:4], opened))
+    await pg.screenshot(path=str(out / "42-about.png"), full_page=True)
 async def review_checks(pg):
     """A review's checks (reading and hashing every file) run as a job: progress, Stop, same answer."""
     big = library / "Unsorted/Check progress"
@@ -1712,7 +1816,7 @@ async def main():
             await pg.wait_for_selector("#no-results")
             unsorted = await pg.inner_text(".page-head h1")
             active = await pg.inner_text(".sidebar .nav-link.active .nav-label")
-            check("the menu's places open", labels == ["Home", "Import", "All models", "Unsorted", "Starred", "Duplicates", "Settings"] and unsorted == "Unsorted" and active == "Unsorted", (labels, unsorted, active))
+            check("the menu's places open", labels == ["Home", "Import", "All models", "Unsorted", "Starred", "Duplicates", "Settings", "About"] and unsorted == "Unsorted" and active == "Unsorted", (labels, unsorted, active))
 
             await phase1(pg)
             await phase2(pg)
@@ -1729,6 +1833,7 @@ async def main():
             await card_checks(pg, library, B, out, api, check, PNG, cube)
             await agent_c_pdf_archive_checks(pg)
             await agent_d_reviewed_import(pg)
+            await group1(pg)
             await review_checks(pg)
 
             # 3. renaming the library

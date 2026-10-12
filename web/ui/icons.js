@@ -5,6 +5,7 @@ const svg = (d, size = 16) => html`<svg width=${size} height=${size} viewBox="0 
   stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 
 export const Icon = {
+  info: (s) => svg(html`<circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7.5v.01" />`, s),
   search: (s) => svg(html`<circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" />`, s),
   grid: (s) => svg(html`<rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" />`, s),
   list: (s) => svg(html`<rect x="3" y="4" width="5" height="4" rx="1" /><rect x="3" y="10" width="5" height="4" rx="1" /><rect x="3" y="16" width="5" height="4" rx="1" /><path d="M11 6h10M11 12h10M11 18h10" />`, s),

@@ -12,8 +12,7 @@ import { FilePanel } from "./filepanel.js";
 import { WorkspaceDetails } from "./workspace-details.js";
 import { WorkspaceStage } from "./stage.js";
 import { fileSel, reset, clear } from "./filesel.js";
-import { ExtractionBar, extractionAction, installExtractKeys } from "./extract.js";
-import { sendFilesAction } from "./fileops.js";
+import { ExtractionBar, fileActions, installExtractKeys } from "./extract.js";
 import { ActionRow, MODEL_ACTIONS, usePageKeys, runKey, letter, editDetails, writable, typing } from "./actions.js";
 import { PageHead } from "./layout.js";
 import { PlaceLinks } from "./details.js";
@@ -98,7 +97,7 @@ function ModelWorkspace({ model, names, narrow, onModelChange }) {
     addEventListener("keydown", key);
     return () => removeEventListener("keydown", key);
   });
-  const contextActions = () => [extractionAction(src, model), sendFilesAction(model)];
+  const contextActions = () => fileActions(src, model);
   const beginDetailsResize = (event) => {
     event.preventDefault();
     const x = event.clientX, width = detailWidth;
@@ -109,7 +108,7 @@ function ModelWorkspace({ model, names, narrow, onModelChange }) {
   return html`<div class="model-workspace">
     ${narrow && (open || detailsOpen) ? html`<button type="button" class="file-panel-shade" aria-label="Close panel" onClick=${() => ui.set({ mobilePanel: null })}></button>` : null}
     <${FilePanel} src=${src} model=${model} files=${files} variants=${variants} variant=${chosen} setVariant=${setVariant} open=${open} toggle=${toggle} narrow=${narrow} contextActions=${contextActions} />
-    <section class="workspace-viewing-area"><${ExtractionBar} src=${src} model=${model} /><${WorkspaceStage} src=${src} model=${model} files=${files} />
+    <section class="workspace-viewing-area"><${ExtractionBar} src=${src} model=${model} /><${WorkspaceStage} src=${src} model=${model} files=${files} contextActions=${contextActions} />
       ${model.details?.notes ? html`<details class="workspace-notes"><summary>Notes</summary><p>${model.details.notes}</p></details>` : null}
     </section>
     <aside id="workspace-details-panel" class=${`details-panel${detailsOpen ? "" : " collapsed"}${narrow ? " drawer" : ""}`} style=${{ width: detailsOpen ? `${detailWidth}px` : "36px" }} aria-label="Model details">

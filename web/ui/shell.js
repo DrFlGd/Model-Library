@@ -10,6 +10,7 @@ import { Home } from "./home.js";
 import { Browser } from "./browser.js";
 import { Dialogs } from "./dialogs.js";
 import { Settings } from "./settings.js";
+import { About } from "./about.js";
 import { ImportPage } from "./sort.js";
 import { onDropped, DropHint } from "./drop.js";
 import { DuplicatesPage } from "./dupes.js";
@@ -21,6 +22,7 @@ function Main() {
   const route = useStore(ui, (s) => s.route);
   const blocked = useStore(ui, (s) => s.firstRun && !s.library);
   if (route === "settings" && !blocked) return html`<${Settings} />`;
+  if (route === "about") return html`<${About} />`;
   if (route === "import" && !blocked) return html`<${ImportPage} />`;
   if (route === "duplicates" && !blocked) return html`<${DuplicatesPage} />`;
   if (route.startsWith("model:") && !blocked) return html`<${ModelPage} key=${route} id=${route.slice(6)} />`;

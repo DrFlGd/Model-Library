@@ -10,6 +10,7 @@ import { SelectionRows } from "./parts.js";
 import { WorkspaceStage } from "./stage.js";
 import { reset } from "./filesel.js";
 import { ViewSwitch } from "./layout.js";
+import { ExtractionBar, fileActions } from "./extract.js";
 
 export function UnsortedPreview({ id, narrow = false, onClose }) {
   const rev = useStore(ui, (s) => s.catalogRev);
@@ -49,8 +50,9 @@ export function UnsortedPreview({ id, narrow = false, onClose }) {
       ${tab === "details" ? html`<${ModelDetails} id=${m.id} />` : html`
         <div class="unsorted-quick-details"><${ModelDetails} id=${m.id} /></div>
         <${ViewSwitch} id="unsorted-file-views" views=${[["folders", "Folders", "folder"], ["all", "List", "list"], ["type", "By type", "grouped"]]} value=${view} onChange=${(filePanelView) => setPref({ filePanelView })} />
-        <div class="unsorted-file-tree"><${SelectionRows} key=${m.id} src=${src} files=${m.files_list || []} name=${m.name} view=${view} /></div>
-        <div class="unsorted-preview-stage"><${WorkspaceStage} key=${m.id} src=${src} model=${m} files=${m.files_list || []} /></div>
+        <div class="unsorted-file-tree"><${SelectionRows} key=${m.id} src=${src} files=${m.files_list || []} name=${m.name} view=${view} contextActions=${() => fileActions(src, m)} /></div>
+        <${ExtractionBar} src=${src} model=${m} />
+        <div class="unsorted-preview-stage"><${WorkspaceStage} key=${m.id} src=${src} model=${m} files=${m.files_list || []} contextActions=${() => fileActions(src, m)} /></div>
       `}
     `}
   </aside>`;

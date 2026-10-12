@@ -3,12 +3,19 @@
 
     python3 tools/build_desktop.py --out build/desktop [--fetch-fonts]
 
-Copies web/ to <out>/ui (tauri.conf.json's frontendDist). The app works offline,
+Copies web/ to <out>/ui (tauri.conf.json's frontendDist), with CHANGELOG.md,
+THIRD_PARTY.md and build-info.json (date, commit, vendored library versions)
+for the About page. The app works offline,
 so the Google Fonts lines are dropped from index.html: with --fetch-fonts (CI)
 the Archivo font (SIL OFL) is bundled instead, otherwise system fonts are used.
 """
 import argparse
+import datetime
+import json
+import os
+import re
 import shutil
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -33,6 +40,41 @@ for script in ui.rglob("*"):
             f"{script.relative_to(ui)} contains the PDF magic marker; "
             "Tauri can serve this JavaScript module as application/pdf."
         )
+
+# The About page reads these next to index.html.
+for doc in ("CHANGELOG.md", "THIRD_PARTY.md"):
+    shutil.copy2(ROOT / doc, ui / doc)
+
+
+def commit():
+    sha = os.environ.get("GITHUB_SHA")
+    if not sha:
+        try:
+            sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip()
+        except (OSError, subprocess.CalledProcessError):
+            return None
+    return sha[:7] or None
+
+
+def found(path, pattern):
+    m = re.search(pattern, (ROOT / path).read_text(encoding="utf-8", errors="replace"))
+    return m.group(1) if m else None
+
+
+parts = []
+for name, path, pattern, fmt in (
+    ("Preact", "web/vendor/PREACT_NOTICE.txt", r"Preact (\d+\.\d+\.\d+)", "{}"),
+    ("htm", "web/vendor/PREACT_NOTICE.txt", r"htm \(\S+ @ ([0-9a-f]{7})", "@ {}"),
+    ("three.js", "web/vendor/three/three.core.js", r"REVISION = '(\d+)'", "r{}"),
+):
+    v = found(path, pattern)
+    if v:
+        parts.append({"name": name, "version": fmt.format(v)})
+(ui / "build-info.json").write_text(json.dumps({
+    "date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d"),
+    "commit": commit(),
+    "parts": parts,
+}, indent=2) + "\n", encoding="utf-8")
 
 FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/archivo/"
 index = ui / "index.html"
