@@ -2,7 +2,7 @@
 import { html, useState, useEffect, useLayoutEffect, useRef } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui, setPref } from "./state.js";
-import { extractionAction } from "./extract.js";
+import { fileActions } from "./extract.js";
 import { ctx } from "./context.js";
 import { Icon } from "./icons.js";
 import { api, apiBytes, isDesktop, openModelFile, openArchiveEntry } from "./library.js";
@@ -116,8 +116,7 @@ export function Contents({ src, model, files, shown, archive, entries, error, co
         ...(!row.entry ? [{ id: "folder", label: "Show in folder", icon: "folder", run: () => ctx.platform.library.openPath([lib.path, src.rel, row.folder ? row.rel : parentPath(row.rel)].filter(Boolean).join("/")) }] : []),
       ] : []),
       ...(!row.entry && fileType(row.name).group === "image" ? [{ id: "cover", label: "Use as cover", icon: "image", disabled: lib?.read_only ? "The library is read-only." : false, run: () => useAsCover(src.id, row.file) }] : []),
-      extractionAction(src, model),
-      ...(contextActions?.(row) || []),
+      ...(contextActions ? contextActions(row) : fileActions(src, model)),
     ]);
   };
   const key = (e) => {

@@ -183,6 +183,9 @@ input:invalid { border-color: var(--danger); }
 .nav-head { font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--graphite); margin: 16px 8px 4px 30px; }
 .nav-note { font-size: 12.5px; margin: 0 8px 0 30px; }
 .nav-foot { margin-top: auto; padding-top: 18px; }
+.nav-add-sub { width: 100%; border: 0; background: transparent; font: inherit; font-size: 13px; color: var(--graphite); cursor: pointer; text-align: left; }
+.nav-add-sub:hover { color: var(--ink); }
+.nav-add-input { flex: 1; min-width: 0; margin: 2px 0; padding: 4px 8px; font-size: 13px; }
 .nav-foot li { padding-left: 0; }
 
 /* browser */
@@ -347,6 +350,22 @@ input:invalid { border-color: var(--danger); }
 .home-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
 .phase-list { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
 .phase-list .now { font-weight: 700; }
+.about-versions { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; }
+.about-versions > div { display: contents; }
+.about-versions dt { color: var(--graphite); }
+.about-versions dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.about-release { border: 1px solid var(--steel-2); border-radius: var(--radius-s); padding: 8px 12px; background: var(--panel); }
+.about-release summary { cursor: pointer; }
+.about-release.now { border-color: var(--graphite); }
+.about-badge { font-size: 11.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--sel); margin-left: 6px; }
+.about-md { display: grid; gap: 8px; padding-top: 8px; font-size: 14px; line-height: 1.5; }
+.about-md h3 { font-size: 14.5px; margin: 6px 0 0; }
+.about-md h4 { font-size: 13.5px; margin: 4px 0 0; }
+.about-md ul { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.about-md code { font-size: 12.5px; overflow-wrap: anywhere; }
+.about-table { overflow-x: auto; }
+.about-table table { border-collapse: collapse; font-size: 13px; }
+.about-table th, .about-table td { text-align: left; vertical-align: top; padding: 4px 10px 4px 0; border-bottom: 1px solid var(--steel-2); }
 
 /* browse: what a section will list */
 .browse-empty { flex: 1; overflow: auto; padding: 30px 32px 60px; display: grid; gap: 10px; align-content: start; }
@@ -723,7 +742,7 @@ body:has(.sw-go) .toast { bottom: 92px; }
 .home .home-model .card-name { margin-top: 6px; color: var(--ink); }
 #home-categories .ls-list a { font-weight: 600; }
 #home-waiting p { margin: 0; }
-#settings-about .folder-tree { max-width: 100%; }
+#about-layout .folder-tree { max-width: 100%; }
 /* Duplicates: the list, and the details panel beside it */
 .dupes-layout { min-height: 0; }
 .dupes-layout > .pages { min-width: 0; }

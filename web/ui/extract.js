@@ -40,6 +40,13 @@ export function extractionAction(src, model = src?.model) {
   } };
 }
 
+/** What can be done with a model's selected files, the same in every view
+ *  (selection bar and every right-click menu on its files). */
+export function fileActions(src, model = src?.model) {
+  if (!src || src.kind !== "model") return [];
+  return [extractionAction(src, model), sendFilesAction(model)];
+}
+
 export function installExtractKeys() {
   const key = (e) => {
     if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.key.toLowerCase() !== "n" || ui.get().dialog || ui.get().menu || e.target.closest?.("input, textarea, select, [contenteditable=true]")) return;
@@ -51,17 +58,18 @@ export function installExtractKeys() {
   return () => removeEventListener("keydown", key);
 }
 
+const BAR_IDS = { extract: "extract-model" };
+
 export function ExtractionBar({ src, model = src?.model }) {
   const selection = useStore(fileSel);
   useStore(ui, (s) => s.library?.read_only);
   if (!selection.picked.length) return null;
-  const action = extractionAction(src, model);
   const p = pickedFiles(selection.picked);
   const count = new Set((model?.files_list || []).filter((f) => p.files.some((r) => !r || f.rel === r || f.rel.startsWith(`${r}/`))).map((f) => f.rel)).size + p.entries.length;
   return html`<div class="extraction-bar" id="extraction-bar" aria-label="Selected files">
     <span>${count || selection.picked.length} ${(count || selection.picked.length) === 1 ? "file selected" : "files selected"}</span>
-    <button type="button" class="ghost" id="extract-model" disabled=${!!action.disabled} title=${action.disabled || "Make a new model (N)"} onClick=${action.run}>${action.label}</button>
-    ${(() => { const transfer = sendFilesAction(model); return html`<button type="button" class="ghost" id="send-model-files" disabled=${!!transfer.disabled} title=${transfer.disabled || transfer.label} onClick=${transfer.run}>${transfer.label}</button>`; })()}
+    ${fileActions(src, model).map((action) => html`<button type="button" class="ghost" key=${action.id} id=${BAR_IDS[action.id] || action.id} disabled=${!!action.disabled}
+      title=${action.disabled || (action.key ? `${action.label.replace(/…$/, "")} (${action.key})` : action.label)} onClick=${action.run}>${action.label}</button>`)}
     <button type="button" class="ghost" onClick=${clear}>Clear</button>
   </div>`;
 }

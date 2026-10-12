@@ -133,6 +133,21 @@ export function RenameNode({ schemaId, path }) {
 }
 
 /** Add a subcategory to a category or inside one of its subcategories (its folder is made too). */
+/** Add a subcategory `name` under `path` of category `schemaId` (its folder is
+ *  made now), with Undo in the message; the dialog and the menu's add row share it. */
+export async function addSubcategory(schemaId, path, name) {
+  const sc = ui.get().overview?.schemas?.find((s) => s.id === schemaId);
+  const r = await api("subcategory_add", { schema: schemaId, path, name });
+  await loadOverview();
+  const made = Array.isArray(r?.path) && r.path.length ? r.path : [...path, name.trim()];
+  undoable(`Added ${made[made.length - 1]} to ${placeName(sc, path)}.`, async () => {
+    await api("subcategory_remove", { schema: schemaId, path: made });
+    await loadOverview();
+    if (showing(schemaId, made)) goTo(schemaId, path);
+  });
+  return made;
+}
+
 export function AddSubcategory({ schemaId, path }) {
   const overview = useStore(ui, (s) => s.overview);
   const sc = overview?.schemas?.find((s) => s.id === schemaId);
@@ -144,15 +159,8 @@ export function AddSubcategory({ schemaId, path }) {
     setBusy(true);
     setError("");
     try {
-      const r = await api("subcategory_add", { schema: schemaId, path, name });
-      await loadOverview();
+      await addSubcategory(schemaId, path, name);
       close();
-      const made = Array.isArray(r?.path) && r.path.length ? r.path : [...path, name.trim()];
-      undoable(`Added ${made[made.length - 1]} to ${placeName(sc, path)}.`, async () => {
-        await api("subcategory_remove", { schema: schemaId, path: made });
-        await loadOverview();
-        if (showing(schemaId, made)) goTo(schemaId, path);
-      });
     } catch (e) {
       setError(e.message || String(e));
     } finally {
