@@ -15,6 +15,7 @@ import { MODEL_ACTIONS, menuItems, openMenu, usePageKeys, runKey, letter, select
 import { categoryItems } from "./categories.js";
 import { PageHead, ViewSwitch, SortMenu, SearchNote } from "./layout.js";
 import { UnsortedPreview } from "./unsorted-preview.js";
+import { CatIcon, iconOf } from "./caticons.js";
 
 /** Open a model's own page. */
 const openModel = (m) => { location.hash = routeHash(`model:${m.id}`); };
@@ -32,7 +33,8 @@ function Title({ scope, overview }) {
   const [id, ...values] = scope.slice(7).split("/").map(decodeURIComponent);
   const schema = overview?.schemas?.find((s) => s.id === id);
   const crumbs = [[schema?.name || id, []], ...values.map((v, i) => [v, values.slice(0, i + 1)])];
-  return html`<h1 class="crumbs">${crumbs.map(([label, path], i) => html`${i ? html`<span class="crumb-sep"> › </span>` : null}${
+  const icon = iconOf(schema, values);
+  return html`<h1 class="crumbs">${icon ? html`<${CatIcon} icon=${icon} size=${22} />` : null}${crumbs.map(([label, path], i) => html`${i ? html`<span class="crumb-sep"> › </span>` : null}${
     i === crumbs.length - 1 ? label : html`<a href=${routeHash(`browse:${schemaScope(id, path)}`)}>${label}</a>`}`)}</h1>`;
 }
 
@@ -50,6 +52,45 @@ function categoryMenu(scope) {
   if (!scope.startsWith("schema:")) return null;
   const [id, ...values] = scope.slice(7).split("/").map(decodeURIComponent);
   return { id: "category-menu", label: values.length ? "Subcategory" : "Category", icon: "layers", title: "Add, edit, rename or delete", items: () => categoryItems(id, values) };
+}
+
+/** The category a scope shows, with its schema and its tree node (children, count). */
+function placeOf(scope, overview) {
+  if (!scope.startsWith("schema:")) return null;
+  const [id, ...path] = scope.slice(7).split("/").map(decodeURIComponent);
+  const schema = overview?.schemas?.find((s) => s.id === id);
+  if (!schema) return null;
+  let node = { children: schema.tree || [], count: schema.count };
+  for (const v of path) {
+    node = node.children.find((n) => n.value.toLowerCase() === v.toLowerCase());
+    if (!node) return null;
+  }
+  return { schema, path, node };
+}
+
+const SHOW = [["subs", "Subcategories", "layers"], ["models", "Models", "grid"]];
+
+/** A subcategory as a tile: its icon, name, how many models it holds, and four of their covers (R3). */
+function SubTile({ schema, path, node, rev }) {
+  const [models, setModels] = useState(null);
+  const scope = schemaScope(schema.id, path);
+  useEffect(() => {
+    let live = true;
+    if (!node.count) { setModels([]); return; }
+    api("models_query", { scope, q: "", sort: "added", limit: 4 }).then((r) => { if (live) setModels(r.items || []); }, () => { if (live) setModels([]); });
+    return () => { live = false; };
+  }, [scope, rev, node.count]);
+  const icon = iconOf(schema, path);
+  const subs = node.children.length;
+  return html`<a class="subcat-tile" href=${routeHash(`browse:${scope}`)} data-sub=${node.value} title=${node.value}
+    onContextMenu=${(e) => openMenu(e, categoryItems(schema.id, path))}
+    onKeyDown=${(e) => { if ((e.shiftKey && e.key === "F10") || e.key === "ContextMenu") { e.preventDefault(); e.stopPropagation(); openMenu(e.currentTarget, categoryItems(schema.id, path)); } }}>
+    <span class=${`subcat-pics subcat-pics-${Math.max(1, models?.length || 0)}`}>${models?.length
+      ? models.map((m) => html`<${Cover} key=${m.id} model=${m} cls="subcat-pic" />`)
+      : html`<span class="subcat-empty">${icon ? html`<${CatIcon} icon=${icon} size=${34} />` : Icon.folder(34)}</span>`}</span>
+    <span class="subcat-name">${icon ? html`<${CatIcon} icon=${icon} size=${15} />` : null}<span>${node.value}</span></span>
+    <span class="subcat-meta">${node.count} ${node.count === 1 ? "model" : "models"}${subs ? ` · ${subs} ${subs === 1 ? "subcategory" : "subcategories"}` : ""}</span>
+  </a>`;
 }
 
 const cardEl = (id) => document.querySelector(`.results [data-model="${CSS.escape(id)}"]`);
@@ -124,6 +165,12 @@ function filtersIn(q) {
 export function Browser() {
   const s = useStore(ui, (st) => ({ route: st.route, q: st.q, sort: st.sort, layout: st.layout, selection: st.selection, picked: st.picked, rev: st.catalogRev, favs: st.favs, overview: st.overview, library: st.library, navOpen: st.navOpen }));
   const scope = s.route.slice(7);
+  const catShow = useStore(ui, (st) => st.catShow);
+  const place = placeOf(scope, s.overview);
+  const subs = place?.node.children || [];
+  const show = subs.length ? (catShow[scope] || "subs") : "models";
+  // Subcategories: their tiles, then only the models filed at this level (a search looks everywhere below)
+  const direct = show === "subs" && !s.q;
   const [text, setText] = useState(s.q);
   const [result, setResult] = useState(null);
   const [limit, setLimit] = useState(PAGE);
@@ -144,9 +191,9 @@ export function Browser() {
     if (!s.library) return;
     const n = ++seq.current;
     const q = s.q;
-    api("models_query", { scope, q, sort: s.sort, limit }).then((r) => { if (n === seq.current) setResult({ ...r, q, scope }); },
-      (e) => { if (n === seq.current) { setResult({ total: 0, items: [], facets: {}, q, scope, error: e.message || String(e) }); } });
-  }, [scope, s.q, s.sort, limit, s.rev, s.favs.length, s.library?.path]);
+    api("models_query", { scope, q, sort: s.sort, limit, direct }).then((r) => { if (n === seq.current) setResult({ ...r, q, scope, direct }); },
+      (e) => { if (n === seq.current) { setResult({ total: 0, items: [], facets: {}, q, scope, direct, error: e.message || String(e) }); } });
+  }, [scope, s.q, s.sort, limit, s.rev, s.favs.length, s.library?.path, direct]);
   // typing searches after a short pause
   useEffect(() => {
     if (text === s.q) return;
@@ -214,8 +261,12 @@ export function Browser() {
   const name = placeName(scope, s.overview);
   const unsortedOne = scope === "unsorted" && picked.length === 1;
   // the answer for this place and search (the last one stays up while the next comes)
-  const fresh = result && result.q === s.q && result.scope === scope ? result : null;
-  const count = html`<span class="page-count" id="browse-count" data-q=${result ? result.q : null} data-scope=${result ? result.scope : null}>${result ? `${result.total} ${result.total === 1 ? "model" : "models"}` : ""}</span>`;
+  const fresh = result && result.q === s.q && result.scope === scope && result.direct === direct ? result : null;
+  const total = direct ? place.node.count : result?.total;
+  const count = html`<span class="page-count" id="browse-count" data-q=${result ? result.q : null} data-scope=${result ? result.scope : null}>${result ? `${total} ${total === 1 ? "model" : "models"}` : ""}</span>`;
+  const emptyNote = s.q ? `Nothing in ${name} matches that search.` : scope === "favs" ? "Nothing starred yet: star a model to keep it here."
+    : scope === "unsorted" ? "No models here yet."
+    : html`No models here yet. Drop model files or folders on this window to add them here, or use <a href=${routeHash("import")}>Import</a>.`;
   const wider = s.q && scope !== "all" ? html`<a href=${routeHash("browse:all")} id="search-everywhere">Search all models</a>` : null;
   return html`<div class="browser">
     <div class="browse-main">
@@ -225,6 +276,7 @@ export function Browser() {
           <input id="search" data-search type="search" value=${text} placeholder="Search names, authors, tags… or author:jo tag:presupported" autocomplete="off" spellcheck="false"
             title="Search (/)" onInput=${(e) => setText(e.target.value)} /></label>
         <${SortMenu} id="sort" options=${SORTS} value=${s.sort} onChange=${(v) => setPref({ sort: v })} />
+        ${subs.length ? html`<${ViewSwitch} id="cat-show" label="Show" views=${SHOW} value=${show} onChange=${(v) => setPref({ catShow: { ...catShow, [scope]: v } })} />` : null}
         ${previewNarrow && unsortedOne ? html`<button type="button" class="ghost" id="unsorted-preview-open" onClick=${() => { ui.set({ navOpen: false }); setPreviewOpen(true); }}>Preview files</button>` : null}
         <${ViewSwitch} views=${VIEWS} value=${s.layout === "list" ? "list" : "grid"} onChange=${(v) => setPref({ layout: v })} />
       </div>
@@ -236,7 +288,9 @@ export function Browser() {
       <div class="browse-scroll">
         <${SearchNote} q=${s.q} found=${fresh ? `${fresh.total} found in ${name}` : ""} wider=${wider} onClear=${() => { setText(""); ui.set({ q: "" }); }} />
         ${result?.error ? html`<p class="warn-note" role="alert">${result.error}</p>` : null}
-        ${result && !items.length && !result.error ? html`<div class="empty" id="no-results">${s.q ? `Nothing in ${name} matches that search.` : scope === "favs" ? "Nothing starred yet: star a model to keep it here." : "No models here yet."}</div>` : null}
+        ${direct ? html`<div class="subcat-tiles" id="subcat-tiles" aria-label="Subcategories">${subs.map((n) => html`<${SubTile} key=${n.value} schema=${place.schema} path=${[...place.path, n.value]} node=${n} rev=${s.rev} />`)}</div>
+          ${items.length ? html`<h2 class="here-head" id="here-head">Here in ${name}</h2>` : null}` : null}
+        ${result && !items.length && !result.error && !direct ? html`<div class="empty" id="no-results">${emptyNote}</div>` : null}
         ${s.layout === "list" && items.length ? html`<${ListHead} sort=${s.sort} />` : null}
         <div class=${`results ${s.layout === "list" ? "list-view" : "grid-view"}${picked.length > 1 ? " picking" : ""}`} role="listbox" aria-multiselectable="true" aria-label="Models">
           ${items.map((m) => html`<${View} key=${m.id} m=${m} items=${items} selected=${s.picked.includes(m.id)} fav=${s.favs.includes(m.id)} onMenu=${onMenu} />`)}

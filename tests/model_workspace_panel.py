@@ -226,6 +226,8 @@ async def details_refresh_checks(pg, check, out=None):
           await pg.get_attribute('#workspace-details-form', 'data-dirty') == 'false')
 
     # Race after the form's render but before Save is caught by preflight.
+    # (Leaving the tags box for Use latest queued a save; let it find nothing to save first.)
+    await pg.evaluate("() => new Promise((r) => setTimeout(r, 50))")
     await pg.fill('#workspace-edit-notes', 'Unsaved preflight test')
     await remote_update({'tags': 'Agent A preflight update'}, refresh=False)
     await pg.click('#workspace-edit-tags')  # leaving the box saves, after checking for newer changes

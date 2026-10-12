@@ -8,12 +8,14 @@
 import { html, useState, useEffect } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui } from "./state.js";
-import { routeHash, schemaScope } from "./context.js";
+import { routeHash, schemaScope, ctx } from "./context.js";
 import { Icon } from "./icons.js";
 import { api, planChange, runChange, undoChange, loadOverview, toast, undoable, recorded, followIds } from "./library.js";
 import { Dialog, close, FieldInput, FIELD_TYPES } from "./dialogs.js";
 import { SubcategoryTree, editorTree, treeSpec, treeReady, treeList, nodeAt, origs } from "./category.js";
 import { writable } from "./actions.js";
+import { BUILTIN, CatIcon, iconOf } from "./caticons.js";
+import { isDesktop } from "./library.js";
 
 const KEY = "\u001f";
 const placeName = (sc, path) => [sc.name, ...path].join(" › ");
@@ -46,6 +48,7 @@ export function categoryItems(schemaId, path) {
   return [
     { id: "add-subcategory", label: "Add subcategory…", icon: "plus", disabled: off, run: () => ui.set({ dialog: { type: "add-subcategory", schemaId, path } }) },
     { id: "edit-category", label: "Edit category…", icon: "edit", disabled: off, title: `Edit ${sc.name}: its subcategories, folders and fields`, run: () => ui.set({ dialog: { type: "edit-schema", schemaId } }) },
+    { id: "choose-icon", label: "Choose icon…", icon: "image", disabled: off, run: () => ui.set({ dialog: { type: "choose-icon", schemaId, path } }) },
     ...(path.length ? [{ id: "rename-subcategory", label: "Rename or move…", icon: "move", disabled: off, run: () => ui.set({ dialog: { type: "rename-node", schemaId, path } }) }] : []),
     { id: "merge-categories", label: "Merge categories…", icon: "move", disabled: off, run: () => ui.set({ dialog: { type: "merge-categories", schemaId, path } }) },
     { sep: true },
@@ -146,6 +149,54 @@ export async function addSubcategory(schemaId, path, name) {
     if (showing(schemaId, made)) goTo(schemaId, path);
   });
   return made;
+}
+
+/** Give a category or subcategory an icon ({ icon: "builtin:…" | null } or { file }), with Undo. */
+export async function setIcon(schemaId, path, choice) {
+  const sc = ui.get().overview?.schemas?.find((s) => s.id === schemaId);
+  const r = await api("category_icon_set", { schema: schemaId, path, ...choice });
+  await loadOverview();
+  const none = !choice.file && !choice.icon;
+  undoable(`${none ? "Removed the icon of" : "Changed the icon of"} ${placeName(sc, path)}.`, async () => {
+    await api("category_icon_set", { schema: schemaId, path, icon: r?.before ?? null });
+    await loadOverview();
+  });
+}
+
+/** Choose icon…: the built-in set (searchable), a picture of your own, or none. */
+export function ChooseIcon({ schemaId, path }) {
+  const overview = useStore(ui, (s) => s.overview);
+  const sc = overview?.schemas?.find((s) => s.id === schemaId);
+  const now = iconOf(sc, path);
+  const [pick, setPick] = useState(now);
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  if (!sc) return null;
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = Object.entries(BUILTIN).filter(([name, [label, more]]) => words.every((w) => `${name} ${label} ${more}`.toLowerCase().includes(w)));
+  const apply = async (choice) => {
+    setBusy(true); setError("");
+    try { await setIcon(schemaId, path, choice); close(); }
+    catch (e) { setError(e.message || String(e)); }
+    finally { setBusy(false); }
+  };
+  const own = async () => {
+    const file = await ctx.platform.library.pickFile("Choose a picture for the icon", ["png", "jpg", "jpeg", "webp", "svg"]);
+    if (file) apply({ file });
+  };
+  return html`<${Dialog} title=${`Icon for ${placeName(sc, path)}`} id="icon-dialog" onSubmit=${() => apply({ icon: pick })} busy=${busy || pick === now} error=${error} submitLabel="Use this icon">
+    <input type="search" id="icon-search" placeholder="Search icons (castle, tool, plant…)" aria-label="Search icons" value=${q} onInput=${(e) => setQ(e.target.value)} />
+    <div class="icon-grid" role="group" aria-label="Icons">
+      <button type="button" class="icon-choice" data-icon="" aria-pressed=${!pick ? "true" : "false"} title="No icon" onClick=${() => setPick(null)}><span class="icon-none">${Icon.close(16)}</span><span>None</span></button>
+      ${pick?.startsWith("file:") ? html`<button type="button" class="icon-choice" data-icon=${pick} aria-pressed="true" title="Your picture"><${CatIcon} icon=${pick} size=${22} /><span>Yours</span></button>` : null}
+      ${shown.map(([name, [label]]) => html`<button type="button" key=${name} class="icon-choice" data-icon=${`builtin:${name}`} aria-pressed=${pick === `builtin:${name}` ? "true" : "false"} title=${label}
+        onClick=${() => setPick(`builtin:${name}`)} onDblClick=${() => apply({ icon: `builtin:${name}` })}><${CatIcon} icon=${`builtin:${name}`} size=${22} /><span>${label}</span></button>`)}
+    </div>
+    ${!shown.length ? html`<p class="muted">No icon matches that.</p>` : null}
+    ${isDesktop() ? html`<p><button type="button" class="ghost" id="icon-own" disabled=${busy} onClick=${own}>${Icon.image(15)} Use a picture of your own…</button>
+      <span class="muted"> PNG, JPEG, WebP or SVG up to 512 KB, kept in the library.</span></p>` : null}
+  </${Dialog}>`;
 }
 
 export function AddSubcategory({ schemaId, path }) {

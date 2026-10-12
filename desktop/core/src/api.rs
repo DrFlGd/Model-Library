@@ -1756,7 +1756,9 @@ impl App {
                     args["limit"].as_u64().unwrap_or(200).min(2000) as usize,
                 );
                 j(self
-                    .with_index(None, |ix, _| ix.query(scope, q, sort, offset, limit, &favs))
+                    .with_index(None, |ix, _| {
+                        ix.query_at(scope, q, sort, offset, limit, &favs, args["direct"].as_bool() == Some(true))
+                    })
                     .await?)
             }
             "model_get" => {
@@ -2080,6 +2082,22 @@ impl App {
                     .await?
                     .map_err(e2s)?;
                 j(r)
+            }
+            "category_icon_set" => {
+                let lib = self.library()?;
+                let id = arg(&args, "schema").map_err(e2s)?.to_string();
+                let path: Vec<String> = args["path"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect();
+                let file = args["file"].as_str().filter(|f| !f.is_empty()).map(std::path::Path::new);
+                let before = schema::set_icon(&lib, &id, &path, args["icon"].as_str(), file)
+                    .map_err(e2s)?;
+                self.with_index(Some(false), |_, _| ()).await?;
+                j(json!({ "before": before }))
             }
             "subcategory_add" | "subcategory_remove" => {
                 let lib = self.library()?;

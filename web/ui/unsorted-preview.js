@@ -11,6 +11,7 @@ import { WorkspaceStage } from "./stage.js";
 import { reset } from "./filesel.js";
 import { ViewSwitch } from "./layout.js";
 import { ExtractionBar, fileActions } from "./extract.js";
+import { Icon } from "./icons.js";
 
 export function UnsortedPreview({ id, narrow = false, onClose }) {
   const rev = useStore(ui, (s) => s.catalogRev);
@@ -34,22 +35,20 @@ export function UnsortedPreview({ id, narrow = false, onClose }) {
   const src = m ? { kind: "model", id: m.id, rel: m.rel, model: m } : null;
   return html`<aside class=${`unsorted-preview${narrow ? " mobile-preview" : ""}`} aria-label="Unsorted model preview" id="unsorted-preview">
     <header class="unsorted-preview-head">
-      <strong>Model preview</strong>
+      <strong title=${m?.name || ""}>${m?.name || "Model"}</strong>
+      ${m ? html`<span class="unsorted-preview-actions">
+        <button type="button" class="ghost" id="unsorted-move" title="Move to category… (M)" onClick=${() => ui.set({ dialog: { type: "move-models", models: [m] } })}>${Icon.move(14)} Move to category…</button>
+        <button type="button" class="ghost" id="unsorted-open" title="Open its page (Enter)" onClick=${() => { location.hash = routeHash(`model:${m.id}`); }}>${Icon.eye(14)} Open</button></span>` : null}
       ${narrow ? html`<button type="button" class="ghost" onClick=${onClose} aria-label="Close file preview">Close</button>` : null}
     </header>
     <div class="unsorted-preview-tabs" role="group" aria-label="Preview panel">
-      <button type="button" class="ghost" aria-pressed=${tab === "files"} onClick=${() => setTab("files")}>Files</button>
-      <button type="button" class="ghost" aria-pressed=${tab === "details"} onClick=${() => setTab("details")}>Details</button>
+      <button type="button" class="ghost" id="unsorted-tab-files" aria-pressed=${tab === "files"} onClick=${() => setTab("files")}>Files</button>
+      <button type="button" class="ghost" id="unsorted-tab-details" aria-pressed=${tab === "details"} onClick=${() => setTab("details")}>Details</button>
     </div>
     ${error ? html`<p class="form-error" role="alert">${error}</p>` : null}
     ${!m ? html`<p class="muted">${error ? "" : "Reading model files…"}</p>` : html`
-      <div class="unsorted-preview-title">
-        <strong>${m.name}</strong><a href=${routeHash(`model:${m.id}`)}>Open workspace ›</a>
-      </div>
-
       ${tab === "details" ? html`<${ModelDetails} id=${m.id} />` : html`
-        <div class="unsorted-quick-details"><${ModelDetails} id=${m.id} /></div>
-        <${ViewSwitch} id="unsorted-file-views" views=${[["folders", "Folders", "folder"], ["all", "List", "list"], ["type", "By type", "grouped"]]} value=${view} onChange=${(filePanelView) => setPref({ filePanelView })} />
+        <${ViewSwitch} id="unsorted-file-views" label="Show the files as" views=${[["folders", "Folders", "folder"], ["all", "All files", "list"], ["type", "By type", "grouped"]]} value=${view} onChange=${(filePanelView) => setPref({ filePanelView })} />
         <div class="unsorted-file-tree"><${SelectionRows} key=${m.id} src=${src} files=${m.files_list || []} name=${m.name} view=${view} contextActions=${() => fileActions(src, m)} /></div>
         <${ExtractionBar} src=${src} model=${m} />
         <div class="unsorted-preview-stage"><${WorkspaceStage} key=${m.id} src=${src} model=${m} files=${m.files_list || []} contextActions=${() => fileActions(src, m)} /></div>

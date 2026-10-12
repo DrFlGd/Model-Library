@@ -7,7 +7,7 @@ import { routeHash, schemaScope } from "./context.js";
 import { Icon } from "./icons.js";
 import { api, loadOverview, saveDetails, runChange, undoable, recorded } from "./library.js";
 import { CategoryPicker, SubcategoryTree, treeSpec, treeReady, firstBranch } from "./category.js";
-import { RenameNode, EditSchema, DeleteSchema, DeleteSubcategory, MergeCategories, EditPicked, AddSubcategory, ChangePreview } from "./categories.js";
+import { RenameNode, EditSchema, DeleteSchema, DeleteSubcategory, MergeCategories, EditPicked, AddSubcategory, ChangePreview, ChooseIcon } from "./categories.js";
 
 import { ExtractDialog } from "./extract.js";
 import { AddFilesDialog, SendFilesDialog, DeleteModelsDialog } from "./fileops.js";
@@ -258,6 +258,7 @@ export function Dialogs() {
   if (dialog.type === "delete-models") return html`<${DeleteModelsDialog} models=${dialog.models} />`;
   if (dialog.type === "new-schema") return html`<${NewSchema} />`;
   if (dialog.type === "move-models") return html`<${MoveModels} models=${dialog.models} />`;
+  if (dialog.type === "choose-icon") return html`<${ChooseIcon} schemaId=${dialog.schemaId} path=${dialog.path} />`;
   if (dialog.type === "add-subcategory") return html`<${AddSubcategory} schemaId=${dialog.schemaId} path=${dialog.path} />`;
   if (dialog.type === "rename-node") return html`<${RenameNode} schemaId=${dialog.schemaId} path=${dialog.path} />`;
   if (dialog.type === "edit-schema") return html`<${EditSchema} schemaId=${dialog.schemaId} />`;

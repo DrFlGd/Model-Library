@@ -161,6 +161,7 @@ async def card_checks(pg, library, base, out, api, check, png, cube):
     await pg.wait_for_selector('.card:has(.card-name:text-is("F card chosen"))')
     selected = pg.locator('.card:has(.card-name:text-is("F card chosen"))')
     await selected.click()
+    await pg.click("#unsorted-tab-details")
     await pg.wait_for_selector("#model-details")
     check("Agent F explicit cover overrides the automatic composition",
           await selected.locator(".thumb > img").count() == 1
@@ -197,6 +198,7 @@ async def card_checks(pg, library, base, out, api, check, png, cube):
           and not restored_source["files"]["cover_missing"]
           and await selected.locator(".thumb > img").count() == 1)
     await selected.click()
+    await pg.click("#unsorted-tab-details")
     await pg.wait_for_selector("#details-more")
     await pg.click("#details-more")
     await pg.click('#context-menu [data-action="auto-cover"]')
