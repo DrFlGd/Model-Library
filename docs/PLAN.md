@@ -643,7 +643,7 @@ Seventeen asks, written up in full (what each does, where it appears, what exist
 
 Agreed order: (1) R1, R2, R14; (2) R5, R3, R4, with R16's style study; (3) R9, R11, R10; (4) R7, R8; (5) R15, R6; (6) R13; (7) R12. A UI review (R17) follows each group.
 
-### Group 1 design (0.5.7)
+### Group 1 design
 
 **R1. The same file actions in every view.** A model's selected files have one list of actions, `fileActions(src, model)` in `extract.js`: Make a new model… (N) and Send to another model…. It's used by the selection bar above the viewing area and by every right-click menu on a model's files: the file panel's Folders, List and By type, the viewing area's tiles and list, and the same views in the Unsorted preview beside the collection (which also gets the selection bar). Before, the viewing area's menu lacked Send to another model… and the Unsorted preview had neither action in its file rows and no selection bar. Import's compact files (a sorting item, not a model) are unchanged. R7 and R8's archive actions join this list later.
 

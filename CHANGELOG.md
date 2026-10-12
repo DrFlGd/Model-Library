@@ -74,7 +74,13 @@ Group 1 of the second round of requirements (design in docs/PLAN.md, "Requiremen
 - **The same file actions in every view of a model**: Make a new model… and Send to another model… are on the right-click menu of the viewing area's grid and list (Send was missing there), the file panel and the selection bar, and now also in the Unsorted preview beside the collection, which gets the selection bar too.
 - **Add subcategory where you are**: the category or subcategory shown in the menu has an "+ Add subcategory" row under it; type a name and press Enter (Esc cancels). Undo is in the message.
 - **An About page** (bottom of the menu, and linked from Settings): the app's version, the library format, when it was built, what it's built with, what's changed in each release (from this file), what's coming, how a library is laid out, and the licences. `tools/build_desktop.py` now copies `CHANGELOG.md` and `THIRD_PARTY.md` into the interface and writes `build-info.json`; `app_info` has `library_format`.
+
+## 0.5.7 (2026-10-12)
+
+Testing moves to Windows (the owner's main platform).
+
 - CI tests Windows only: the acceptance test now runs on Windows, and the Linux app and the Linux-to-Windows library check run only when asked for. Release notes now come from this section instead of the list of commit subjects.
+- The acceptance test runs on Windows in UTF-8 mode, and its import check no longer uses a model name that only differs in case from one already in the library (the same folder on Windows).
 
 ## 0.5.6 (2026-10-10)
 
