@@ -320,8 +320,8 @@ async def phase2(pg):
     put(dl / "Armour Set/Helmet/helmet.stl")
     put(dl / "Armour Set/Arms/arm.stl")
     put(dl / "dragon.zip", "PK dragon")
-    put(dl / "benchy.stl")
-    put(dl / "benchy.png", PNG)
+    put(dl / "tugboat.stl")
+    put(dl / "tugboat.png", PNG)
     put(dl / "Copy of Captain/captain.zip", "PK")
     put(dl / "Other Library Model/prime.stl")
     put(dl / "Other Library Model/model.json", json.dumps({"id": "mfromelsewhere", "name": "Tyrant Prime", "schema": "wargames", "category": {"game": "Warhammer 40k", "faction": "Tyranid"}, "kept": True}))
@@ -340,20 +340,20 @@ async def phase2(pg):
     await pick_rows(pg, "Copy of Captain")
     dup = await pg.locator("#sort-details [data-warn=duplicate]").count()
     guess = await pg.inner_text('#sort-list tr[data-name="Tyrant Prime"]')
-    check("a messy folder is read as it is, with models proposed, warnings, and a model.json's place used", names == ["Armour Set", "Copy of Captain", "Hive Guard", "Tyrant Prime", "benchy", "dragon"]
+    check("a messy folder is read as it is, with models proposed, warnings, and a model.json's place used", names == ["Armour Set", "Copy of Captain", "Hive Guard", "Tyrant Prime", "dragon", "tugboat"]
           and loose == 1 and dup == 1 and "→ Wargames › Warhammer 40k › Tyranid" in guess, (names, loose, dup, guess))
     await pg.click("#sort-skip")
     await pick_rows(pg, "Hive Guard", "Armour Set")
     await send_to(pg, "wargames", "Warhammer 40k\x1fTyranid")
     # (Tyrant Prime's model.json says where it goes: it's sorted already)
-    await pick_rows(pg, "benchy", "dragon")
+    await pick_rows(pg, "tugboat", "dragon")
     await send_to(pg, "")
     await pg.wait_for_function("() => /Import 5 models/.test(document.querySelector('#import-go')?.textContent || '')")
     await pg.evaluate("() => { window.__forceCopy = true; }")  # as across drives: copy, check, delete
     title = await import_and_wait(pg)
     t = "Wargames/Warhammer 40k/Tyranid"
     on_disk = [(library / t / "Hive Guard (Jo Smith)/guard.stl").is_file(), (library / t / "Armour Set/Helmet/helmet.stl").is_file(),
-               (library / "Unsorted/benchy/benchy.png").is_file(), (library / "Unsorted/dragon/dragon.zip").is_file(), (library / t / "Tyrant Prime/prime.stl").is_file()]
+               (library / "Unsorted/tugboat/tugboat.png").is_file(), (library / "Unsorted/dragon/dragon.zip").is_file(), (library / t / "Tyrant Prime/prime.stl").is_file()]
     side = json.loads((library / t / "Hive Guard (Jo Smith)/model.json").read_text())
     prime_side = json.loads((library / t / "Tyrant Prime/model.json").read_text())
     remaining = sorted(x.name for x in dl.iterdir())
@@ -379,15 +379,15 @@ async def phase2(pg):
 
     # 17. Move to category: one model, then several
     await pg.goto(B + "#/browse/unsorted")
-    await pg.wait_for_selector(".card:has(.card-name:text-is('benchy'))")
-    await pg.click(".card:has(.card-name:text-is('benchy'))")
+    await pg.wait_for_selector(".card:has(.card-name:text-is('tugboat'))")
+    await pg.click(".card:has(.card-name:text-is('tugboat'))")
     await pg.click("#details-move")
     await pg.select_option("#move-schema", "wargames")
     await pg.select_option("#move-place", "Warhammer 40k")
     await pg.fill("#move-new", "Necrons")  # a new subcategory, made as it moves
     await pg.click("#move-dialog button[type=submit]")
     await pg.wait_for_selector("#move-dialog", state="detached")
-    one = (library / "Wargames/Warhammer 40k/Necrons/benchy/benchy.stl").is_file() and not (library / "Unsorted/benchy").exists()
+    one = (library / "Wargames/Warhammer 40k/Necrons/tugboat/tugboat.stl").is_file() and not (library / "Unsorted/tugboat").exists()
     await pg.goto(B + "#/browse/unsorted")
     await pg.wait_for_selector(".card:has-text('Gargoyle')")
     await pg.click(".card:has-text('dragon')")
@@ -400,7 +400,7 @@ async def phase2(pg):
     await pg.wait_for_selector("#move-dialog", state="detached")
     nec = sorted(x.name for x in (library / "Wargames/Warhammer 40k/Necrons").iterdir())
     n = await count(pg)
-    check("models move to a category, one or several at once", one and nec == ["Gargoyle", "benchy", "dragon"] and n == "1 model", (one, nec, n))
+    check("models move to a category, one or several at once", one and nec == ["Gargoyle", "dragon", "tugboat"] and n == "1 model", (one, nec, n))
 
     # 18. a loose folder inside the library is offered for sorting
     put(library / "Old stuff/Lictor/lictor.stl")
