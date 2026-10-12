@@ -59,7 +59,7 @@ The sandbox has a network allowlist and is reset between sessions.
 - The app icons are Grid Workshop's; the interface has its own mark (a stack of layers). New icons are to do.
 - Installers aren't code-signed, and there's no auto-update.
 - PDFs use the system's engine (WebView2 on Windows, checked by the owner in 0.5.6; WebKitGTK on Linux is unchecked).
-- Planning a large import, file transfer or ZIP operation hashes every file before the review appears, with no progress or Stop; carrying it out is a job that can be stopped. See the handoff docs.
+- A review reads and hashes every file before it appears; it runs as a job with progress and Stop (`checking.rs`, `web/ui/checking.js`). When the change is then made, its files are checked once more before the job starts, without progress.
 
 ### Next (roadmap)
 
@@ -70,6 +70,7 @@ The UI pass in `docs/PLAN.md` ("UI pass design") is done: actions (0.5.1), undo 
 ## Unreleased
 
 - CI tests Windows only: the acceptance test now runs on Windows, and the Linux app and the Linux-to-Windows library check run only when asked for. Release notes now come from this section instead of the list of commit subjects.
+- **Big reviews show progress and can be stopped.** Before Send to another model, Add files, Delete models, Compress to ZIP or Extract archive, Make a new model and Import folders as categories show their review, every file is read and checked. That now says how many files and how much has been read, with Stop (and Check again), in the dialog and the status bar; the rest of the app stays usable meanwhile.
 
 ## 0.5.6 (2026-10-10)
 

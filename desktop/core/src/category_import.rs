@@ -29,12 +29,14 @@ fn file_count(node: &Value) -> u64 {
 }
 
 fn digest(path: &Path) -> Result<String> {
+    crate::checking::file(path)?;
     let mut f = std::fs::File::open(path)?;
     let mut hash = Sha256::new();
     let mut buf = [0u8; 65536];
     loop {
         let n = f.read(&mut buf)?;
         if n == 0 { break; }
+        crate::checking::read(n)?;
         hash.update(&buf[..n]);
     }
     Ok(format!("{:x}", hash.finalize()))

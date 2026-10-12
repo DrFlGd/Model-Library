@@ -1040,3 +1040,8 @@ body:has(.sw-go) .toast { bottom: 92px; }
   .ci-children { margin-left: 8px; }
   .ci-options { margin-left: 13px; }
 }
+
+/* Review checks: progress and Stop while a review reads and hashes files */
+.check-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0; }
+.check-progress .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 24ch; }
+.check-progress button { margin-left: auto; }

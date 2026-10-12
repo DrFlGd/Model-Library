@@ -4,6 +4,7 @@ import { ui } from "./state.js";
 import { api, followJob, loadOverview, recorded } from "./library.js";
 import { size } from "./details.js";
 import { Dialog, close } from "./dialogs.js";
+import { useCheck } from "./checking.js";
 
 const errorOf = (e) => e?.message || String(e);
 export function ArchiveDialog({ request }) {
@@ -12,7 +13,6 @@ export function ArchiveDialog({ request }) {
   const [filename, setFilename] = useState("");
   const [verified, setVerified] = useState(null);
   const [cleaned, setCleaned] = useState(false);
-  const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const readOnly = !!ui.get().library?.read_only;
@@ -27,20 +27,10 @@ export function ArchiveDialog({ request }) {
     }, (e) => { if (live) setError(errorOf(e)); });
     return () => { live = false; };
   }, [id, action]);
-  useEffect(() => {
-    if (verified) return;
-    setPreview(null);
-    if (!model || !filename || busy) return;
-    let live = true;
-    const timer = setTimeout(() => {
-      api("archive_plan", { id, action, file: filename }).then((plan) => {
-        if (live) setPreview({ plan });
-      }, (e) => { if (live) setPreview({ error: errorOf(e) }); });
-    }, 350);
-    return () => { live = false; clearTimeout(timer); };
-  }, [id, action, filename, model, busy, verified]);
+  const check = useCheck("archive_plan", { id, action, file: filename }, JSON.stringify([id, action, filename, !!model]),
+    { delay: 350, enabled: !verified && !!model && !!filename && !busy });
   const archives = (model?.files_list || []).filter((f) => /\.zip$/i.test(f.rel));
-  const plan = preview?.plan;
+  const plan = check.result;
   const submit = async () => {
     if (busy || (!plan && !verified) || readOnly) return;
     if (verified) {
@@ -72,14 +62,14 @@ export function ArchiveDialog({ request }) {
     } catch (e) { setError(errorOf(e)); }
     finally { setBusy(false); }
   };
-  return html`<${Dialog} id="archive-dialog" title=${action === "compress" ? "Compress model to ZIP" : "Extract archive into model"} onSubmit=${submit} busy=${busy || (!verified && !plan) || readOnly} error=${error || preview?.error || (readOnly ? "The library is read-only." : "")} submitLabel=${verified ? "Finish" : action === "compress" ? "Compress to ZIP" : "Extract files"}>
+  return html`<${Dialog} id="archive-dialog" title=${action === "compress" ? "Compress model to ZIP" : "Extract archive into model"} onSubmit=${submit} busy=${busy || (!verified && !plan) || readOnly} error=${error || check.error || (readOnly ? "The library is read-only." : "")} submitLabel=${verified ? "Finish" : action === "compress" ? "Compress to ZIP" : "Extract files"}>
     <p class="muted">This changes files in the existing model. Its identity, category and model.json stay in place. Existing files are never overwritten.</p>
     ${action === "compress" ? html`<label class="field-block"><span>ZIP file name (in the model's folder)</span><input id="archive-name" required value=${filename} disabled=${busy || !!verified} onInput=${(e) => setFilename(e.target.value)} /></label>` :
       html`<label class="field-block"><span>Archive to extract</span><select id="archive-select" value=${filename} disabled=${busy || !!verified} onChange=${(e) => setFilename(e.target.value)}>
         ${!archives.length ? html`<option value="">No ZIP files</option>` : null}
         ${archives.map((f) => html`<option key=${f.rel} value=${f.rel}>${f.rel}</option>`)}
       </select></label>`}
-    ${!preview && filename ? html`<p role="status" class="muted">Checking files, destinations and hashes…</p>` : null}
+    ${check.running && !check.view ? html`<p role="status" class="muted">Checking files, destinations and hashes…</p>` : check.view}
     ${plan ? html`<div class="archive-plan" aria-label="ZIP operation preview">
       <p><strong>${plan.files_count} files</strong> · ${size(plan.bytes)} of content · approximately ${size(plan.required_bytes)} of staging space required.</p>
       <p class="muted">${action === "compress" ? "Output ZIP:" : "Source archive:"} <code>${plan.file}</code></p>
