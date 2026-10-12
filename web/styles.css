@@ -321,7 +321,10 @@ input:invalid { border-color: var(--danger); }
 .dialog { width: min(620px, 100%); background: var(--white); color: var(--ink); border: 1px solid var(--steel-2); border-radius: var(--radius-m); box-shadow: var(--shadow); padding: 18px 20px 16px; display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
 .dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .dialog-head h2 { font-size: 19px; margin: 0; }
-.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.dialog { max-height: calc(92vh - 32px); overflow: auto; }
+/* the foot (error, Cancel, Save) stays in sight while a long form scrolls */
+.dialog-foot { position: sticky; bottom: -16px; margin: 0 -20px -16px; padding: 10px 20px 16px; background: var(--white); border-top: 1px solid var(--steel-2); display: grid; gap: 8px; z-index: 1; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .dialog-actions .primary { padding: 9px 18px; }
 .field-block { display: grid; gap: 6px; grid-template-columns: minmax(0, 1fr); }
 .field-label, .field-block > span { font-weight: 700; font-size: 13.5px; }
@@ -637,7 +640,7 @@ input:invalid { border-color: var(--danger); }
 .toast-action:hover { background: rgba(255, 255, 255, .12); }
 :root[data-theme="dark"] .toast-action, :root[data-theme="night"] .toast-action { color: #8a5a00; }
 /* clear of the Import page's footer */
-body:has(.sw-go) .toast { bottom: 92px; }
+/* toast(): the message sits clear of the bars at the foot of the page */
 
 .menu { position: fixed; z-index: 90; min-width: 210px; max-width: min(340px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto;
   background: var(--white); color: var(--ink); border: 1px solid var(--steel-2); border-radius: var(--radius-m); box-shadow: var(--shadow); padding: 5px; display: grid; }
@@ -818,6 +821,8 @@ body:has(.sw-go) .toast { bottom: 92px; }
 .file-panel-scroll { overflow:auto; max-height:calc(100vh - 320px); min-height:300px; }
 .file-panel .parts-filter { width:100%; min-width:0; flex:0 0 auto; height:36px; }
 .file-panel .variant-seg { flex-wrap:wrap; }
+.variant-pick { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.variant-pick select { flex: 1; min-width: 0; }
 .file-panel .view-switch { display:flex; }
 .file-panel .view-switch button { flex:1; padding:7px 4px; }
 .file-panel .view-switch .view-label { font-size:11px; }

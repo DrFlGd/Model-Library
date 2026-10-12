@@ -519,11 +519,11 @@ async def phase3(pg):
     stored = json.loads((library / "_library/library.json").read_text()).get("variant_folders")
     await pg.go_back()
     await pg.wait_for_selector("#variants")
-    await pg.wait_for_function("() => document.querySelectorAll('#variants button').length === 5")
-    variants = await pg.eval_on_selector_all("#variants button", "els => els.map(e => e.textContent)")
+    await pg.wait_for_function("() => document.querySelectorAll('#variants option').length === 5")
+    variants = await pg.eval_on_selector_all("#variants option", "els => els.map(e => e.textContent)")
     check("variant folder names are set in Settings and kept in the library", defaults == ["Presupported", "Supported", "Unsupported", "No supports", "Sized", "Split", "FDM", "Resin"]
           and stored and stored[-1] == "fdm" and "FDM" not in stored and variants == ["Presupported", "FDM", "Resin 32mm", "Unsupported", "All"], (defaults, stored, variants))
-    await pg.click("#variants button:text-is('Unsupported')")
+    await pg.select_option("#variants", "Unsupported")  # more than three variants: a menu
 
     # 21. a ZIP's entries open from inside it
     await pg.click("#part-tree [aria-label='Unfold extras.zip']")
@@ -552,7 +552,7 @@ async def phase3(pg):
           and "<strong>0.12 mm</strong>" in doc and "<script" not in doc and 'href="javascript' not in doc and not pwned, (side.get("cover"), side2.get("cover"), doc[:200], pwned))
 
     # 22b. the model's files in other views: all files, by type, a grid of previews
-    await pg.click("#variants button:text-is('All')")  # the variant switch picks the files every view shows
+    await pg.select_option("#variants", label="All")  # the variant switch picks the files every view shows
     on_disk = sorted(x.relative_to(dest).as_posix() for x in dest.rglob("*") if x.is_file() and x.name != "model.json" and not x.relative_to(dest).as_posix().startswith("_thumbs/"))
     await pg.click('#parts-views [data-view="all"]')
     await pg.wait_for_selector("#all-files")
@@ -1038,7 +1038,7 @@ async def ui_pass(pg):
     await pg.keyboard.press("Escape")
     mp_row = await labels_of(pg, "#model-page .action-row button")
     check("files with no viewer show details and open in their own app; the model page has the same row", "settings.ini" in fallback and "Open externally" in fallback
-          and "Open externally" in file_menu and "Show in folder" in file_menu and "Make a new model…" in file_menu
+          and "Open externally" in file_menu and "Show in folder" in file_menu and "Make a model…" in file_menu
           and mp_row == ["Edit details…", "Move to category…", "Add files…", "Star", "Show in folder", "More ▾"], (fallback, file_menu, mp_row))
 
     # 39. Import: right-click, Ctrl+A and Esc, Ctrl+Z, and messages clear of the footer
@@ -1070,7 +1070,7 @@ async def ui_pass(pg):
     apart = await pg.evaluate("() => { const t = document.querySelector('.toast').getBoundingClientRect(); const f = document.querySelector('.sw-go').getBoundingClientRect(); return t.bottom <= f.top + 1 || t.top >= f.bottom - 1; }")
     await pg.screenshot(path=str(out / "26-import-undo.png"))
     check("Import has the same right-click menu, keys and Undo, and messages don't cover its footer",
-          imenu[:3] == ["Edit details", "Set category…", "Show in folder"] and "Skip" in imenu and both == "2 models selected" and none == 0
+          imenu[:3] == ["Edit details…", "Set category…", "Show in folder"] and "Skip" in imenu and both == "2 models selected" and none == 0
           and "Household" in placed and apart, (imenu, both, none, placed, apart))
     await start_again(pg)
 
@@ -1647,10 +1647,62 @@ async def agent_d_reviewed_import(pg):
               and (src / "Terrain/Rock.stl").is_file(), status)
     await pg.locator(".ci-results button").click()
 
+
+async def review1(pg):
+    """UI review 1 (docs/PLAN.md, "UI review 1 (0.5.10)"): the fixes made before group 2."""
+    # Home points to About for the folder layout
+    await pg.goto(B + "#/")
+    await pg.wait_for_selector("#home-layout-link")
+    check("Home points to About for how the folders are laid out", await pg.get_attribute("#home-layout-link", "href") == "#/about")
+
+    # a message sits above the viewer's bar, not over it
+    await pg.goto(B + "#/model/group-one")
+    await pg.wait_for_selector('#model-page[data-model="group-one"] .stage-bar')
+    await pg.evaluate("async () => { const {toast} = await import('/ui/library.js'); toast('Review one', 4000); }")
+    clear = await pg.evaluate("""() => {
+        const t = document.getElementById('toast').getBoundingClientRect(), b = document.querySelector('.stage-bar').getBoundingClientRect();
+        return t.bottom <= b.top + 1;
+    }""")
+    check("messages sit above the bar at the foot of the viewer", clear)
+
+    # the same Select buttons in the file panel and the viewing area
+    panel = [await pg.inner_text("#select-visible-files"), await pg.inner_text("#select-whole-model")]
+    await pg.evaluate("""async () => {
+        const {fileSel} = await import('/ui/filesel.js');
+        fileSel.set({shown: 'd:', picked: [], anchor: null});
+    }""")
+    await pg.wait_for_selector("#select-folder-contents")
+    stage = [await pg.inner_text("#select-this-level"), await pg.inner_text("#select-folder-contents")]
+    check("the file panel and the viewing area say Select shown and Select all, with counts",
+          panel[0].startswith("Select shown (") and panel[1].startswith("Select all (") and stage[0] == "Select shown (2)"
+          and stage[1] == panel[1], (panel, stage))
+
+    # leaving a Details box saves it, with Undo
+    await pg.click("#details-panel-open")
+    await pg.fill("#workspace-edit-tags", "review one")
+    await pg.press("#workspace-edit-tags", "Tab")
+    await pg.wait_for_function("() => document.querySelector('.toast')?.textContent.includes('Saved')")
+    side = json.loads((library / "Unsorted" / "Group one kit" / "model.json").read_text())
+    undo = await pg.locator(".toast .toast-action:text-is('Undo')").count()
+    check("leaving a box on a model's Details saves it, with Undo", side.get("tags") == ["review one"] and undo == 1
+          and await pg.locator("#workspace-details-form button[type=submit]").count() == 0, (side.get("tags"), undo))
+    await pg.click("#details-panel-close")
+
+    # a long dialog keeps its buttons in sight
+    size = pg.viewport_size
+    await pg.set_viewport_size({"width": 1000, "height": 420})
+    await pg.evaluate("async () => { const {ui} = await import('/ui/state.js'); ui.set({dialog: {type: 'new-schema'}}); }")
+    await pg.wait_for_selector("#schema-dialog")
+    box = await pg.locator("#schema-dialog button[type=submit]").bounding_box()
+    check("a dialog taller than the window keeps Cancel and Save in sight", box and box["y"] + box["height"] <= 420, box)
+    await pg.keyboard.press("Escape")
+    await pg.wait_for_selector("#schema-dialog", state="detached")
+    await pg.set_viewport_size(size)
+
 async def group1(pg):
     """Group 1 (docs/PLAN.md, "Group 1 design"): the same file actions in every
     view of a model, Add subcategory under the one shown, and the About page."""
-    both = ["Make a new model…", "Send to another model…"]
+    both = ["Make a model…", "Send to another model…"]
 
     async def menu_at(target):
         await pg.locator(target).first.click(button="right")
@@ -1834,6 +1886,7 @@ async def main():
             await agent_c_pdf_archive_checks(pg)
             await agent_d_reviewed_import(pg)
             await group1(pg)
+            await review1(pg)
             await review_checks(pg)
 
             # 3. renaming the library

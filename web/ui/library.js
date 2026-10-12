@@ -7,6 +7,17 @@ export const isDesktop = () => ctx.platform?.kind === "desktop";
 export const api = (cmd, args) => ctx.platform.api(cmd, args);
 export const apiBytes = (cmd, args) => ctx.platform.apiBytes(cmd, args);
 
+/** How far above the window's foot a message goes: clear of the status bar and
+ *  of any bar at the foot of the page (the viewer's, Import's Move/Copy bar). */
+function clearance() {
+  let top = innerHeight;
+  for (const bar of document.querySelectorAll(".statusbar-inner, .stage-bar, .sw-go")) {
+    const r = bar.getBoundingClientRect();
+    if (r.height && r.top > innerHeight * 0.6 && r.top < top) top = r.top;
+  }
+  return Math.max(20, Math.round(innerHeight - top + 10));
+}
+
 /** Show a short message at the bottom of the window. `opts`: how long (ms), or
  *  { ms, action: { label, run } } for a button in the message (Undo). It stays
  *  while the pointer is on it. */
@@ -26,6 +37,9 @@ export function toast(text, opts = {}) {
     el.append(b);
   }
   el.hidden = false;
+  // again once the page has drawn what the change brought (Import's bar appears with its first folder)
+  const place = () => { el.style.bottom = `${clearance()}px`; };
+  place(); setTimeout(place, 300);
   const hide = (after) => { clearTimeout(toast.timer); toast.timer = setTimeout(() => { el.hidden = true; }, after); };
   el.onmouseenter = () => clearTimeout(toast.timer);
   el.onmouseleave = () => hide(2500);

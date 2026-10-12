@@ -385,9 +385,9 @@ function levelOf(se, ix, path) {
   return se.folders.filter((f) => ix.rootOf(f.path) === root && depthOf(f.path) === d).map((f) => f.path);
 }
 
-/** Make a folder one model (everything in it becomes its parts) and select it. */
+/** Make a folder a model (everything in it becomes its parts) and select it. */
 async function joinFolder(folder) {
-  const r = await act("sort_join", { folder: folder.path }, () => `Made ${folder.name} one model.`);
+  const r = await act("sort_join", { folder: folder.path }, () => `Made ${folder.name} a model.`);
   if (r?.id) sorter.set({ picked: [`i:${r.id}`], focus: `i:${r.id}`, anchor: `i:${r.id}` });
 }
 
@@ -407,16 +407,16 @@ function importActions(s, sel, ix, overview) {
   const where = isDesktop() ? folderOfSelection(sel, ix) : null;
   const list = [];
   if (one?.done) list.push({ id: "open", label: "Open", icon: "eye", key: "Enter", run: () => { location.hash = routeHash(`model:${one.done.id}`); } });
-  if (one && !one.done) list.push({ id: "edit", label: "Edit details", icon: "edit", key: "E", run: () => { sorter.set({ focus: `i:${one.id}` }); focusBox("#details-name"); } });
+  if (one && !one.done) list.push({ id: "edit", label: "Edit details…", icon: "edit", key: "E", run: () => { sorter.set({ focus: `i:${one.id}` }); focusBox("#details-name"); } });
   if (n) list.push({ id: "set-category", label: "Set category…", icon: "move", key: "M", run: () => focusBox("#send-schema") });
   if (where) list.push({ id: "folder", label: "Show in folder", icon: "folder", run: () => ctx.platform.library.openPath(where) });
   const own = [];
   // which folder is the model: this one, every one at its level, or each of several
   if (oneFolder) {
-    own.push({ id: "sort-join", label: "Make this folder one model", icon: "box", title: "Everything in it becomes the model's parts", run: () => joinFolder(oneFolder) });
+    own.push({ id: "sort-join", label: "Make this folder a model", icon: "box", title: "Everything in it becomes the model's parts", run: () => joinFolder(oneFolder) });
     const level = levelOf(s.session, ix, oneFolder.path);
     if (level.length > 1) {
-      own.push({ id: "sort-join-level", label: `Make every folder at this level a model (${level.length})`, icon: "box",
+      own.push({ id: "sort-join-level", label: `Make every folder here a model (${level.length})`, icon: "box",
         title: `${level.slice(0, 12).map(baseName).join(", ")}${level.length > 12 ? "…" : ""}`, run: async () => {
           const r = await act("sort_join", { folder: oneFolder.path, level: true }, joinedText);
           if (r) sorter.set({ picked: [], anchor: null });
@@ -507,7 +507,7 @@ function Details({ s, sel, ix, overview, names, counts }) {
       <p class="muted sw-path">${folder.path}</p>
       <p>${plural(inside.length, "model", "models")} in it${inside.length ? `, ${todo} with no category yet` : ""}.</p>
       ${actions}
-      <p class="muted sw-hint">If this folder is one model and the folders in it are its parts, choose Make this folder one model; if every folder at this level is a model, choose Make every folder at this level a model. Setting a folder's category sets it for everything in it; tick “Keep its folders as subcategories” to bring its folders along.</p>
+      <p class="muted sw-hint">If this folder is one model and the folders in it are its parts, choose Make this folder a model${levelOf(s.session, ix, folder.path).length > 1 ? "; if every folder at this level is a model, choose Make every folder here a model" : ""}. Setting a folder's category sets it for everything in it; tick “Keep its folders as subcategories” to bring its folders along.</p>
     </div>`;
   }
   if (left) {
@@ -721,7 +721,7 @@ export function ImportPage() {
   const count = se && !empty ? `${plural(counts.all, "model", "models")}, ${counts.todo} with no category` : null;
   return html`<div class="sort-page" id="sort-page" data-ready=${se ? "1" : null}>
     <${PageHead} title="Import" count=${count} menu=${{ id: "import-more", items: moreItems, title: "Read or clear the sorting workspace" }}>
-      <button type="button" class="primary" id="import-sort" disabled=${busy} onClick=${() => pickAndAdd(true)}>${Icon.folder(15)} Sort a folder…</button>
+      <button type="button" class=${empty ? "primary" : "ghost"} id="import-sort" disabled=${busy} onClick=${() => pickAndAdd(true)}>${Icon.folder(15)} Sort a folder…</button>
       <button type="button" class="ghost" id="import-folder" disabled=${busy} onClick=${() => pickAndAdd(false)}>${Icon.folder(15)} Import folder…</button>
       <button type="button" class="ghost" id="import-file" disabled=${busy} onClick=${() => pickAndAdd(false, true)}>${Icon.file(15)} Import file…</button>
       <button type="button" class="ghost" id="import-categories" disabled=${busy} onClick=${openCategoryImport}>${Icon.layers(15)} Import folders as categories…</button>
@@ -759,7 +759,7 @@ export function ImportPage() {
           <button type="button" id="mode-copy" aria-pressed=${s.mode === "copy" ? "true" : "false"} onClick=${() => sorter.set({ mode: "copy" })}>Copy</button>
         </div>
         <span class="muted imp-mode-note">${s.mode === "move" ? "Files move into the library. Across drives they're copied, checked, then the originals deleted." : "The originals stay where they are; every copy is checked."}</span>
-        <button type="button" class="primary" id="import-go" disabled=${!ready || busy || !!lib.read_only} title="Import the models that have a category" onClick=${importSorted}>${!ready ? "Nothing to import yet" : `${s.mode === "copy" ? "Copy" : "Import"} ${plural(ready, "model", "models")}`}</button>
+        <button type="button" class=${sel?.count ? "ghost" : "primary"} id="import-go" disabled=${!ready || busy || !!lib.read_only} title="Import the models that have a category" onClick=${importSorted}>${!ready ? "Nothing to import yet" : `${s.mode === "copy" ? "Copy" : "Import"} ${plural(ready, "model", "models")}`}</button>
       </div>`}`}
   </div>`;
 }

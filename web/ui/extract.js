@@ -28,7 +28,7 @@ export function extractionName(keys) {
 }
 
 export function extractionAction(src, model = src?.model) {
-  return { id: "extract", label: "Make a new model…", key: "N", icon: "plus", disabled: extractionReason(src, model), run: async () => {
+  return { id: "extract", label: "Make a model…", key: "N", icon: "plus", disabled: extractionReason(src, model), run: async () => {
     const keys = [...fileSel.get().picked];
     const reason = extractionReason(src, model, keys);
     if (reason) return toast(reason);
@@ -119,7 +119,7 @@ export function ExtractDialog({ model, keys }) {
     finally { setBusy(false); }
   };
   const n = plan?.files?.length || 0;
-  return html`<${Dialog} title="Make a new model" id="extract-dialog" onSubmit=${submit} busy=${busy || !n || !!plan?.error || !!readOnly} error=${error || check.error || plan?.error || (readOnly ? "The library is read-only." : "")} submitLabel=${`Make model (${n} ${n === 1 ? "file" : "files"})`}>
+  return html`<${Dialog} title="Make a model" id="extract-dialog" onSubmit=${submit} busy=${busy || !n || !!plan?.error || !!readOnly} error=${error || check.error || plan?.error || (readOnly ? "The library is read-only." : "")} submitLabel=${`Make model (${n} ${n === 1 ? "file" : "files"})`}>
     <label class="field-block"><span>Name</span><input id="extract-name" required maxlength="200" value=${name} disabled=${busy} onInput=${(e) => setName(e.target.value)} /></label>
     <div class="field-block"><span class="field-label">Where</span>
       <label><input type="radio" name="extract-where" checked=${keep} disabled=${busy} onChange=${() => { setKeep(true); setSchema(model.schema || null); setValues([...(model.path || [])]); }} /> Keep in ${originalPlace}</label>
