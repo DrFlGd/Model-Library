@@ -6,7 +6,7 @@ use crate::config::{AppConfig, Prefs};
 use crate::index::Index;
 use crate::library::{self, Library};
 use crate::sort::Session;
-use crate::{archive, category_import, dupes, import, mesh, model, relayout, schema, thumb};
+use crate::{archive, category_import, checking, dupes, import, mesh, model, relayout, schema, thumb};
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -411,6 +411,42 @@ impl App {
             app.job_done(&id, r);
         });
         json!({ "job": job.id })
+    }
+
+    /// A review's checks (the plan reads and hashes every file it would touch) as a
+    /// job the page can follow and stop. It works on a copy of the index, off the
+    /// mutation lock, so the rest of the app carries on meanwhile. Stopped: `{stopped}`.
+    fn check_job<F>(self: &Arc<Self>, label: &str, lib: Library, ix: Option<Index>, work: F) -> Value
+    where
+        F: FnOnce(&Library, Option<&Index>) -> anyhow::Result<Value> + Send + 'static,
+    {
+        let job = self.start_job(label);
+        let (app, id, cancel) = (self.clone(), job.id.clone(), job.cancel.clone());
+        tokio::spawn(async move {
+            let (a, jid, c) = (app.clone(), id.clone(), cancel.clone());
+            let r = tokio::task::spawn_blocking(move || {
+                let report: checking::Report = Arc::new(move |files, bytes, name: &str| {
+                    a.job_progress(&jid, json!({ "files": files, "bytes": bytes, "name": name }))
+                });
+                checking::scope(checking::Check { cancel: c, report }, || work(&lib, ix.as_ref()))
+            })
+            .await;
+            let r = if cancel.load(Ordering::Relaxed) {
+                Ok(json!({ "stopped": true }))
+            } else {
+                match r {
+                    Ok(r) => r.map_err(e2s),
+                    Err(e) => Err(e.to_string()),
+                }
+            };
+            app.job_done(&id, r);
+        });
+        json!({ "job": job.id })
+    }
+
+    /// The open library and a copy of its index, for `check_job`.
+    async fn snapshot(&self) -> Result<(Library, Index), String> {
+        self.with_index(None, |ix, lib| (lib.clone(), ix.clone())).await
     }
 
     /// Read some models again from their folders, and save the cache.
@@ -1164,12 +1200,19 @@ impl App {
             "category_import_scan" => {
                 let paths: Vec<PathBuf> = strings(&args["paths"]).into_iter().map(PathBuf::from).collect();
                 let lib = self.library()?;
+                if args["job"] == true {
+                    return j(self.check_job("Checking the folders", lib, None, move |lib, _| category_import::scan(lib, &paths)));
+                }
                 let r = tokio::task::spawn_blocking(move || category_import::scan(&lib, &paths))
                     .await.map_err(|e| e.to_string())?.map_err(e2s)?;
                 j(r)
             }
             "category_import_plan" => {
                 let proposal = args["proposal"].clone();
+                if args["job"] == true {
+                    let (lib, ix) = self.snapshot().await?;
+                    return j(self.check_job("Checking the import", lib, Some(ix), move |lib, ix| category_import::plan(lib, ix.unwrap(), &proposal)));
+                }
                 let r = self.with_index(None, |ix, lib| category_import::plan(lib, ix, &proposal)).await?;
                 j(r.map_err(e2s)?)
             }
@@ -1422,6 +1465,10 @@ impl App {
                 }))
             }
             "archive_plan" => {
+                if args["job"] == true {
+                    let (lib, ix) = self.snapshot().await?;
+                    return j(self.check_job("Checking the files", lib, Some(ix), move |lib, ix| crate::archive_ops::plan(lib, ix.unwrap(), &args)));
+                }
                 let r = self.with_index(None, |ix, lib| crate::archive_ops::plan(lib, ix, &args)).await?.map_err(e2s)?;
                 j(r)
             }
@@ -1803,6 +1850,10 @@ impl App {
                 j(json!({ "id": id, "favourites": favs }))
             }
             "model_files_plan" => {
+                if args["job"] == true {
+                    let (lib, ix) = self.snapshot().await?;
+                    return j(self.check_job("Checking the files", lib, Some(ix), move |lib, ix| crate::fileops::plan(lib, ix.unwrap(), &args)));
+                }
                 let r = self.with_index(None, |ix, lib| crate::fileops::plan(lib, ix, &args)).await?;
                 j(r.map_err(e2s)?)
             }
@@ -1822,6 +1873,10 @@ impl App {
                 }))
             }
             "models_delete_plan" => {
+                if args["job"] == true {
+                    let (lib, ix) = self.snapshot().await?;
+                    return j(self.check_job("Checking the models", lib, Some(ix), move |lib, ix| crate::delete::plan(lib, ix.unwrap(), &args)));
+                }
                 let r=self.with_index(None, |ix,lib| crate::delete::plan(lib,ix,&args)).await?;
                 j(r.map_err(e2s)?)
             }
@@ -1840,6 +1895,12 @@ impl App {
                 }))
             }
             "model_extract_plan" => {
+                if args["job"] == true {
+                    let (lib, ix) = self.snapshot().await?;
+                    return j(self.check_job("Checking the files", lib, Some(ix), move |lib, ix| {
+                        Ok(crate::extract::plan(lib, ix.unwrap(), &args).unwrap_or_else(|e| json!({"error": e.to_string(), "files": []})))
+                    }));
+                }
                 let r = self.with_index(None, |ix, lib| crate::extract::plan(lib, ix, &args)).await?;
                 j(match r { Ok(p) => p, Err(e) => json!({"error":e.to_string(),"files":[]}) })
             }
@@ -3340,6 +3401,13 @@ mod tests {
         assert_eq!(p["models"], 2, "{p}");
         assert!(p["conflicts"].as_array().unwrap().is_empty(), "{p}");
         assert!(!lib.join("Collection").exists(), "review must not mutate the library");
+        // the same checks as a job the page can follow and stop give the same answers
+        let job = call(&app, "category_import_scan", json!({ "paths": [source.display().to_string()], "job": true })).await;
+        let done = wait(&app, &job).await;
+        assert_eq!(done["result"]["roots"], proposal["roots"], "{done}");
+        assert!(done["progress"]["files"].as_u64().unwrap() > 0, "{done}");
+        let job = call(&app, "category_import_plan", json!({ "proposal": reviewed, "job": true })).await;
+        assert_eq!(wait(&app, &job).await["result"], p);
 
         let mut approval = p.clone();
         approval["reviewed_mode"] = json!("copy");

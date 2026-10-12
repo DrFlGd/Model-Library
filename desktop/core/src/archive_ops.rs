@@ -46,11 +46,13 @@ fn hash_stream<R: Read>(mut reader: R, max: u64) -> Result<(String,u64)> {
         if n == 0 { break; }
         count = count.checked_add(n as u64).ok_or_else(|| anyhow!("Archive entry size overflow."))?;
         if count > max { bail!("Expanded file exceeds the safe size limit."); }
+        crate::checking::read(n)?;
         hash.update(&buf[..n]);
     }
     Ok((hex::encode(hash.finalize()), count))
 }
 fn file_hash(p: &Path) -> Result<(String,u64)> {
+    crate::checking::file(p)?;
     let f = File::open(p).with_context(|| format!("Cannot open {}", p.display()))?;
     let limit = MAX_EXPANDED;
     hash_stream(f, limit)

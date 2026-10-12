@@ -8,6 +8,7 @@ import { writable } from "./actions.js";
 import { Dialog, close } from "./dialogs.js";
 import { fileSel, pickedFiles, clear, show } from "./filesel.js";
 import { size } from "./details.js";
+import { useCheck } from "./checking.js";
 
 const message = (e) => e?.message || String(e);
 function modelFolders(model) {
@@ -64,7 +65,6 @@ export function SendFilesDialog({ model, keys }) {
   const [folder, setFolder] = useState("");
   const [mode, setMode] = useState("move");
   const [conflict, setConflict] = useState("cancel");
-  const [review, setReview] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const readOnly = useStore(ui, (s) => s.library?.read_only);
@@ -84,15 +84,9 @@ export function SendFilesDialog({ model, keys }) {
   }, [target]);
   const action = { kind: "send", id: model.id, target, ...selected, folder, mode, conflict };
   const signature = JSON.stringify(action);
-  const plan = review?.signature === signature ? review.plan : null;
-  useEffect(() => {
-    let live = true; setError("");
-    if (!targetModel || targetModel.id !== target) { setReview(null); return; }
-    const t = setTimeout(() => api("model_files_plan", action).then((p) => {
-      if (live) setReview({ signature, plan: p });
-    }, (e) => { if (live) { setReview(null); setError(message(e)); } }), 180);
-    return () => { live = false; clearTimeout(t); };
-  }, [signature, targetModel?.id]);
+  const check = useCheck("model_files_plan", action, signature, { enabled: !!targetModel && targetModel.id === target });
+  const plan = check.result;
+  useEffect(() => setError(""), [signature]);
   const submit = async () => {
     if (!plan?.files?.length || busy || readOnly || (conflict === "cancel" && plan.conflicts?.length)) return;
     setBusy(true); setError("");
@@ -107,7 +101,7 @@ export function SendFilesDialog({ model, keys }) {
   };
   return html`<${Dialog} title="Send to another model" id="send-files-dialog" onSubmit=${submit}
     busy=${busy || readOnly || !plan?.files?.length || (conflict === "cancel" && !!plan?.conflicts?.length)}
-    error=${error || (readOnly ? "The library is read-only." : "")} submitLabel=${mode === "move" ? "Move files" : "Copy files"}>
+    error=${error || check.error || (readOnly ? "The library is read-only." : "")} submitLabel=${mode === "move" ? "Move files" : "Copy files"}>
     <p class="muted">From ${model.name}. ${selected.files.length} selected files/folders and ${selected.entries.length} ZIP entries; folders include their descendants. Destination model identity and details remain unchanged.</p>
     <label class="field-block"><span>Find a destination model</span><input id="send-search" type="search" placeholder="Search models" value=${q} disabled=${busy} onInput=${(e) => setQ(e.target.value)} /></label>
     <label class="field-block"><span>Destination</span><select id="send-target" value=${target} disabled=${busy} required onChange=${(e) => setTarget(e.target.value)}>
@@ -121,26 +115,21 @@ export function SendFilesDialog({ model, keys }) {
     </select></label>
     <${ConflictChoice} id="send-conflict" value=${conflict} setValue=${setConflict} busy=${busy} />
     ${selected.entries.length ? html`<p class="muted">ZIP entries can be copied but not moved. Choose Copy to unpack entries without changing the archive.</p>` : null}
+    ${check.view}
     <${Preview} plan=${plan} />
   <//>`;
 }
 export function AddFilesDialog({ model, sources }) {
   const [folder, setFolder] = useState("");
   const [conflict, setConflict] = useState("cancel");
-  const [review, setReview] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const readOnly = useStore(ui, (s) => s.library?.read_only);
   const action = { kind: "add", target: model.id, sources, folder, conflict };
   const signature = JSON.stringify(action);
-  const plan = review?.signature === signature ? review.plan : null;
-  useEffect(() => {
-    let live = true; setError("");
-    const t = setTimeout(() => api("model_files_plan", action).then((p) => {
-      if (live) setReview({ signature, plan: p });
-    }, (e) => { if (live) { setReview(null); setError(message(e)); } }), 180);
-    return () => { live = false; clearTimeout(t); };
-  }, [signature]);
+  const check = useCheck("model_files_plan", action, signature);
+  const plan = check.result;
+  useEffect(() => setError(""), [signature]);
   const submit = async () => {
     if (busy || !plan?.files?.length || (conflict === "cancel" && plan.conflicts?.length)) return;
     setBusy(true); setError("");
@@ -155,26 +144,23 @@ export function AddFilesDialog({ model, sources }) {
   };
   return html`<${Dialog} title="Add files" id="add-files-dialog" onSubmit=${submit}
     busy=${busy || readOnly || !plan?.files?.length || (conflict === "cancel" && !!plan?.conflicts?.length)}
-    error=${error || (readOnly ? "The library is read-only." : "")} submitLabel="Add files">
+    error=${error || check.error || (readOnly ? "The library is read-only." : "")} submitLabel="Add files">
     <p class="muted">Add to ${model.name}, not as new models. Images, videos, PDFs, archives and unknown extensions are accepted. External originals are kept.</p>
     <ul class="extract-preview" aria-label="Selected external files">${sources.map((p,i) => html`<li key=${i}><code>${p.replace(/\\/g,"/").split("/").pop()}</code></li>`)}</ul>
     <label class="field-block"><span>Folder in this model</span><select id="add-files-folder" value=${folder} disabled=${busy} onChange=${(e) => setFolder(e.target.value)}>
       ${modelFolders(model).map((f) => html`<option value=${f} key=${f}>${f || "Model root"}</option>`)}</select></label>
     <${ConflictChoice} id="add-files-conflict" value=${conflict} setValue=${setConflict} busy=${busy} />
+    ${check.view}
     <${Preview} plan=${plan} />
   <//>`;
 }
 export function DeleteModelsDialog({ models }) {
-  const [review, setReview] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const ids = models.map((m) => m.id);
   const readOnly = useStore(ui, (s) => s.library?.read_only);
-  useEffect(() => {
-    let live = true;
-    api("models_delete_plan", { ids }).then((p) => { if (live) setReview(p); }, (e) => { if (live) setError(message(e)); });
-    return () => { live = false; };
-  }, [ids.join("|")]);
+  const check = useCheck("models_delete_plan", { ids }, ids.join("|"), { delay: 0, label: "Checking the models" });
+  const review = check.result;
   const submit = async () => {
     if (busy || !review || readOnly) return;
     setBusy(true); setError("");
@@ -190,10 +176,11 @@ export function DeleteModelsDialog({ models }) {
     } catch (e) { setError(message(e)); } finally { setBusy(false); }
   };
   return html`<${Dialog} title="Delete models" id="delete-models-dialog" danger=${true} onSubmit=${submit}
-    busy=${busy || !review || readOnly} error=${error || (readOnly ? "The library is read-only." : "")}
+    busy=${busy || !review || readOnly} error=${error || check.error || (readOnly ? "The library is read-only." : "")}
     submitLabel=${`Delete ${models.length} ${models.length === 1 ? "model" : "models"}`}>
     <p>Remove ${models.length} ${models.length === 1 ? "model" : "models"} from the active library, including their files, details and previews?</p>
     <ul class="extract-preview" aria-label="Models to delete">${(review?.models || models).map((m) => html`<li key=${m.id}>${m.name} ${m.count != null ? html`<span class="muted">(${m.count} files · ${size(m.bytes || 0)})</span>` : null}</li>`)}</ul>
+    ${check.view}
     <p class="muted">Complete model folders are moved into application-managed recovery storage with journalled Undo. Shared assets outside the models are untouched. Categories remain, even if empty. Recovery data has no automatic expiry.</p>
   <//>`;
 }

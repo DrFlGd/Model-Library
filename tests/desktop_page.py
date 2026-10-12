@@ -1750,6 +1750,36 @@ async def group1(pg):
           "Library format" in versions and "three.js" in versions and "r" in versions and len(releases) >= 5 and "0.5.6 (2026-10-10)" in releases
           and opened == 1 and "Preact" in third and "MIT" in third and agents == 0, (versions, releases[:4], opened))
     await pg.screenshot(path=str(out / "42-about.png"), full_page=True)
+async def review_checks(pg):
+    """A review's checks (reading and hashing every file) run as a job: progress, Stop, same answer."""
+    big = library / "Unsorted/Check progress"
+    big.mkdir(parents=True, exist_ok=True)
+    with open(big / "big part.bin", "wb") as f:
+        f.seek(160 * 1024 * 1024 - 1)
+        f.write(b"\0")
+    put(big / "small.stl", cube(3))
+    await api(pg, "library_scan", {"full": True})
+    q = await api(pg, "models_query", {"scope": "unsorted", "q": "Check progress"})
+    mid = q["items"][0]["id"]
+    stopped = await pg.evaluate("""async (id) => {
+      const { runCheck } = await import('./ui/checking.js');
+      const c = runCheck('models_delete_plan', { ids: [id] }, 'Checking the models');
+      c.stop();
+      return await c.done;
+    }""", mid)
+    seen = await pg.evaluate("""async (id) => {
+      const { runCheck } = await import('./ui/checking.js');
+      const progress = [];
+      const plan = await runCheck('models_delete_plan', { ids: [id] }, 'Checking the models', (p) => progress.push(p)).done;
+      return { plan, progress };
+    }""", mid)
+    direct = await api(pg, "models_delete_plan", {"ids": [mid]})
+    plan = seen["plan"] or {}
+    check("a review's check can be stopped, and otherwise gives the same plan with progress",
+          stopped is None and plan.get("models", [{}])[0].get("manifest") == direct["models"][0]["manifest"]
+          and plan["models"][0]["count"] == 2 and big.is_dir(), (stopped, len(seen["progress"]), plan.get("count")))
+    shutil.rmtree(big)
+    await api(pg, "library_scan", {"full": True})
 
 
 async def main():
@@ -1804,6 +1834,7 @@ async def main():
             await agent_c_pdf_archive_checks(pg)
             await agent_d_reviewed_import(pg)
             await group1(pg)
+            await review_checks(pg)
 
             # 3. renaming the library
             await pg.click('.sidebar a[href="#/settings"]')

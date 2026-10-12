@@ -38,10 +38,11 @@ fn archive_entry_hash(path:&Path,entry:&str)->Result<(String,u64)> {
     use std::io::Read;
     let mut z=zip::ZipArchive::new(std::fs::File::open(path)?)?;
     let mut item=z.by_name(entry)?;
+    crate::checking::file(Path::new(entry))?;
     let mut digest=Sha256::new();
     let mut buf=[0u8;65536];
     let mut bytes=0u64;
-    loop {let n=item.read(&mut buf)?;if n==0{break;}digest.update(&buf[..n]);bytes+=n as u64;}
+    loop {let n=item.read(&mut buf)?;if n==0{break;}crate::checking::read(n)?;digest.update(&buf[..n]);bytes+=n as u64;}
     Ok((hex::encode(digest.finalize()),bytes))
 }
 pub fn plan(lib: &Library, ix: &Index, args: &Value) -> Result<Value> {
@@ -226,8 +227,9 @@ fn directories(root:&Path)->Result<Vec<String>> {
 }
 pub(crate) fn hash(path:&Path)->Result<String> {
     use sha2::{Digest,Sha256}; use std::io::Read;
+    crate::checking::file(path)?;
     let mut f=std::fs::File::open(path)?; let mut h=Sha256::new(); let mut b=vec![0;1<<20];
-    loop { let n=f.read(&mut b)?; if n==0 {break;} h.update(&b[..n]); }
+    loop { let n=f.read(&mut b)?; if n==0 {break;} crate::checking::read(n)?; h.update(&b[..n]); }
     Ok(hex::encode(h.finalize()))
 }
 pub(crate) fn hashes(root:&Path)->Result<Value> {

@@ -19,6 +19,7 @@ pub mod api;
 pub mod archive;
 pub mod archive_ops;
 pub mod category_import;
+pub mod checking;
 pub mod config;
 pub mod docs;
 pub mod dupes;

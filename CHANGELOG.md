@@ -59,7 +59,7 @@ The sandbox has a network allowlist and is reset between sessions.
 - The app icons are Grid Workshop's; the interface has its own mark (a stack of layers). New icons are to do.
 - Installers aren't code-signed, and there's no auto-update.
 - PDFs use the system's engine (WebView2 on Windows, checked by the owner in 0.5.6; WebKitGTK on Linux is unchecked).
-- Planning a large import, file transfer or ZIP operation hashes every file before the review appears, with no progress or Stop; carrying it out is a job that can be stopped. See the handoff docs.
+- A review reads and hashes every file before it appears; it runs as a job with progress and Stop (`checking.rs`, `web/ui/checking.js`). When the change is then made, its files are checked once more before the job starts, without progress.
 
 ### Next (roadmap)
 
@@ -74,6 +74,10 @@ Group 1 of the second round of requirements (design in docs/PLAN.md, "Requiremen
 - **The same file actions in every view of a model**: Make a new model… and Send to another model… are on the right-click menu of the viewing area's grid and list (Send was missing there), the file panel and the selection bar, and now also in the Unsorted preview beside the collection, which gets the selection bar too.
 - **Add subcategory where you are**: the category or subcategory shown in the menu has an "+ Add subcategory" row under it; type a name and press Enter (Esc cancels). Undo is in the message.
 - **An About page** (bottom of the menu, and linked from Settings): the app's version, the library format, when it was built, what it's built with, what's changed in each release (from this file), what's coming, how a library is laid out, and the licences. `tools/build_desktop.py` now copies `CHANGELOG.md` and `THIRD_PARTY.md` into the interface and writes `build-info.json`; `app_info` has `library_format`.
+
+## 0.5.8 (2026-10-12)
+
+- **Big reviews show progress and can be stopped.** Before Send to another model, Add files, Delete models, Compress to ZIP or Extract archive, Make a new model and Import folders as categories show their review, every file is read and checked. That now says how many files and how much has been read, with Stop (and Check again), in the dialog and the status bar; the rest of the app stays usable meanwhile.
 
 ## 0.5.7 (2026-10-12)
 
