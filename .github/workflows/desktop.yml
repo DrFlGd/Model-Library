@@ -1,10 +1,13 @@
 name: Desktop
 
-# Builds the desktop app (Tauri) for Linux and Windows, drives both apps through
-# WebDriver, runs the acceptance test (the page against the app's real backend),
-# checks a library made on Linux opens the same on Windows, and when everything
-# passes on main publishes a numbered release (v0.0.0, v0.0.1, ...; see
-# tools/set_version.py). Reports and screenshots go to the desktop-ci-<os> branches.
+# Builds the desktop app (Tauri) for Windows, runs the Rust tests and the acceptance
+# test (the page against the app's real backend), drives the app through WebDriver,
+# and when everything passes on main publishes a numbered release (v0.0.0, v0.0.1,
+# ...; see tools/set_version.py) with notes taken from CHANGELOG.md's Unreleased
+# section. Windows is the platform being tested for now (owner's call, 2026-10-12):
+# the Linux app and the Linux-to-Windows library check run only when asked for, from
+# Run workflow with "Linux too" ticked. Reports and screenshots go to the
+# desktop-ci-<os> branches.
 on:
   push:
     branches: [main]
@@ -17,6 +20,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      linux:
+        description: "Linux too (the Linux app and the Linux-to-Windows library check)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -45,6 +53,7 @@ jobs:
   linux:
     name: Linux app
     needs: version
+    if: github.event_name == 'workflow_dispatch' && inputs.linux
     runs-on: ubuntu-22.04   # oldest supported: the AppImage then runs on newer systems too
     timeout-minutes: 60
     defaults:
@@ -150,10 +159,17 @@ jobs:
           mkdir -p ../ci-out
           cargo build --release -p modlib-core 2>&1 | tee ../ci-out/core-build.log
           cargo test --release -p modlib-core 2>&1 | tee ../ci-out/core-test.log
+          cp Cargo.lock ../ci-out/Cargo.lock
       - uses: actions/upload-artifact@v4
         with: { name: cli-windows, path: desktop/target/release/modlib-cli.exe, retention-days: 3 }
       - name: Front end
         run: python tools/build_desktop.py --out build/desktop --fetch-fonts
+      - name: Acceptance test (the page and the app's backend)
+        run: |
+          pip install playwright
+          python -m playwright install chromium 2>&1 | tail -2
+          timeout 900 python tests/desktop_page.py --cli desktop/target/release/modlib-cli.exe --ui build/desktop/ui \
+            --home "$RUNNER_TEMP/pagehome" --out ci-out/page 2>&1 | tee ci-out/desktop-page.log
       - name: Build the app (NSIS installer)
         working-directory: desktop
         run: npx --yes @tauri-apps/cli@2 build --bundles nsis 2>&1 | tee ../ci-out/tauri-build.log
@@ -189,7 +205,7 @@ jobs:
   portability:
     name: Library made on Linux, opened on Windows
     needs: [linux, windows]
-    if: always() && needs.linux.result != 'skipped'
+    if: always() && needs.linux.result == 'success'
     runs-on: windows-2022
     timeout-minutes: 20
     defaults:
@@ -218,8 +234,13 @@ jobs:
   release:
     name: Release
     needs: [version, linux, windows, portability]
-    # only from main, and only when every check above passed
-    if: github.ref == 'refs/heads/main' && needs.linux.result == 'success' && needs.windows.result == 'success' && needs.portability.result == 'success'
+    # only from main, and only when every check that ran passed (Linux and the
+    # portability check are skipped unless asked for)
+    if: >-
+      always() && github.ref == 'refs/heads/main' && needs.version.result == 'success' &&
+      needs.windows.result == 'success' &&
+      contains(fromJSON('["success","skipped"]'), needs.linux.result) &&
+      contains(fromJSON('["success","skipped"]'), needs.portability.result)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -236,9 +257,18 @@ jobs:
           prev=$(git tag -l 'v[0-9]*' --sort=-v:refname | head -1)
           {
             echo "**Windows:** the \`-setup.exe\` (unsigned, so SmartScreen asks once: More info → Run anyway)."
-            echo "**Linux:** the \`.deb\` or the \`.AppImage\`."
+            if ls dist/*.deb dist/*.AppImage > /dev/null 2>&1; then
+              echo "**Linux:** the \`.deb\` or the \`.AppImage\`."
+            fi
             echo
-            if [ -n "$prev" ]; then
+            # what changed for the user: CHANGELOG.md's Unreleased section; the
+            # commit subjects only when that section is empty
+            awk '/^## Unreleased/{on=1; next} on && /^## /{exit} on' CHANGELOG.md | sed '/./,$!d' > unreleased.md
+            if [ -s unreleased.md ]; then
+              echo "### What's new"
+              echo
+              cat unreleased.md
+            elif [ -n "$prev" ]; then
               echo "### Changes since $prev"
               git log --no-merges --format='- %s' "$prev..$GITHUB_SHA"
             else
