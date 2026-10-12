@@ -503,6 +503,22 @@ impl Index {
         limit: usize,
         favs: &[String],
     ) -> Value {
+        self.query_at(scope, q, sort, offset, limit, favs, false)
+    }
+
+    /// [`Index::query`]; `direct`: in a category, only the models filed at that
+    /// level, not in its subcategories.
+    #[allow(clippy::too_many_arguments)]
+    pub fn query_at(
+        &self,
+        scope: &str,
+        q: &str,
+        sort: &str,
+        offset: usize,
+        limit: usize,
+        favs: &[String],
+        direct: bool,
+    ) -> Value {
         let t = std::time::Instant::now();
         let (place, sub) = scope.split_once(':').unwrap_or((scope, ""));
         let mut sub_path = sub.split('/');
@@ -519,8 +535,9 @@ impl Index {
                 "unsorted" => m.v["schema"].is_null(),
                 "favs" => favs.iter().any(|f| f == m.id()),
                 "schema" => {
+                    let depth = m.v["path"].as_array().map_or(0, Vec::len);
                     m.v["schema"] == json!(schema_id)
-                        && sub_path.len() <= m.v["path"].as_array().map_or(0, Vec::len)
+                        && (if direct { sub_path.len() == depth } else { sub_path.len() <= depth })
                         && sub_path
                             .iter()
                             .zip(m.v["path"].as_array().into_iter().flatten())

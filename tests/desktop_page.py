@@ -176,8 +176,9 @@ async def phase1(pg):
     await pg.goto(B + "#/")
     await library_menu(pg, "rescan")
     await pg.wait_for_function("() => document.querySelector('#home-counts')?.textContent.includes('4 models')")
-    await pg.click('.sidebar a[href="#/browse/schema/wargames/Warhammer%2040k"]')
-    tree = await pg.eval_on_selector_all("#schema-tree a.nav-link", "els => els.map(e => e.textContent.trim())")
+    await pg.click('.sidebar a[href="#/browse/schema/wargames"]')
+    await pg.click('#category-tree a[href="#/browse/schema/wargames/Warhammer%2040k"]')
+    tree = await pg.eval_on_selector_all("#schema-tree a.nav-link, #category-tree a.nav-link", "els => els.map(e => e.textContent.trim())")
     await pg.goto(B + "#/browse/schema/wargames/Warhammer%2040k/Tyranid")
     n = await count(pg)
     names = await pg.eval_on_selector_all(".card .card-name", "els => els.map(e => e.textContent)")
@@ -381,7 +382,7 @@ async def phase2(pg):
     await pg.goto(B + "#/browse/unsorted")
     await pg.wait_for_selector(".card:has(.card-name:text-is('tugboat'))")
     await pg.click(".card:has(.card-name:text-is('tugboat'))")
-    await pg.click("#details-move")
+    await pg.click("#unsorted-move")
     await pg.select_option("#move-schema", "wargames")
     await pg.select_option("#move-place", "Warhammer 40k")
     await pg.fill("#move-new", "Necrons")  # a new subcategory, made as it moves
@@ -760,7 +761,7 @@ async def phase4(pg):
     await toast_text(pg, "^Undone")
     back = (t / "Orks").is_dir()
     check("subcategories are added at any depth, kept with no models, and deleted with Undo", made and gone and back and "Orks" in w40k and "Aeldari" in w40k
-          and items == ["Add subcategory…", "Edit category…", "Rename or move…", "Merge categories…", "Delete subcategory…"], (made, gone, back, w40k, items))
+          and items == ["Add subcategory…", "Edit category…", "Choose icon…", "Rename or move…", "Merge categories…", "Delete subcategory…"], (made, gone, back, w40k, items))
     # one with models in it: they move up a level, after a list of what moves
     model_folder("Tabletop/Terrain/Buildings/Ruins/Tower", {"tower.stl": cube(6)})
     await api(pg, "library_scan", {"full": False})
@@ -793,6 +794,7 @@ async def phase4(pg):
 
     # 29. several models' details at once
     await pg.goto(B + "#/browse/schema/wargames")
+    await pg.click('#cat-show [data-view="models"]')  # everything below, not only the models filed here
     await pg.wait_for_selector(".card:has(.card-name:text-is('Gargoyle'))")
     await pg.click(".card:has(.card-name:text-is('Gargoyle'))")
     await pg.click(".card:has(.card-name:text-is('dragon'))", modifiers=["Control"])
@@ -941,6 +943,7 @@ async def ui_pass(pg):
     await count(pg)
     first = pg.locator(".results .card").first
     await first.click()
+    await pg.click("#unsorted-tab-details")
     await pg.wait_for_selector("#model-details .action-row")
     row = await labels_of(pg, "#model-details .action-row button")
     await first.click(button="right")
@@ -1022,7 +1025,7 @@ async def ui_pass(pg):
     await pg.screenshot(path=str(out / "25-delete-category.png"))
     await pg.click("#delete-schema-dialog .dialog-actions .ghost")
     await pg.wait_for_selector("#delete-schema-dialog", state="detached")
-    check("a category's menu is on the sidebar too, and Delete category is red", items == ["Add subcategory…", "Edit category…", "Merge categories…", "Delete category…"] and red, (items, red))
+    check("a category's menu is on the sidebar too, and Delete category is red", items == ["Add subcategory…", "Edit category…", "Choose icon…", "Merge categories…", "Delete category…"] and red, (items, red))
 
     # 38. files without a viewer show their details and an external-app action
     put(library / "Unsorted/Knight Armour/settings.ini", "x")
@@ -1219,6 +1222,7 @@ async def ui_pass3(pg):
     await pg.wait_for_selector("#place-summary #place-counts")
     summary = await pg.inner_text("#place-summary #place-counts")
     await pg.click(".card:has(.card-name:text-is('Knight Armour'))")
+    await pg.click("#unsorted-tab-details")
     await pg.wait_for_function("() => document.querySelector('#details-name')?.value === 'Knight Armour'")
     side = library / "Unsorted/Knight Armour/model.json"
     before = json.loads(side.read_text()).get("authors") or []
@@ -1699,6 +1703,86 @@ async def review1(pg):
     await pg.wait_for_selector("#schema-dialog", state="detached")
     await pg.set_viewport_size(size)
 
+
+async def group2(pg):
+    """Group 2 (docs/PLAN.md, "Group 2 design"): the category's subcategories in a
+    panel beside the menu, Subcategories or Models, and icons."""
+    # R5. the panel: beside the menu on a category's pages, folds to a strip, remembered
+    await pg.goto(B + "#/browse/schema/household")
+    await pg.wait_for_selector("#category-panel #category-tree")
+    head = await pg.inner_text("#category-panel .cat-panel-title")
+    menu_rows = await labels_of(pg, "#schema-tree .nav-label")
+    panel_rows = await labels_of(pg, "#category-tree a.nav-link .nav-label")
+    await pg.click("#category-panel-close")
+    await pg.wait_for_selector("#category-panel.folded")
+    strip = await pg.inner_text("#category-panel-open")
+    await pg.goto(B + "#/browse/all")
+    await pg.wait_for_selector("#browse-count")
+    gone = await pg.locator("#category-panel").count() == 0
+    await pg.goto(B + "#/browse/schema/household")
+    await pg.wait_for_selector("#category-panel")
+    still = await pg.locator("#category-panel.folded").count() == 1
+    await pg.click("#category-panel-open")
+    await pg.wait_for_selector("#category-tree")
+    check("a category's subcategories are in a panel beside the menu, which folds to a strip and shows only on its pages",
+          "Household" in head and "Kitchen" in panel_rows and "Kitchen" not in menu_rows and "Household" in strip and gone and still,
+          (head, menu_rows, panel_rows, strip, gone, still))
+
+    # R3. Subcategories or Models
+    await pg.wait_for_selector("#cat-show")
+    await pg.wait_for_selector("#subcat-tiles .subcat-tile")
+    tiles = await labels_of(pg, "#subcat-tiles .subcat-name > span:last-child")
+    every = await api(pg, "models_query", {"scope": "schema:household", "limit": 2000})
+    here = await api(pg, "models_query", {"scope": "schema:household", "direct": True, "limit": 2000})
+    await pg.wait_for_function("n => document.querySelectorAll('.results [data-model]').length === n", arg=here["total"])
+    shown_here = await pg.locator(".results [data-model]").count()
+    await pg.click('#cat-show [data-view="models"]')
+    await pg.wait_for_selector("#subcat-tiles", state="detached")
+    await pg.wait_for_function("n => document.querySelectorAll('.results [data-model]').length === n", arg=min(every["total"], 300))
+    await pg.click('#cat-show [data-view="subs"]')
+    await pg.wait_for_selector("#subcat-tiles .subcat-tile")
+    await pg.screenshot(path=str(out / "43-subcategories.png"))
+    await pg.click('#subcat-tiles .subcat-tile[data-sub="Kitchen"]')
+    await pg.wait_for_function("() => location.hash.endsWith('/Kitchen')")
+    check("a category shows its subcategories as tiles and the models filed at its own level, or every model below",
+          "Kitchen" in tiles and here["total"] < every["total"] and all(not m.get("path") for m in here["items"]) and shown_here == here["total"],
+          (tiles, here["total"], every["total"], shown_here))
+
+    # R4. icons: built in or your own picture, from the Category menu, with Undo
+    await pg.click('.sidebar a[href="#/browse/schema/household"]', button="right")
+    await pg.click('#context-menu [data-action="choose-icon"]')
+    await pg.wait_for_selector("#icon-dialog")
+    await pg.fill("#icon-search", "house")
+    await pg.click('#icon-dialog .icon-choice[data-icon="builtin:house"]')
+    await pg.click("#icon-dialog button[type=submit]")
+    await pg.wait_for_selector("#icon-dialog", state="detached")
+    await pg.wait_for_selector('.sidebar .cat-icon[data-icon="builtin:house"]')
+    stored = json.loads((library / "_library/schemas/household.json").read_text()).get("icons")
+    in_panel = await pg.locator('#category-panel .cat-panel-title .cat-icon[data-icon="builtin:house"]').count()
+    pic = library.parent / "kitchen-icon.png"
+    pic.write_bytes(PNG)
+    await api(pg, "category_icon_set", {"schema": "household", "path": ["Kitchen"], "file": str(pic)})
+    await pg.evaluate("async () => { const {loadOverview} = await import('/ui/library.js'); await loadOverview(); }")
+    await pg.goto(B + "#/browse/schema/household")
+    await pg.wait_for_selector('#subcat-tiles .subcat-tile[data-sub="Kitchen"] .cat-icon[data-icon^="file:_library/icons/"] img')
+    own = await pg.locator('#category-tree .cat-icon[data-icon^="file:_library/icons/"]').count()
+    await pg.screenshot(path=str(out / "44-category-icons.png"))
+    await pg.evaluate("async () => { const {ui} = await import('/ui/state.js'); ui.set({dialog: {type: 'choose-icon', schemaId: 'household', path: []}}); }")
+    await pg.wait_for_selector("#icon-dialog")
+    await pg.click('#icon-dialog .icon-choice[data-icon=""]')
+    await pg.click("#icon-dialog button[type=submit]")
+    await pg.wait_for_selector('.sidebar .cat-icon[data-icon="builtin:house"]', state="detached")
+    await pg.locator('#toast button:text-is("Undo")').click()
+    await pg.wait_for_selector('.sidebar .cat-icon[data-icon="builtin:house"]')
+    check("a category or subcategory gets a built-in icon or your own picture, shown in the menu, panel and tiles, with Undo",
+          stored == {"": "builtin:house"} and in_panel == 1 and own == 1, (stored, in_panel, own))
+
+    # review 1, item 13: an empty place says how to fill it
+    await pg.goto(B + "#/browse/schema/workshop/Tools")
+    await pg.wait_for_selector("#no-results")
+    note = await pg.inner_text("#no-results")
+    check("an empty category says how to add models to it", "Drop model files" in note and await pg.locator('#no-results a[href="#/import"]').count() == 1, note)
+
 async def group1(pg):
     """Group 1 (docs/PLAN.md, "Group 1 design"): the same file actions in every
     view of a model, Add subcategory under the one shown, and the About page."""
@@ -1763,25 +1847,25 @@ async def group1(pg):
     # R2. Add subcategory under the category or subcategory shown
     await api(pg, "schema_create", {"schema": {"name": "Workshop", "subcategories": [{"name": "Tools"}]}})
     await pg.evaluate("async () => { const {loadOverview} = await import('/ui/library.js'); await loadOverview(); }")
-    tree = pg.locator("#schema-tree")
-    await tree.locator('a.nav-link[aria-label="Workshop"]').click()
+    await pg.locator('#schema-tree a.nav-link[aria-label="Workshop"]').click()
     await pg.wait_for_selector("#nav-add-subcategory")
-    rows = await labels_of(pg, "#schema-tree .nav-label")
-    under_top = rows.index("Add subcategory") == rows.index("Workshop") + 2  # after its subcategory Tools
+    tree = pg.locator("#category-tree")
+    rows = await labels_of(pg, "#category-tree .nav-label")
+    under_top = rows == ["Tools", "Add subcategory"]  # the category's own row is the panel's head
     await tree.locator('a.nav-link[aria-label="Tools"]').click()
     await pg.wait_for_function("() => location.hash.includes('Tools')")
-    rows = await labels_of(pg, "#schema-tree .nav-label")
+    rows = await labels_of(pg, "#category-tree .nav-label")
     under_sub = rows.count("Add subcategory") == 1 and rows.index("Add subcategory") == rows.index("Tools") + 1
     await pg.click("#nav-add-subcategory")
     await pg.fill("#nav-subcategory-name", "Clamps")
     await pg.keyboard.press("Enter")
     await pg.wait_for_function("() => document.querySelector('#toast')?.textContent.includes('Added Clamps')")
     made = (library / "Workshop" / "Tools" / "Clamps").is_dir()
-    rows = await labels_of(pg, "#schema-tree .nav-label")
+    rows = await labels_of(pg, "#category-tree .nav-label")
     shown = rows.index("Clamps") == rows.index("Tools") + 1 and rows.index("Add subcategory") == rows.index("Clamps") + 1
     await pg.screenshot(path=str(out / "41-add-subcategory.png"))
     await pg.locator('#toast button:text-is("Undo")').click()
-    await pg.wait_for_function("() => ![...document.querySelectorAll('#schema-tree .nav-label')].some(e => e.textContent === 'Clamps')")
+    await pg.wait_for_function("() => ![...document.querySelectorAll('#category-tree .nav-label')].some(e => e.textContent === 'Clamps')")
     undone = not (library / "Workshop" / "Tools" / "Clamps").exists()
     await pg.click("#nav-add-subcategory")
     await pg.fill("#nav-subcategory-name", "Nothing")
@@ -1887,6 +1971,7 @@ async def main():
             await agent_d_reviewed_import(pg)
             await group1(pg)
             await review1(pg)
+            await group2(pg)
             await review_checks(pg)
 
             # 3. renaming the library

@@ -771,6 +771,7 @@ pub fn edited(lib: &Library, old: &Schema, spec: &Value) -> Result<(Value, Vec<R
             check_path(lib, &folder, known, p)?;
         }
         set_subcategories(&mut v, &paths);
+        carry_icons(&mut v, &maps);
     }
     v["name"] = json!(name);
     v["folder"] = json!(folder);
@@ -778,6 +779,114 @@ pub fn edited(lib: &Library, old: &Schema, spec: &Value) -> Result<(Value, Vec<R
     v["fields"] = json!(fields);
     v["updated"] = json!(crate::library::now());
     Ok((v, maps))
+}
+
+/// Icons follow their subcategory through an edit: a renamed or moved one keeps
+/// its icon, a removed one loses it (see [`set_icon`]).
+fn carry_icons(v: &mut Value, maps: &[Remap]) {
+    let Some(old) = v["icons"].as_object().cloned() else {
+        return;
+    };
+    let tree = subcategories(v);
+    let mut out = Map::new();
+    for (key, icon) in old {
+        if key.is_empty() {
+            out.insert(key, icon);
+            continue;
+        }
+        let path: Vec<String> = key.split('/').map(String::from).collect();
+        if best(&path, maps).is_some_and(|m| !m.keep_below) {
+            continue;
+        }
+        let to = remap(&path, maps);
+        if in_tree(&tree, &to) {
+            out.insert(to.join("/"), icon);
+        }
+    }
+    v["icons"] = Value::Object(out);
+}
+
+/// The folder (in the library) where pictures chosen as icons are kept.
+pub const ICONS_DIR: &str = "_library/icons";
+const ICON_TYPES: [&str; 5] = ["png", "jpg", "jpeg", "webp", "svg"];
+const ICON_MAX: u64 = 512 * 1024;
+
+/// Give a category (`path` empty) or one of its subcategories an icon:
+/// `builtin:<name>`, `file:_library/icons/<file>` (one already in the library),
+/// a picture `file` to copy into the library, or none. Returns the icon it
+/// replaced (or null), for Undo.
+pub fn set_icon(
+    lib: &Library,
+    id: &str,
+    path: &[String],
+    icon: Option<&str>,
+    file: Option<&std::path::Path>,
+) -> Result<Value> {
+    lib.writable()?;
+    let s = upgrade(lib, find(lib, id)?)?;
+    if !path.is_empty() && !in_tree(&s.tree(), path) {
+        bail!("{} isn't a subcategory of {}.", path.join(" › "), s.name);
+    }
+    let value = if let Some(f) = file {
+        let ext = f
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_ascii_lowercase)
+            .filter(|e| ICON_TYPES.contains(&e.as_str()))
+            .ok_or_else(|| anyhow::anyhow!("Choose a PNG, JPEG, WebP or SVG picture."))?;
+        let size = std::fs::metadata(f)?.len();
+        if size > ICON_MAX {
+            bail!("That picture is {} KB; choose one of 512 KB or less.", size / 1024);
+        }
+        let bytes = std::fs::read(f)?;
+        use sha2::{Digest, Sha256};
+        let name = format!("{}.{ext}", &hex::encode(Sha256::digest(&bytes))[..16]);
+        let dir = lib.root().join(ICONS_DIR);
+        std::fs::create_dir_all(&dir)?;
+        if !dir.join(&name).is_file() {
+            std::fs::write(dir.join(&name), &bytes)?;
+        }
+        Some(format!("file:{ICONS_DIR}/{name}"))
+    } else if let Some(i) = icon.filter(|i| !i.is_empty()) {
+        let ok = match i.split_once(':') {
+            Some(("builtin", n)) => {
+                !n.is_empty() && n.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+            }
+            Some(("file", rel)) => rel
+                .strip_prefix(ICONS_DIR)
+                .and_then(|n| n.strip_prefix('/'))
+                .is_some_and(|n| !n.contains(['/', '\\']) && !n.starts_with('.') && lib.root().join(rel).is_file()),
+            _ => false,
+        };
+        if !ok {
+            bail!("That isn't an icon this app knows.");
+        }
+        Some(i.to_string())
+    } else {
+        None
+    };
+    let mut v = s.to_json();
+    let key = path.join("/");
+    let mut icons = v["icons"].as_object().cloned().unwrap_or_default();
+    let before = icons.get(&key).cloned().unwrap_or(Value::Null);
+    match value {
+        Some(i) => {
+            icons.insert(key, json!(i));
+        }
+        None => {
+            icons.shift_remove(&key);
+        }
+    }
+    if icons.is_empty() {
+        if let Some(o) = v.as_object_mut() {
+            o.shift_remove("icons");
+        }
+    } else {
+        v["icons"] = Value::Object(icons);
+    }
+    v["updated"] = json!(crate::library::now());
+    save(lib, &v)?;
+    Ok(before)
 }
 
 fn choices(v: &Value) -> Vec<String> {
@@ -921,6 +1030,43 @@ mod tests {
         let s2 = create(&lib, &json!({ "name": "Wargames", "folder": "Wargames 2" })).unwrap();
         assert_eq!(s2.id, "wargames-2");
         assert_eq!(list(&lib).len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn icons_are_set_and_follow_edits() {
+        let dir = std::env::temp_dir().join(format!("modlib-icons-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let lib = Library::open(&dir).unwrap();
+        let s = create(&lib, &json!({ "name": "Home", "subcategories": [
+            { "name": "Kitchen", "subcategories": [{ "name": "Cups" }] }, { "name": "Office" } ] }))
+        .unwrap();
+        let p = |x: &[&str]| x.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(set_icon(&lib, &s.id, &[], Some("builtin:house"), None).unwrap(), Value::Null);
+        set_icon(&lib, &s.id, &p(&["Kitchen", "Cups"]), Some("builtin:cup"), None).unwrap();
+        assert!(set_icon(&lib, &s.id, &p(&["Garage"]), Some("builtin:car"), None).is_err());
+        assert!(set_icon(&lib, &s.id, &[], Some("javascript:alert(1)"), None).is_err());
+        assert!(set_icon(&lib, &s.id, &[], Some("file:../secret.png"), None).is_err());
+        // a picture of your own is copied into the library
+        let pic = dir.join("office.png");
+        std::fs::write(&pic, b"\x89PNG not really").unwrap();
+        set_icon(&lib, &s.id, &p(&["Office"]), None, Some(&pic)).unwrap();
+        let v = find(&lib, &s.id).unwrap().to_json();
+        let own = v["icons"]["Office"].as_str().unwrap().to_string();
+        assert!(own.starts_with("file:_library/icons/") && lib.root().join(&own[5..]).is_file());
+        std::fs::write(&pic, vec![0u8; 600 * 1024]).unwrap();
+        assert!(set_icon(&lib, &s.id, &p(&["Office"]), None, Some(&pic)).is_err());
+        // Undo sets back what it replaced
+        let before = set_icon(&lib, &s.id, &[], None, None).unwrap();
+        assert_eq!(before, json!("builtin:house"));
+        set_icon(&lib, &s.id, &[], before.as_str(), None).unwrap();
+        // renaming Kitchen carries Cups' icon; removing Office drops its own
+        let s = find(&lib, &s.id).unwrap();
+        let (v, _) = edited(&lib, &s, &json!({ "subcategories": [
+            { "name": "Galley", "orig": ["Kitchen"], "subcategories": [{ "name": "Cups", "orig": ["Kitchen", "Cups"] }] } ],
+            "removed": [["Office"]] }))
+        .unwrap();
+        assert_eq!(v["icons"], json!({ "": "builtin:house", "Galley/Cups": "builtin:cup" }));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
