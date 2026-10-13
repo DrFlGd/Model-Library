@@ -84,6 +84,7 @@ Fixes from the review of 0.5.17 (all 13 items; docs/PLAN.md, "0.5.18"):
 - Archives that need a password have a lock mark and **Enter password…** in their right-click menu.
 - Settings › Library › **Opened archives** shows how much room unpacked 7z and RAR files take on this computer, with **Empty**.
 - Import's details for one file read "Robot.7z · 55 KB", and file counts use singular and plural names.
+- The Rust tests no longer share their archive cache with a test that is about to remove it (this failed the 0.5.18 build on main).
 - Stopping a review's check now always counts as stopped, even when the check had just finished. Before, a fast check could ignore Stop (this failed the page test on main and held back the release of the 0.5.16 review fixes).
 
 ## 0.5.17 (2026-10-13)

@@ -130,6 +130,9 @@ fn cache_root() -> &'static Mutex<Option<PathBuf>> {
 
 /// Where 7z and RAR archives are unpacked (the app's data folder).
 pub fn set_cache(dir: &Path) {
+    // the tests make many apps at once, each with a data folder removed when it
+    // ends; they share one cache instead, so one test can't remove another's
+    if cfg!(test) { return; }
     *cache_root().lock().unwrap() = Some(dir.join("archive-cache"));
 }
 
