@@ -1,0 +1,50 @@
+[dependencies]
+
+[dev-dependencies.rand]
+version = "0.8"
+
+[dev-dependencies.rustversion]
+version = "1"
+
+[features]
+default = ["std"]
+nightly = []
+std = []
+
+[lib]
+path = "src/lib.rs"
+
+[lints.clippy.declare_interior_mutable_const]
+level = "allow"
+priority = 1
+
+[lints.clippy.lint_groups_priority]
+level = "allow"
+priority = 1
+
+[lints.rust.unexpected_cfgs]
+check-cfg = ["cfg(crossbeam_loom)", "cfg(crossbeam_sanitize)"]
+level = "warn"
+priority = 0
+
+[package]
+autobenches = false
+autobins = false
+autoexamples = false
+autolib = false
+autotests = false
+categories = ["algorithms", "concurrency", "data-structures", "no-std"]
+description = "Utilities for concurrent programming"
+edition = "2021"
+homepage = "https://github.com/crossbeam-rs/crossbeam/tree/master/crossbeam-utils"
+keywords = ["scoped", "thread", "atomic", "cache"]
+license = "MIT OR Apache-2.0"
+name = "crossbeam-utils"
+readme = "README.md"
+repository = "https://github.com/crossbeam-rs/crossbeam"
+rust-version = "1.60"
+version = "0.8.23"
+
+[target."cfg(crossbeam_loom)".dependencies.loom]
+optional = true
+version = "0.7.1"
