@@ -1383,7 +1383,7 @@ async def import_follow_ups(pg):
     body = await pg.eval_on_selector_all('#sort-tree .sw-item[data-name="Body"] .ft', "els => els.map(e => e.dataset.type)")
     loose = await pg.eval_on_selector_all('#sort-tree .sw-left[data-name="notes.txt"] .ft', "els => els.map(e => e.dataset.type)")
     folder = await pg.locator('#sort-tree .sw-folder[data-name="Ann"] .sw-mark-folder').count()
-    colours = await pg.evaluate("() => ['stl', '3mf', 'zip'].map(t => getComputedStyle(document.querySelector(`.ft[data-type='${t}']`)).backgroundColor)")
+    colours = await pg.evaluate("() => ['stl', '3mf', 'zip'].map(t => getComputedStyle(document.querySelector(`.ft[data-type='${t}']`)).borderTopColor)")
     await pick_rows_tree(pg, "Torso")
     await pg.wait_for_selector("#sort-details .tree-file .ft")
     files = await pg.eval_on_selector_all("#sort-details .tree-file .ft", "els => els.map(e => e.dataset.type)")
@@ -2692,7 +2692,7 @@ async def main():
             await pg.select_option("#skin-select", "drafting")
             check("the skin is Drafting Sheet unless chosen; choosing one changes the look and icons at once and is kept",
                   first == "drafting" and icon_before == "drafting" and skin == "classic" and icon_after == "classic"
-                  and font.startswith('"Archivo"') and saved == "classic", (first, icon_before, skin, icon_after, font, saved))
+                  and font.strip('"').startswith('Archivo') and saved == "classic", (first, icon_before, skin, icon_after, font, saved))
 
             # 6. a library made by a newer app opens read-only
             future = home / "Future"
