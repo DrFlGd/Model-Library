@@ -1,12 +1,13 @@
 // Settings: the open library (name, folder, variant folders, other libraries),
 // the theme, and the app's version with a link to the About page.
-import { html, useState } from "../lib/html.js";
+import { html, useState, useEffect } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui, THEMES, setTheme, setPref } from "./state.js";
 import { ctx } from "./context.js";
 import { api, isDesktop, openLibrary, renameLibrary, showLibraryFolder, setVariantFolders, setPreviews, remakePreviews, undoable, toast } from "./library.js";
 import { CommandBar } from "./layout.js";
 import { GRAY, ColourSelect, colourName } from "./colours.js";
+import { size } from "./details.js";
 
 /** How the library's previews are drawn: their colour, 3MF pictures and 3MF
  *  colours (R10, R11; docs/PLAN.md "0.5.17"). Saving changes the cards at once;
@@ -42,6 +43,28 @@ function Previews({ lib }) {
     <label class="check-row"><input type="checkbox" id="preview-file-colours" checked=${look.file_colours} disabled=${off}
       onChange=${(e) => save({ file_colours: e.target.checked }, e.target.checked ? "3MF files are drawn in their own colours." : "3MF files are drawn in the preview colour.")} />
       <span>Draw a 3MF file in its own colours when it has some (when it has no picture, or pictures are off)</span></label>
+  </div>`;
+}
+
+/** The 7z and RAR archives unpacked on this computer to look inside them
+ *  (docs/PLAN.md, "0.5.18"): how much room they take, and Empty. */
+function OpenedArchives() {
+  const [info, setInfo] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const load = () => api("archive_cache").then(setInfo, () => setInfo(null));
+  useEffect(() => { load(); }, []);
+  const empty = async () => {
+    setBusy(true);
+    try { const { freed } = await api("archive_cache_empty"); toast(`Emptied the opened archives (${size(freed)}). They're opened again when you next look inside.`, 6000); }
+    catch (e) { toast(`Couldn't empty them: ${e.message || e}`, 6000); }
+    await load();
+    setBusy(false);
+  };
+  if (!info) return null;
+  return html`<div class="field-block" id="settings-archives"><span class="field-label">Opened archives</span>
+    <div class="pick-row"><span id="archive-cache-size">${info.size ? size(info.size) : "Empty"}</span>
+      <button type="button" class="ghost" id="archive-cache-empty" disabled=${busy || !info.size} onClick=${empty}>Empty</button></div>
+    <small class="muted">To look inside a 7z or RAR file, the app unpacks it once on this computer. It keeps those used in the last ${info.days} days, up to ${size(info.limit)}; your archives aren't changed.</small>
   </div>`;
 }
 
@@ -119,7 +142,8 @@ export function Settings() {
           <small class="muted">Everything about your models is kept in this folder, so you can move, copy or sync it and open it again here.</small>
         </div>
         <${VariantFolders} lib=${lib} />
-        <${Previews} lib=${lib} />` : html`<p class="muted">No library is open.</p>`}
+        <${Previews} lib=${lib} />
+        <${OpenedArchives} />` : html`<p class="muted">No library is open.</p>`}
       ${!lib && isDesktop() ? html`<div><button type="button" class="ghost" id="open-library" title="Open a library, or make a new one in an empty folder" onClick=${() => openLibrary()}>Open another library…</button></div>` : null}
       ${others.length ? html`<h3>Libraries opened before</h3>
         <ul class="ls-list" id="recent-libraries">${others.map((p) => html`<li key=${p}><span>${p}</span>

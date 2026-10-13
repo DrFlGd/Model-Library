@@ -249,6 +249,27 @@ fn folder_size(p: &Path) -> u64 {
     }).sum()
 }
 
+/// How much the cache holds, in bytes, and what it keeps (Settings › Library).
+pub fn cache_info() -> Value {
+    json!({ "size": folder_size(&cache()), "days": CACHE_DAYS, "limit": CACHE_BYTES })
+}
+
+/// Empty the cache (an archive being opened right now is left alone). Gives the
+/// bytes freed; the archives are opened again when next looked inside.
+pub fn empty_cache() -> u64 {
+    empty(&cache())
+}
+
+fn empty(root: &Path) -> u64 {
+    let mut freed = 0;
+    for e in std::fs::read_dir(root).into_iter().flatten().flatten() {
+        if e.file_name().to_string_lossy().starts_with(".open-") { continue; }
+        let size = folder_size(&e.path());
+        if std::fs::remove_dir_all(e.path()).is_ok() { freed += size; }
+    }
+    freed
+}
+
 /// Keep the cache to archives used lately and to its size, newest kept first.
 fn trim(keep: &Path) {
     let now = SystemTime::now();
@@ -384,19 +405,25 @@ fn junk(name: &str) -> bool {
 }
 
 /// The files in an archive: [{ name, size, kind, modified }], folders left out, sorted by name.
+/// A file that needs a password to read also has `"locked": true`.
 pub fn list(path: &Path) -> Result<Vec<Value>> {
     let mut out = vec![];
-    let mut add = |name: String, size: u64, modified: i64| {
+    let mut add = |name: String, size: u64, modified: i64, locked: bool| {
         if !junk(&name) {
-            out.push(json!({ "name": name, "size": size, "kind": file_kind(&name), "modified": modified }));
+            let mut e = json!({ "name": name, "size": size, "kind": file_kind(&name), "modified": modified });
+            if locked { e["locked"] = json!(true); }
+            out.push(e);
         }
     };
     match format(&path.to_string_lossy()) {
         Some(Format::SevenZ) => {
             let r = seven(path)?;
-            for e in &r.archive().files {
+            let a = r.archive();
+            for (i, e) in a.files.iter().enumerate() {
                 if e.is_directory() || e.is_anti_item() { continue; }
-                add(e.name().replace('\\', "/"), e.size(), nt_millis(e.last_modified_date()));
+                let locked = a.stream_map.file_block_index.get(i).copied().flatten().and_then(|b| a.blocks.get(b))
+                    .is_some_and(|b| b.coders.iter().any(|c| c.encoder_method_id() == sevenz_rust2::EncoderMethod::ID_AES256_SHA256));
+                add(e.name().replace('\\', "/"), e.size(), nt_millis(e.last_modified_date()), locked);
             }
         }
         Some(Format::Rar) => {
@@ -405,7 +432,7 @@ pub fn list(path: &Path) -> Result<Vec<Value>> {
             for e in a.open_for_listing().map_err(|e| rar_error(e, path, pw.is_some()))? {
                 let e = e.map_err(|e| rar_error(e, path, pw.is_some()))?;
                 if e.is_directory() || e.is_split_before() { continue; }
-                add(rar_name(&e.filename), e.unpacked_size, dos_millis(e.file_time));
+                add(rar_name(&e.filename), e.unpacked_size, dos_millis(e.file_time), e.is_encrypted());
             }
         }
         _ => {
@@ -414,7 +441,7 @@ pub fn list(path: &Path) -> Result<Vec<Value>> {
             for i in 0..z.len() {
                 let e = z.by_index_raw(i)?;
                 if e.is_dir() { continue; }
-                add(e.name().to_string(), e.size(), e.last_modified().map(modified_millis).unwrap_or(0));
+                add(e.name().to_string(), e.size(), e.last_modified().map(modified_millis).unwrap_or(0), e.encrypted());
             }
         }
     }
@@ -598,6 +625,7 @@ pub(crate) mod tests {
         assert!(!needs_opening(&p));
         assert_eq!(read(&p, "Kit/notes.txt", 100).unwrap(), b"hello");
         assert!(opened(&p).is_some(), "small archives are unpacked when first read");
+        assert!(l[0].get("locked").is_none());
         assert!(read(&p, "Kit/../x", 100).is_err());
         // bigger ones need opening first
         assert_eq!(read_opening(&p, "Kit/arm.stl", 100, 0).unwrap(), b"solid arm", "already in the cache");
@@ -632,11 +660,38 @@ pub(crate) mod tests {
             &p, "pw".into()).unwrap();
         let e = read(&p, "a.txt", 100).unwrap_err().to_string();
         assert_eq!(e, LOCKED);
+        assert_eq!(list(&p).unwrap_err().to_string(), LOCKED, "its names are locked too");
         set_password(&p, "nope");
         assert_eq!(read(&p, "a.txt", 100).unwrap_err().to_string(), WRONG_PASSWORD);
         assert_eq!(read(&p, "a.txt", 100).unwrap_err().to_string(), LOCKED, "a wrong password is forgotten");
         set_password(&p, "pw");
         assert_eq!(read(&p, "a.txt", 100).unwrap(), b"secret");
+        // names readable, files locked: the listing marks them
+        let q = d.join("files-locked.7z");
+        let mut w = sevenz_rust2::ArchiveWriter::create(&q).unwrap();
+        w.set_content_methods(vec![
+            sevenz_rust2::encoder_options::AesEncoderOptions::new("pw".into()).into(),
+            sevenz_rust2::EncoderMethod::LZMA2.into(),
+        ]);
+        w.set_encrypt_header(false);
+        w.push_archive_entry(sevenz_rust2::ArchiveEntry::new_file("b.txt"), Some(&b"secret"[..])).unwrap();
+        w.finish().unwrap();
+        let l = list(&q).unwrap();
+        assert_eq!((l[0]["name"].as_str(), l[0]["locked"].as_bool()), (Some("b.txt"), Some(true)));
+    }
+
+    #[test]
+    fn the_cache_can_be_emptied() {
+        // its own folder: the shared cache is in use by the other tests
+        let d = crate::library::tests::temp_dir("archive-cache-empty");
+        for (dir, n) in [("abc", 9), ("def", 5), (".open-1-1", 7)] {
+            std::fs::create_dir_all(d.join(dir).join("files")).unwrap();
+            std::fs::write(d.join(dir).join("files/a.stl"), vec![0u8; n]).unwrap();
+        }
+        assert_eq!(folder_size(&d), 21);
+        assert_eq!(empty(&d), 14, "an archive being opened is left alone");
+        assert!(!d.join("abc").exists() && d.join(".open-1-1").exists());
+        assert!(cache_info()["days"] == 14);
     }
 
     #[test]
@@ -652,6 +707,8 @@ pub(crate) mod tests {
         let q = d.join("crypted.rar");
         std::fs::copy(rar_data("crypted.rar"), &q).unwrap();
         assert_eq!(list(&q).unwrap()[0]["name"], ".gitignore", "only its files are locked");
+        assert_eq!(list(&q).unwrap()[0]["locked"], true);
+        assert!(list(&p).unwrap()[0].get("locked").is_none());
         assert_eq!(read(&q, ".gitignore", 1000).unwrap_err().to_string(), LOCKED);
         set_password(&q, "unrar");
         assert_eq!(read(&q, ".gitignore", 1000).unwrap(), b"target\nCargo.lock\n");

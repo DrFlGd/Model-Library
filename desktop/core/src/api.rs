@@ -1518,6 +1518,12 @@ impl App {
                     Ok(json!({ "opened": true }))
                 }))
             }
+            "archive_cache" => j(archive::cache_info()),
+            "archive_cache_empty" => {
+                // Settings › Library › Opened archives (docs/PLAN.md, "0.5.18")
+                let freed = tokio::task::spawn_blocking(archive::empty_cache).await.map_err(|e| e.to_string())?;
+                j(json!({ "freed": freed }))
+            }
             "archive_password" => {
                 // kept in memory until the app closes, never written down
                 let path = self.file_path(&args).await?;
@@ -1617,8 +1623,10 @@ impl App {
                 // deletes a user-supplied image or the last complete file copy.
                 let cover = if args["automatic"] == json!(true) {
                     Value::Null
-                } else { match args["snapshot"].as_str() {
-                    Some(data) => {
+                } else {
+                    // a picture made here: the 3D view's snapshot, or a picture inside an
+                    // archive, copied out (the archive isn't changed)
+                    let made: Option<(Vec<u8>, String)> = if let Some(data) = args["snapshot"].as_str() {
                         use base64::Engine;
                         let b64 = data.split_once(',').map(|(_, b)| b).unwrap_or(data);
                         let png = base64::engine::general_purpose::STANDARD
@@ -1627,21 +1635,42 @@ impl App {
                         if !png.starts_with(b"\x89PNG") {
                             return Err("not a PNG".into());
                         }
-                        let file = dir.join("_media/cover.png");
-                        let kept = if file.is_file() {
-                            let k = relayout::kept_dir(&lib, &jid);
-                            std::fs::create_dir_all(&k).map_err(|e| e.to_string())?;
-                            std::fs::copy(&file, k.join("0.png")).map_err(|e| e.to_string())?;
-                            json!("0.png")
-                        } else {
-                            Value::Null
-                        };
-                        files.push(json!({ "rel": lib.relative(&file), "kept": kept }));
-                        crate::config::write_atomic(&file, &png).map_err(e2s)?;
-                        json!("_media/cover.png")
+                        Some((png, "png".into()))
+                    } else if let Some(entry) = args["entry"].as_str() {
+                        let ext = entry.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+                        if !["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif"].contains(&ext.as_str()) {
+                            return Err("Choose a picture in the archive.".into());
+                        }
+                        let path = self.file_path(&args).await?;
+                        let entry = entry.to_string();
+                        let bytes = tokio::task::spawn_blocking(move || archive::read(&path, &entry, 64 << 20))
+                            .await.map_err(|e| e.to_string())?.map_err(e2s)?;
+                        Some((bytes, ext))
+                    } else { None };
+                    match made {
+                        Some((bytes, ext)) => {
+                            let name = format!("cover.{ext}");
+                            // one cover picture at a time: an older one (of any kind) is kept for Undo
+                            let mut kept_any = Value::Null;
+                            for old in ["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif"] {
+                                let f = dir.join(format!("_media/cover.{old}"));
+                                if !f.is_file() { continue; }
+                                let k = relayout::kept_dir(&lib, &jid);
+                                std::fs::create_dir_all(&k).map_err(|e| e.to_string())?;
+                                let to = format!("{}.{old}", files.len());
+                                std::fs::copy(&f, k.join(&to)).map_err(|e| e.to_string())?;
+                                files.push(json!({ "rel": lib.relative(&f), "kept": to }));
+                                if old != ext { std::fs::remove_file(&f).map_err(|e| e.to_string())?; } else { kept_any = json!(true); }
+                            }
+                            let file = dir.join("_media").join(&name);
+                            if kept_any.is_null() { files.push(json!({ "rel": lib.relative(&file), "kept": Value::Null })); }
+                            std::fs::create_dir_all(dir.join("_media")).map_err(|e| e.to_string())?;
+                            crate::config::write_atomic(&file, &bytes).map_err(e2s)?;
+                            json!(format!("_media/{name}"))
+                        }
+                        None => args["file"].clone(),
                     }
-                    None => args["file"].clone(),
-                }};
+                };
                 let name = v["name"].as_str().unwrap_or("");
                 Box::pin(self.call(
                     "model_update",

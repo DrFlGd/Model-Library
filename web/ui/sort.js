@@ -15,7 +15,7 @@ import { Icon } from "./icons.js";
 import { api, followJob, isDesktop, loadOverview, toast, undoable, undoChange } from "./library.js";
 import { openMenu, usePageKeys, letter, selectAllKey } from "./actions.js";
 import { CategoryPicker } from "./category.js";
-import { size } from "./details.js";
+import { size, KIND_LABEL } from "./details.js";
 import { FilesView, LazyPreview } from "./parts.js";
 import { CommandBar, ViewSwitch, SortMenu, SearchNote, EditBox } from "./layout.js";
 import { Inspector } from "./inspector.js";
@@ -40,8 +40,13 @@ export const sorter = createStore({
   send: { schema: null, values: [], keep: false, keepSelf: true },
 });
 
-const KIND = { model: "3D", slicer: "slicer", image: "pictures", doc: "documents", video: "videos", archive: "archives", other: "other" };
-const kindsText = (s) => Object.entries(s?.kinds || {}).map(([k, n]) => `${n} ${KIND[k] || k}`).join(", ");
+const kindText = ([k, n]) => `${n} ${(KIND_LABEL[k] || [k, k])[n === 1 ? 0 : 1]}`;
+/** "3 files (2 3D files, 1 picture)", or "3 3D files" when they're all one kind. */
+const filesText = (s) => {
+  const kinds = Object.entries(s?.kinds || {}).filter(([, n]) => n);
+  if (kinds.length === 1 && kinds[0][1] === (s.count || 0)) return kindText(kinds[0]);
+  return plural(s?.count || 0, "file", "files") + (kinds.length ? ` (${kinds.map(kindText).join(", ")})` : "");
+};
 const baseName = (p) => p.split(/[\\/]/).filter(Boolean).pop() || p;
 const dirName = (p) => p.replace(/[\\/][^\\/]*$/, "");
 const under = (p, dir) => !!p && (p === dir || p.startsWith(`${dir}/`) || p.startsWith(`${dir}\\`));
@@ -558,7 +563,9 @@ function Details({ s, sel, ix, overview, names, counts }) {
       ${item.done ? html` <a href=${routeHash(`model:${item.done.id}`)}>${item.done.rel}</a>` : null}</p>
     ${item.error ? html`<p class="form-error">${item.error}</p>` : null}
     ${item.done ? null : actions}
-    <p class="muted sw-path">${item.kind === "folder" ? "Folder" : item.kind === "group" ? `Combined from ${plural(item.sources.length, "thing", "things")}` : plural(item.sources.length, "file", "files")}: ${item.kind === "folder" ? item.path : item.sources.map(baseName).join(", ")}${" · "}${plural(sm.count || 0, "file", "files")}${kindsText(sm) ? ` (${kindsText(sm)})` : ""} · ${size(sm.bytes || 0)}${item.has_sidecar ? " · has its own model.json" : ""}</p>
+    <p class="muted sw-path">${item.kind !== "folder" && item.kind !== "group" && item.sources.length === 1
+      ? `${baseName(item.sources[0])} · ${size(sm.bytes || 0)}`
+      : `${item.kind === "folder" ? "Folder" : item.kind === "group" ? `Combined from ${plural(item.sources.length, "thing", "things")}` : plural(item.sources.length, "file", "files")}: ${item.kind === "folder" ? item.path : item.sources.map(baseName).join(", ")} · ${filesText(sm)} · ${size(sm.bytes || 0)}`}${item.has_sidecar ? " · has its own model.json" : ""}</p>
     ${(item.warnings || []).map((w) => html`<${Warning} key=${w.kind} w=${w} item=${item} />`)}
     ${files?.error ? html`<p class="form-error">${files.error}</p>` : files ? html`<${FilesView} src=${{ kind: "sort", id: item.id }} files=${files.files} main=${files.main} names=${names} compact=${true} />` : html`<p class="muted">Reading its files…</p>`}
   </div>`;

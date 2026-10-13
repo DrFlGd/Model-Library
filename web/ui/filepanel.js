@@ -8,7 +8,7 @@ import { size } from "./details.js";
 import { fileSel } from "./filesel.js";
 import { Icon } from "./icons.js";
 
-export function FilePanel({ src, model, files, variants, variant, setVariant, open, toggle, narrow, contextActions }) {
+export function FilePanel({ src, model, files, variants, variant, setVariant, open, toggle, narrow, contextActions, entries = [], keepEntry, locked = [] }) {
   const prefs = useStore(ui);
   const [q, setQ] = useState("");
   const stopResize = useRef(null);
@@ -16,7 +16,15 @@ export function FilePanel({ src, model, files, variants, variant, setVariant, op
   const width = Math.max(220, Math.min(480, prefs.filePanelWidth || 300));
   const view = prefs.filePanelView || "folders";
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-  const filtered = files.filter((f) => words.every((word) => f.rel.toLowerCase().includes(word)));
+  const matches = (name) => words.every((word) => name.toLowerCase().includes(word));
+  const filtered = files.filter((f) => matches(f.rel));
+  // a search looks inside archives too: an archive with a match is listed, unfolded
+  // to its matching files (entries are already narrowed to the variant shown)
+  const inside = words.length ? entries.filter((e) => matches(e.entry)) : [];
+  const holding = [...new Set(inside.map((e) => e.file))];
+  const listed = [...filtered, ...files.filter((f) => holding.includes(f.rel) && !filtered.includes(f))];
+  const keep = words.length ? (file, name) => inside.some((e) => e.file === file && e.entry === name) || (filtered.some((f) => f.rel === file) && keepEntry?.(name) !== false)
+    : (file, name) => keepEntry?.(name) !== false;
   const resize = (e) => {
     e.preventDefault();
     stopResize.current?.();
@@ -39,7 +47,7 @@ export function FilePanel({ src, model, files, variants, variant, setVariant, op
         <button type="button" class="ghost" id="select-whole-model" disabled=${!model.files_list?.length}
           title="Select every file in the model, including those the variant or search hides" onClick=${() => fileSel.set({ picked: ["d:"], anchor: "d:" })}>Select all (${model.files_list?.length || 0})</button>
       </div>
-      <div class="file-panel-scroll"><${SelectionRows} src=${src} files=${filtered} name=${model.name} view=${view} contextActions=${contextActions} />${!filtered.length && q ? html`<p class="muted">No files match.</p>` : null}</div>
+      <div class="file-panel-scroll"><${SelectionRows} src=${src} files=${listed} name=${model.name} view=${view} contextActions=${contextActions} keepEntry=${keep} unfold=${holding} locked=${locked} />${!listed.length && q ? html`<p class="muted">No files match.</p>` : null}</div>
       ${!narrow ? html`<div class="file-panel-resize" role="separator" aria-label="File panel width" aria-orientation="vertical" aria-valuemin="220" aria-valuemax="480" aria-valuenow=${width} tabIndex="0" onPointerDown=${resize} onKeyDown=${(e) => { if (["ArrowLeft", "ArrowRight"].includes(e.key)) { e.preventDefault(); setPref({ filePanelWidth: Math.max(220, Math.min(480, width + (e.key === "ArrowLeft" ? -20 : 20))) }); } }}></div>` : null}
     `}
   </aside>`;

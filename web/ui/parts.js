@@ -14,12 +14,12 @@ import { useStore } from "../lib/store.js";
 import { ui, resolvedTheme, setPref } from "./state.js";
 import { ctx } from "./context.js";
 import { Icon } from "./icons.js";
-import { api, apiBytes, allowPassword, isDesktop, libraryUrl, openModelFile, openArchiveEntry, toast, loadOverview, recorded, followIds } from "./library.js";
+import { api, apiBytes, enterPassword, isDesktop, libraryUrl, openModelFile, openArchiveEntry, toast, loadOverview, recorded, followIds } from "./library.js";
 import { ViewSwitch, SortMenu } from "./layout.js";
 import { size } from "./details.js";
 import { openMenu, typing } from "./actions.js";
 import { fileSel, pick, pickEvent, listClick, show, view, clear } from "./filesel.js";
-import { TypeTag, isArchive, setPart } from "./filetypes.js";
+import { TypeTag, isArchive, setPart, fileType } from "./filetypes.js";
 import { PdfDocument } from "./document-viewer.js";
 import { GRAY, colourItems, colourName, viewColour, setViewColour, setModelColour } from "./colours.js";
 
@@ -161,7 +161,8 @@ async function setCover(id, args, said) {
   } catch (e) { toast(`Couldn't set the cover: ${e.message || e}`, 6000); }
 }
 
-export const useAsCover = (id, file) => setCover(id, { file }, "Saved as the model's cover.");
+/** A picture of the model's own, or one inside an archive (`entry`: copied out, the archive unchanged). */
+export const useAsCover = (id, file, entry) => setCover(id, entry ? { file, entry } : { file }, "Saved as the model's cover.");
 
 /** One file in a list: opens it (an archive unfolds into its entries). A file with no
  *  viewer here is greyed; double-click opens it in its own app. */
@@ -419,7 +420,7 @@ export function Pictures({ src, model, pictures, current, setCurrent }) {
     addEventListener("keydown", key);
     return () => removeEventListener("keydown", key);
   });
-  const cover = () => useAsCover(model.id, pic.file);
+  const cover = () => useAsCover(model.id, pic.file, pic.entry);
   if (!pic) return html`<div class="stage-note muted">No pictures.</div>`;
   return html`<div class="stage-pictures">
     <div class="stage-picture">${url ? html`<img src=${url} alt=${pic.entry || pic.file} id="picture-big" />` : null}</div>
@@ -427,8 +428,8 @@ export function Pictures({ src, model, pictures, current, setCurrent }) {
       <span class="stage-what">${pic.entry ? `${pic.file} › ${pic.entry}` : pic.file}</span>
       <span class="stage-tools">
         ${pictures.length > 1 ? html`<button type="button" class="ghost" onClick=${() => step(-1)} aria-label="Previous picture" title="Previous picture (←)">‹</button><button type="button" class="ghost" onClick=${() => step(1)} aria-label="Next picture" title="Next picture (→)">›</button>` : null}
-        ${model ? html`<button type="button" class="ghost" id="picture-cover" disabled=${!!pic.entry || model.details?.cover === pic.file || !!ui.get().library?.read_only}
-          title=${pic.entry ? "A picture inside an archive can't be the cover" : model.details?.cover === pic.file ? "This is the cover already" : "Use this picture as the model's cover"} onClick=${cover}>Use as cover</button>` : null}
+        ${model ? html`<button type="button" class="ghost" id="picture-cover" disabled=${(!pic.entry && model.details?.cover === pic.file) || !!ui.get().library?.read_only}
+          title=${!pic.entry && model.details?.cover === pic.file ? "This is the cover already" : pic.entry ? "Use this picture as the model's cover (a copy goes beside model.json)" : "Use this picture as the model's cover"} onClick=${cover}>Use as cover</button>` : null}
       </span>
     </div>
     <div class="thumb-strip">${pictures.filter((p) => !p.entry).slice(0, 60).map((p) => html`<button type="button" key=${p.file} data-file=${p.file} class=${`strip-btn${p.file === pic.file && !pic.entry ? " on" : ""}`} onClick=${() => setCurrent(p)}>
@@ -523,7 +524,7 @@ export function FilesView({ src, files: allFiles, main, model, names, compact, s
 }
 
 /** The shared file tree/list with the model workspace's multi-selection. */
-export function SelectionRows({ src, files, name, view = "folders", contextActions }) {
+export function SelectionRows({ src, files, name, view = "folders", contextActions, keepEntry, unfold: opened = [], locked = [] }) {
   const sel = useStore(fileSel);
   const [folded, setFolded] = useState({});
   const [archives, setArchives] = useState({});
@@ -550,7 +551,13 @@ export function SelectionRows({ src, files, name, view = "folders", contextActio
       const pieces = e.name.split("/");
       for (let i = 1; i < pieces.length; i++) dirs.add(pieces.slice(0, i).join("/") + "/");
     }
-    const all = [...[...dirs].map((entry) => ({ entry, folder: true, size: 0 })), ...archives[f.rel].entries.filter((e) => !e.name.endsWith("/")).map((e) => ({ ...e, entry: e.name }))];
+    let all = [...[...dirs].map((entry) => ({ entry, folder: true, size: 0 })), ...archives[f.rel].entries.filter((e) => !e.name.endsWith("/")).map((e) => ({ ...e, entry: e.name }))];
+    // while searching, keep the entries that match and the folders that hold them
+    if (keepEntry) {
+      const kept = all.filter((e) => !e.folder && keepEntry(f.rel, e.entry));
+      const holders = new Set(kept.flatMap((e) => e.entry.split("/").slice(0, -1).map((_, i, a) => a.slice(0, i + 1).join("/") + "/")));
+      all = [...all.filter((e) => e.folder && holders.has(e.entry)), ...kept];
+    }
     all.sort((a, b) => a.entry.localeCompare(b.entry));
     for (const e of all) {
       const parents = e.entry.replace(/\/$/, "").split("/").slice(0, -1);
@@ -574,13 +581,26 @@ export function SelectionRows({ src, files, name, view = "folders", contextActio
     catch (e) { if (source.current === id) setArchives((s) => ({ ...s, [row.rel]: { error: e.message || String(e) } })); }
   };
   // after Cancel on the password, or a wrong one: ask again from the row
-  const askAgain = (row) => { allowPassword(); read(row); };
+  const askAgain = async (row) => { if (await enterPassword({ ...srcArgs(src), file: row.rel })) read(row); };
+  // a lock mark on archives that need a password (found by listing, or by trying)
+  const isLocked = (rel) => !!rel && isArchive(rel) && (locked.includes(rel) || LOCKED_TEXT.test(archives[rel]?.error || "") || !!archives[rel]?.entries?.some((e) => e.locked));
   const unfold = async (row) => {
     const isZip = !row.entry && isArchive(row.rel);
     const now = folded[row.key] ?? isZip;
     setFolded((s) => ({ ...s, [row.key]: !now }));
     if (isZip && !archives[row.rel]) return read(row);
   };
+  // Search found something inside these archives: open them so it shows.
+  const openedKey = opened.join("\n");
+  useEffect(() => {
+    if (!opened.length) return;
+    setFolded((s) => {
+      const next = { ...s };
+      for (const rel of opened) { next[`f:${rel}`] = false; const bits = rel.split("/"); for (let i = 1; i < bits.length; i++) next[`d:${bits.slice(0, i).join("/")}`] = false; }
+      return next;
+    });
+    for (const rel of opened) if (!archives[rel]) read({ rel });
+  }, [openedKey]);
   // Opening a folder from tiles reveals its ancestors in the tree.
   useEffect(() => {
     const key = sel.shown;
@@ -609,6 +629,7 @@ export function SelectionRows({ src, files, name, view = "folders", contextActio
     const lib = ui.get().library;
     openMenu(e, [
       { id: "view", label: "Show here", icon: "eye", run: () => show(row.key) },
+      ...(!row.entry && !row.folder && isLocked(row.rel) ? [{ id: "password", label: "Enter password…", icon: "lock", run: () => askAgain(row) }] : []),
       ...(ownApp(src) && !row.entry ? [
         { id: "open-own", label: "Open externally", icon: "external", run: () => openModelFile({ rel: src.rel }, row.rel) },
         { id: "folder", label: "Show in folder", icon: "folder", run: () => ctx.platform.library.openPath([lib.path, src.rel, row.folder ? row.rel : splitRel(row.rel)[0]].filter(Boolean).join("/")) },
@@ -616,7 +637,7 @@ export function SelectionRows({ src, files, name, view = "folders", contextActio
       ...(ownApp(src) && row.entry && !row.folder ? [
         { id: "open-own", label: "Open externally", icon: "external", run: () => openArchiveEntry(src, row.file, row.entry) },
       ] : []),
-      ...(row.kind === "image" && !row.entry ? [{ id: "cover", label: "Use as cover", icon: "image", disabled: lib?.read_only ? "The library is read-only." : false, run: () => useAsCover(src.id, row.rel) }] : []), ...extra,
+      ...(fileType(row.entry || row.rel).group === "image" && !row.folder ? [{ id: "cover", label: "Use as cover", icon: "image", disabled: lib?.read_only ? "The library is read-only." : false, run: () => row.entry ? useAsCover(src.id, row.file, row.entry) : useAsCover(src.id, row.rel) }] : []), ...extra,
     ]);
   };
   const keys = (e) => {
@@ -642,7 +663,7 @@ export function SelectionRows({ src, files, name, view = "folders", contextActio
         <input type="checkbox" class="pick-tick file-tick" tabindex="-1" checked=${sel.picked.includes(r.key)} aria-label=${`Select ${r.name}`} onClick=${(e) => { e.stopPropagation(); pick(r.key, "toggle", order); }} />
         <button type="button" class=${`tree-btn${sel.picked.includes(r.key) ? " on" : ""}${sel.shown === r.key ? " shown" : ""}`} data-key=${r.key} data-file=${!r.folder && !r.entry ? r.rel : null} data-dir=${r.folder ? r.rel : null} data-entry=${r.entry || null} aria-pressed=${sel.picked.includes(r.key)}
           onClick=${(e) => listClick(r.key, e, order)} onContextMenu=${(e) => menu(e, r)} title=${r.rel || name}>
-          <span class="tree-icon tree-type">${r.folder ? Icon.folder(13) : html`<${TypeTag} name=${r.entry || r.rel} />`}</span><span class="tree-name">${r.name}</span>${!r.folder && !r.entry && setPart(r.rel) ? html`<span class="muted tree-part" title=${setPart(r.rel) > 1 ? "Opened from the set's first file" : "The first file of a split archive"}>part ${setPart(r.rel)}</span>` : null}${!r.folder ? html`<span class="muted tree-size">${size(r.size || 0)}</span>` : null}
+          <span class="tree-icon tree-type">${r.folder ? Icon.folder(13) : html`<${TypeTag} name=${r.entry || r.rel} />`}</span><span class="tree-name">${r.name}</span>${!r.folder && !r.entry && isLocked(r.rel) ? html`<span class="tree-lock" title="Locked with a password" aria-label="Locked with a password">${Icon.lock(12)}</span>` : null}${!r.folder && !r.entry && setPart(r.rel) ? html`<span class="muted tree-part" title=${setPart(r.rel) > 1 ? "Opened from the set's first file" : "The first file of a split archive"}>part ${setPart(r.rel)}</span>` : null}${!r.folder ? html`<span class="muted tree-size">${size(r.size || 0)}</span>` : null}
         </button>
       </div>
       ${archives[r.rel]?.loading ? html`<p class="tree-note muted">Reading the archive…</p>` : archives[r.rel]?.error ? (LOCKED_TEXT.test(archives[r.rel].error)

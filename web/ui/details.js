@@ -15,7 +15,7 @@ import { Icon } from "./icons.js";
 import { TypeTag } from "./filetypes.js";
 import { colourName } from "./colours.js";
 
-const KIND_LABEL = { model: ["3D file", "3D files"], slicer: ["slicer file", "slicer files"], image: ["picture", "pictures"], doc: ["document", "documents"], video: ["video", "videos"], archive: ["archive", "archives"], other: ["other", "other"] };
+export const KIND_LABEL = { model: ["3D file", "3D files"], slicer: ["slicer file", "slicer files"], image: ["picture", "pictures"], doc: ["document", "documents"], video: ["video", "videos"], archive: ["archive", "archives"], other: ["other", "other"] };
 const KIND_ICON = { model: "box", slicer: "stack", image: "image", doc: "file", video: "image", archive: "archive", other: "file" };
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
