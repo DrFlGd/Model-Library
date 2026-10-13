@@ -63,13 +63,32 @@ The sandbox has a network allowlist and is reset between sessions.
 
 ### Next (roadmap)
 
-Jerred's second round of requirements (R1–R17, `docs/PLAN.md`, "Requirements round 2") is being built in the agreed order of groups; groups 1 and 2 are built and both UI reviews' items fixed; Jerred's notes of 13 October (`docs/PLAN.md`, "Notes of 13 October": selection actions out of their own bar, a tabbed or otherwise more consistent layout from mock-ups, the same top bar on every page) are built in 0.5.14 as the Inspector rails layout he picked; group 3 (gray default render, 3MF colours and thumbnails) shipped in 0.5.16 and its review's fixes in 0.5.17; group 4 (7z and RAR, compressing selected files) is built in 0.5.18; then skins for R16 (the owner picked Drafting Sheet as the default look and wants Parts Bin and Layer Line as selectable skins too; the style study's source is in the project files, style-study/), and a UI review follows each group. Before that: the UI pass in `docs/PLAN.md` ("UI pass design") is done: actions (0.5.1), undo and asking (0.5.2) and one layout (0.5.3). The model file workspace followed (0.5.5), then six parallel packages A–F (0.5.6, PRs #3–#8 merged in #9). Phase 6 (Docker with sign-in) is on hold until the owner says the UI is ready; ask before starting it.
+Jerred's second round of requirements (R1–R17, `docs/PLAN.md`, "Requirements round 2") is being built in the agreed order of groups; groups 1 and 2 are built and both UI reviews' items fixed; Jerred's notes of 13 October (`docs/PLAN.md`, "Notes of 13 October": selection actions out of their own bar, a tabbed or otherwise more consistent layout from mock-ups, the same top bar on every page) are built in 0.5.14 as the Inspector rails layout he picked; group 3 (gray default render, 3MF colours and thumbnails) shipped in 0.5.16; its review's fixes and group 4 (7z and RAR, compressing selected files) shipped together in 0.5.17; the fourth review's fixes (archives) are in 0.5.18; then skins for R16 (the owner picked Drafting Sheet as the default look and wants Parts Bin and Layer Line as selectable skins too; the style study's source is in the project files, style-study/), and a UI review follows each group. Before that: the UI pass in `docs/PLAN.md` ("UI pass design") is done: actions (0.5.1), undo and asking (0.5.2) and one layout (0.5.3). The model file workspace followed (0.5.5), then six parallel packages A–F (0.5.6, PRs #3–#8 merged in #9). Phase 6 (Docker with sign-in) is on hold until the owner says the UI is ready; ask before starting it.
 
 ---
 
 ## Unreleased
 
-Group 4: archives (R7 and R8; docs/PLAN.md, "Group 4 design").
+Fixes from the review of 0.5.17 (all 13 items; docs/PLAN.md, "0.5.18"):
+
+- Extract archive… no longer shows a sentence about compressing.
+- A wrong archive password is forgotten at once, so you're asked again; after Cancel the archive's row has **Enter password…**.
+- The first file of a split archive is filed under Archives, and each file of a set shows "part N".
+- While a big archive is opened for the 3D view, the view clears and shows the progress with its own Stop; after Stop it offers **Open the archive**.
+- Compress to ZIP and Extract archive… are one step with a **Move or copy** choice, like Make a model. Move removes the originals once the result is checked, with Undo.
+- A file inside an archive has **Open externally**, and Compress to ZIP… isn't shown greyed when it can't apply.
+- Text and markdown files inside archives are shown.
+- Pictures and documents inside archives are listed in Media under **In archives**, and any picture inside an archive can be the model's cover.
+- Variant folders inside archives are listed in the Variant box and narrow the archives' files.
+- Searching the files panel also finds files inside archives; the archive is unfolded to show them.
+- Archives that need a password have a lock mark and **Enter password…** in their right-click menu.
+- Settings › Library › **Opened archives** shows how much room unpacked 7z and RAR files take on this computer, with **Empty**.
+- Import's details for one file read "Robot.7z · 55 KB", and file counts use singular and plural names.
+- Stopping a review's check now always counts as stopped, even when the check had just finished. Before, a fast check could ignore Stop (this failed the page test on main and held back the release of the 0.5.16 review fixes).
+
+## 0.5.17 (2026-10-13)
+
+Group 4: archives (R7 and R8; docs/PLAN.md, "Group 4 design"), and the fixes from the review of 0.5.16 (the first build of those fixes didn't pass its checks on main, so they ship here).
 
 - **7z and RAR archives open like ZIPs.** Unfold one in a model's files to see what's inside, and show its 3D files, pictures and documents. A split set (name.7z.001, name.part1.rar) opens as one archive from its first file.
 - **A big 7z or RAR is opened once.** The first time you look inside one over 32 MB, it's unpacked into the app's data folder (not the library), with progress and Stop in the status bar. After that it opens at once. Archives not used for 14 days are cleared, and the space is kept under 10 GB.
@@ -80,9 +99,7 @@ Group 4: archives (R7 and R8; docs/PLAN.md, "Group 4 design").
 - A model whose 3D file is inside a 7z or RAR gets a preview, when the archive is 512 MB or smaller.
 - About lists the 7z and RAR readers.
 
-## 0.5.17 (2026-10-13)
-
-Fixes from the review of 0.5.16 (all 11 items; docs/PLAN.md, "0.5.17").
+Fixes from the review of 0.5.16 (all 11 items; docs/PLAN.md, "0.5.17"):
 
 - **The 3D view keeps its room.** In a window around 1000 to 1300 px wide, the inspector on the right folds to its strip so the 3D view isn't squeezed. In a narrower window the files panel folds too. Both come back when the window grows.
 - **The whole model is in view** when the 3D view is taller than it is wide. Before, its sides were cut off.

@@ -54,7 +54,9 @@ export function fileActions(src, model = src?.model) {
 export function compressAction(model) {
   const keys = fileSel.get().picked;
   const { files, entries } = pickedFiles(keys);
-  const reason = writable() !== true ? writable() : !keys.length ? "Select files first." : !files.length ? "Files inside an archive can't go into another ZIP here. Make a model from them first." : false;
+  // only for loose files and folders: not for files inside an archive, nor an archive on its own
+  if (!files.length || files.every((f) => f && isArchive(f))) return null;
+  const reason = writable() !== true ? writable() : false;
   return { id: "compress-files", label: "Compress to ZIP…", icon: "folder", disabled: reason,
     run: () => ui.set({ dialog: { type: "archive-model", id: model.id, action: "compress", files: files.filter(Boolean), name: `${extractionName(keys.filter((k) => keyParts(k).kind !== "entry"))}.zip`, entries: entries.length } }) };
 }

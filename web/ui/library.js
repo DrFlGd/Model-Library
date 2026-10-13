@@ -57,6 +57,16 @@ function askPassword(args, wrong) {
   })));
 }
 
+/** Ask for passwords again straight away (the row's Enter password… after a Cancel). */
+export function allowPassword() { declined.clear(); }
+
+/** Enter password… on a locked archive: asks now, even if its names could be read
+ *  without one. Resolves true when one was given. */
+export function enterPassword(args) {
+  allowPassword();
+  return askPassword(args, false);
+}
+
 async function withArchive(call, cmd, args) {
   for (let tries = 0; ; tries++) {
     let error;

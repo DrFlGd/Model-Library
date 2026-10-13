@@ -32,6 +32,7 @@ export const Icon = {
   chevronsRight: (s) => svg(html`<path d="M13 17l5-5-5-5M6 17l5-5-5-5" />`, s),
   panel: (s) => svg(html`<rect x="3" y="4" width="18" height="16" rx="1.5" /><path d="M15 4v16" />`, s),
   home: (s) => svg(html`<path d="M3 11l9-7 9 7" /><path d="M5 10v10h14V10" />`, s),
+  lock: (s) => svg(html`<rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" />`, s),
   clock: (s) => svg(html`<circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />`, s),
   box: (s) => svg(html`<path d="M3 7l9-4 9 4-9 4-9-4z" /><path d="M3 7v10l9 4 9-4V7" /><path d="M12 11v10" />`, s),
   alert: (s) => svg(html`<path d="M12 3l10 18H2z" /><path d="M12 10v5M12 18v.5" />`, s),

@@ -771,7 +771,7 @@ Jerred chose all 11 items of the third UI review (https://claude.ai/artifact/LM7
 10. **Drawing previews again is asked.** Changing a Previews setting saves it, and the cards show it as they come into view (their pictures are cached on this computer by look). A dialog then offers to draw the previews kept in the model folders again now, with the number of models, as a job with Stop. Not now leaves them until a model's preview is made again.
 11. **Previews in a 3MF's own colours.** Library › Previews has **Draw a 3MF file in its own colours when it has some** (`preview_file_colours` in library.json, off by default). The renderer colours each triangle the way the viewer does: the file's colour where it has one, else the preview or model colour. A 3MF's saved picture still comes first when pictures are on.
 
-### Group 4 design (0.5.18)
+### Group 4 design (0.5.17)
 
 Archives: R7 and R8. The open points in the round-2 write-up are taken as proposed: multi-part RAR sets and split 7z archives open as one archive, and moving files into a ZIP removes the originals (copying leaves them).
 
@@ -786,3 +786,23 @@ Archives: R7 and R8. The open points in the round-2 write-up are taken as propos
 **R8. Compress selected files.** With files or folders selected inside a model:
 - **Compress to ZIP…** joins the file actions (right-click, the top bar's ⋯ in selection mode). It's the model-level Compress to ZIP… limited to what's selected: the ZIP goes in the model's top folder (named after the first selected item, editable), the entries keep their paths relative to the model, it's verified by reading it back, and removing the originals is the separate **Remove verified original files…** step, as now.
 - **Make a new model…** gets **Pack the files into one ZIP**. The new model holds one ZIP, named after it, with the selected files at its root (paths kept below the common folder) beside `model.json`. The ZIP is read back and every entry's hash checked against the reviewed plan before any original is touched. With Move the originals are removed once the check passes; with Copy they stay. Undo removes the new model and, after a move, puts each original back from the ZIP after checking its hash.
+
+### 0.5.18: fixes from the review of 0.5.17
+
+Jerred chose all 13 items of the fourth UI review (https://claude.ai/artifact/YKbgBeMWZfRSKjFJSYXAKr), which looked at group 4.
+
+1. **Extract archive… says only what it does.** The plan's sentence about compressing is gone from the Extract dialog.
+2. **A wrong password can be tried again.** A password that doesn't open the archive is forgotten at once (`wrong_password` in archive.rs), so the next look asks again. After Cancel, the archive's row says "Locked with a password" with an **Enter password…** button.
+3. **Split sets are labelled.** The first file of a split archive (`.7z.001`, `.part1.rar`, `.rar` beside `.r00`) is filed under Archives, and every file of a set shows "part N" beside its name (`setPart` in filetypes.js).
+4. **Opening an archive shows in the 3D view.** While a big 7z or RAR is being opened for a file in it, the view clears and says "Opening "name.7z": X of Y MB" with its own Stop. After Stop it offers **Open the archive**.
+5. **Compress to ZIP matches Make a model.** One dialog: the ZIP's name, a **Move or copy** choice ("Move: the files go into the ZIP" or "Copy: keep the files as well"), what will be in it, and the button. Move removes the originals once the ZIP is read back and checked, in the same step, and Undo puts them back. Extract archive… has the same choice ("Move: the archive is removed" or "Copy: keep the archive as well"). This replaces the separate **Remove verified original files…** step from the group 4 design.
+6. **A file inside an archive has Open externally**, and Compress to ZIP… isn't offered (greyed) when only archives or files inside one are selected.
+7. **Text inside archives is shown.** A `.txt` or `.md` in an archive opens in the viewing area like a loose one (`model_doc` takes `entry`).
+8. **Pictures inside archives.** Media lists the pictures and documents inside the model's archives under **In archives**, with the archive's name. Any picture inside an archive can be **Use as cover** (right-click, or the picture view's button); `model_cover` takes `entry` and writes `_media/cover.<ext>` with Undo.
+9. **Variant folders inside archives count.** The Variant box lists variant folders found inside the model's archives as well as loose ones, and choosing one narrows the archives' files too.
+10. **Search looks inside archives.** Searching the files panel also matches files inside the model's archives (their names are listed without opening them). An archive holding a match is listed and unfolded, showing only the matches and their folders.
+11. **Locked archives are marked.** An archive that needs a password has a lock beside its name, and its right-click menu has **Enter password…**. The listing marks each locked file (`"locked": true` from `archive::list`; a 7z whose names are locked too counts as locked).
+12. **Opened archives in Settings.** Settings › Library has **Opened archives**: how much room the unpacked 7z and RAR files take on this computer, what's kept (the last 14 days, up to 10 GB), and **Empty** (`archive_cache`, `archive_cache_empty`; an archive being opened at that moment is left alone).
+13. **Import's details line is short.** One file reads "Robot.7z · 55 KB". Folders and groups count their files by kind with singular and plural names ("3 files (2 3D files, 1 picture)", or "3 3D files" when they're all one kind).
+
+Not in this round: a preview chosen from a variant folder inside an archive, and videos inside archives.

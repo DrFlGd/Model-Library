@@ -511,6 +511,9 @@ input:invalid { border-color: var(--danger); }
 .tree-icon { flex: none; display: inline-flex; color: var(--graphite); }
 .tree-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .tree-size { flex: none; font-size: 12px; }
+.tree-part { flex: none; font-size: 12px; margin-right: 8px; }
+.tree-lock { flex: none; display: inline-flex; align-items: center; margin-right: 6px; color: var(--graphite); }
+.tree-note button { font-size: 12.5px; padding: 1px 8px; margin-left: 4px; }
 .tree-note { font-size: 12.5px; padding: 4px 6px; }
 .tree .badge { font-size: 11px; padding: 1px 6px; border-color: var(--steel-2); color: var(--graphite); }
 @media (max-width: 860px) {
@@ -1184,6 +1187,8 @@ input:invalid { border-color: var(--danger); }
 .pane-body > .unsorted-preview { flex: 1 1 auto; border-left: 0; min-height: 0; }
 .pane-body > .sw-details { border: 0; border-radius: 0; margin: 0; flex: 1 0 auto; }
 .pane-body > .media-list, .pane-body > #media-list { padding: 8px; }
+.media-archives { display: grid; gap: 4px; margin-top: 10px; }
+.media-archives .field-label { padding: 0 6px; }
 .pane-resize { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; touch-action: none; z-index: 3; }
 .pane-resize:hover, .pane-resize:focus-visible { background: var(--focus); opacity: .4; }
 .rail { flex: none; width: 34px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 0; background: var(--panel); box-sizing: border-box; }

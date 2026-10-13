@@ -38,7 +38,7 @@ export function WorkspaceStage({ src, model, files, contextActions }) {
     return () => removeEventListener("keydown", key);
   });
   const group = fileType(name).group;
-  const mesh = MESH.test(name), picture = group === "image", document = /\.pdf$/i.test(name) || (!p.entry && /\.(md|markdown|txt)$/i.test(name)), video = !p.entry && /\.(mp4|webm|m4v|mov)$/i.test(name);
+  const mesh = MESH.test(name), picture = group === "image", document = /\.(pdf|md|markdown|txt)$/i.test(name), video = !p.entry && /\.(mp4|webm|m4v|mov)$/i.test(name);
   return html`<section class="mp-stage workspace-stage" id="workspace-stage" aria-label="Selected file">
     <${Breadcrumb} model=${model} shown=${shown} />
     ${container ? html`<${Contents} key=${shown} src=${src} model=${model} files=${files} shown=${shown} archive=${archive} entries=${entries} error=${error} contextActions=${contextActions} />`

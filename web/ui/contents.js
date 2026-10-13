@@ -117,7 +117,7 @@ export function Contents({ src, model, files, shown, archive, entries, error, co
         ...(!row.folder ? [{ id: "open-own", label: "Open externally", icon: "external", run: () => row.entry ? openArchiveEntry(src, row.file, row.entry) : openModelFile(model, row.file) }] : []),
         ...(!row.entry ? [{ id: "folder", label: "Show in folder", icon: "folder", run: () => ctx.platform.library.openPath([lib.path, src.rel, row.folder ? row.rel : parentPath(row.rel)].filter(Boolean).join("/")) }] : []),
       ] : []),
-      ...(!row.entry && fileType(row.name).group === "image" ? [{ id: "cover", label: "Use as cover", icon: "image", disabled: lib?.read_only ? "The library is read-only." : false, run: () => useAsCover(src.id, row.file) }] : []),
+      ...(fileType(row.name).group === "image" ? [{ id: "cover", label: "Use as cover", icon: "image", disabled: lib?.read_only ? "The library is read-only." : false, run: () => useAsCover(src.id, row.file, row.entry) }] : []),
       ...(contextActions ? contextActions(row) : fileActions(src, model)),
     ]);
   };

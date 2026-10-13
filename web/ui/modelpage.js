@@ -6,15 +6,16 @@
 import { html, useState, useEffect, useLayoutEffect, useRef } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui, setPref } from "./state.js";
-import { routeHash, schemaScope } from "./context.js";
+import { routeHash, schemaScope, ctx } from "./context.js";
 import { api, toast } from "./library.js";
-import { variantsIn, inVariant, MESH, SelectionRows } from "./parts.js";
+import { variantsIn, inVariant, MESH, SelectionRows, srcArgs, useAsCover } from "./parts.js";
 import { FilePanel } from "./filepanel.js";
 import { WorkspaceDetails } from "./workspace-details.js";
 import { WorkspaceStage } from "./stage.js";
-import { fileSel, reset, clear } from "./filesel.js";
+import { fileSel, reset, clear, show } from "./filesel.js";
+import { TypeTag, fileType, isArchive } from "./filetypes.js";
 import { useFileSelection, fileActions, installExtractKeys } from "./extract.js";
-import { MODEL_ACTIONS, menuItems, usePageKeys, runKey, letter, editDetails, writable, typing } from "./actions.js";
+import { MODEL_ACTIONS, menuItems, usePageKeys, runKey, letter, editDetails, writable, typing, openMenu } from "./actions.js";
 import { CommandBar } from "./layout.js";
 import { size } from "./details.js";
 import { Inspector, useWidth } from "./inspector.js";
@@ -23,6 +24,54 @@ import { Icon } from "./icons.js";
 const CTX = { page: "model" };
 
 const MEDIA = new Set(["image", "doc", "video"]);
+const MEDIA_GROUPS = new Set(["image", "doc", "video"]);
+
+/** Every file inside the model's archives ({ file, entry, size }), for Media, the
+ *  variant switch and the files search. Listing reads only an archive's index; a
+ *  locked one is skipped rather than asking (its files show once it's opened). */
+function useArchiveEntries(src, model) {
+  const [found, setFound] = useState({ entries: [], locked: [] });
+  const archives = (model.files_list || []).filter((f) => isArchive(f.rel)).map((f) => f.rel);
+  const sig = archives.join("|");
+  useEffect(() => {
+    let live = true;
+    setFound({ entries: [], locked: [] });
+    (async () => {
+      const all = [], locked = [];
+      for (const file of archives) {
+        try {
+          const entries = await ctx.platform.api("model_zip", { ...srcArgs(src), file });
+          if (entries.some((e) => e.locked)) locked.push(file);
+          for (const e of entries) if (!e.name.endsWith("/")) all.push({ file, entry: e.name, size: e.size });
+        } catch (e) { if (/locked with a password|password didn't open/.test(String(e?.message ?? e))) locked.push(file); }
+      }
+      if (live) setFound({ entries: all, locked });
+    })();
+    return () => { live = false; };
+  }, [src.id, sig]);
+  return found;
+}
+
+/** Media's list of files inside archives: a click shows one, a right-click offers the cover. */
+function ArchiveMedia({ src, model, items }) {
+  const shown = useStore(fileSel, (s) => s.shown);
+  if (!items.length) return null;
+  const readOnly = !!ui.get().library?.read_only;
+  const menu = (e, it) => {
+    e.preventDefault();
+    openMenu(e, [
+      { id: "view", label: "Show here", icon: "eye", run: () => show(`z:${it.file}!${it.entry}`) },
+      ...(fileType(it.entry).group === "image" ? [{ id: "cover", label: "Use as cover", icon: "image", disabled: readOnly ? "The library is read-only." : false, run: () => useAsCover(model.id, it.file, it.entry) }] : []),
+    ]);
+  };
+  return html`<div class="media-archives" id="media-archives">
+    <p class="field-label">In archives</p>
+    <ul class="tree">${items.map((it) => { const key = `z:${it.file}!${it.entry}`; return html`<li key=${key} class="tree-file">
+      <button type="button" class=${`tree-btn${shown === key ? " shown" : ""}`} data-key=${key} title=${`${it.file} › ${it.entry}`} onClick=${() => show(key)} onContextMenu=${(e) => menu(e, it)}>
+        <span class="tree-icon tree-type"><${TypeTag} name=${it.entry} /></span><span class="tree-name">${it.entry.split("/").pop()}<span class="tree-folder muted">${it.file}</span></span><span class="muted tree-size">${size(it.size || 0)}</span></button></li>`; })}</ul>
+  </div>`;
+}
+
 /** The least room the 3D view gets beside the panels, and a folded panel's rail. */
 const STAGE = 440, RAIL = 36;
 
@@ -94,9 +143,12 @@ function ModelWorkspace({ model, names, narrow, onModelChange }) {
   const prefs = useStore(ui);
   const [variant, setVariant] = useState(undefined);
   const src = { kind: "model", id: model.id, rel: model.rel, model };
-  const variants = variantsIn(model.files_list, names);
+  // folders inside archives count as variants too (docs/PLAN.md, "0.5.18")
+  const { entries: archived, locked } = useArchiveEntries(src, model);
+  const variants = variantsIn([...model.files_list, ...archived.map((e) => ({ rel: e.entry }))], names);
   const chosen = variant === undefined ? variants[0] || null : variant;
   const files = model.files_list.filter((f) => inVariant(f.rel, chosen, names));
+  const entries = archived.filter((e) => inVariant(e.entry, chosen, names));
   // The 3D view keeps at least STAGE px: when the window can't fit it beside the
   // panels, the inspector folds first, then the files panel; opening one then
   // isn't kept, and they come back when the window grows.
@@ -135,16 +187,17 @@ function ModelWorkspace({ model, names, narrow, onModelChange }) {
   });
   const contextActions = () => fileActions(src, model);
   const media = (model.files_list || []).filter((f) => MEDIA.has(f.kind));
+  const inArchives = archived.filter((e) => MEDIA_GROUPS.has(fileType(e.entry).group));
   return html`<div class="model-workspace" ref=${box}>
     ${narrow && open ? html`<button type="button" class="file-panel-shade" aria-label="Close panel" onClick=${() => ui.set({ mobilePanel: null })}></button>` : null}
-    <${FilePanel} src=${src} model=${model} files=${files} variants=${variants} variant=${chosen} setVariant=${setVariant} open=${open} toggle=${toggle} narrow=${narrow} contextActions=${contextActions} />
+    <${FilePanel} src=${src} model=${model} files=${files} variants=${variants} variant=${chosen} setVariant=${setVariant} entries=${entries} locked=${locked} keepEntry=${(e) => inVariant(e, chosen, names)} open=${open} toggle=${toggle} narrow=${narrow} contextActions=${contextActions} />
     <section class="workspace-viewing-area"><${WorkspaceStage} src=${src} model=${model} files=${files} contextActions=${contextActions} />
       ${model.details?.notes ? html`<details class="workspace-notes"><summary>Notes</summary><p>${model.details.notes}</p></details>` : null}
     </section>
     <${Inspector} page="model" open=${false} crowded=${!narrow && !paneFits} tabs=${[
       { id: "details", label: "Details", icon: "info", body: html`<div id="workspace-details-panel"><${WorkspaceDetails} model=${model} onModelChange=${onModelChange} /></div>` },
-      { id: "media", label: "Media", icon: "image", empty: !media.length, body: media.length
-        ? html`<div class="media-list" id="media-list"><${SelectionRows} src=${src} files=${media} name=${model.name} view="all" contextActions=${contextActions} /></div>`
+      { id: "media", label: "Media", icon: "image", empty: !media.length && !inArchives.length, body: media.length || inArchives.length
+        ? html`<div class="media-list" id="media-list">${media.length ? html`<${SelectionRows} src=${src} files=${media} name=${model.name} view="all" contextActions=${contextActions} />` : null}<${ArchiveMedia} src=${src} model=${model} items=${inArchives} /></div>`
         : html`<p class="muted" id="media-list">No pictures, documents, readmes or videos in this model.</p>` },
     ]} />
   </div>`;

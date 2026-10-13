@@ -195,8 +195,7 @@ pub fn plan(lib: &Library, ix: &Index, args: &Value) -> Result<Value> {
         "name": m.v["name"], "file": file, "source_sha256": source_sha,
         "files": inputs, "output_paths": output_paths, "selection": selection,
         "files_count": inputs.len(), "bytes": bytes,
-        "required_bytes": if action == "compress" { bytes + (bytes / 10) + 1024 * 1024 } else { bytes },
-        "metadata": "Only the model's files, at the ZIP's root. The ZIP goes in the model's folder beside model.json and the previews, which stay outside it."
+        "required_bytes": if action == "compress" { bytes + (bytes / 10) + 1024 * 1024 } else { bytes }
     }))
 }
 /// Reject execution unless the entire current source/destination manifest is
