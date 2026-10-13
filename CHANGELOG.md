@@ -63,11 +63,20 @@ The sandbox has a network allowlist and is reset between sessions.
 
 ### Next (roadmap)
 
-Jerred's second round of requirements (R1–R17, `docs/PLAN.md`, "Requirements round 2") is being built in the agreed order of groups; groups 1 and 2 are built and both UI reviews' items fixed; Jerred's notes of 13 October (`docs/PLAN.md`, "Notes of 13 October": selection actions out of their own bar, a tabbed or otherwise more consistent layout from mock-ups, the same top bar on every page) are built in 0.5.14 as the Inspector rails layout he picked; group 3 (gray default render, 3MF colours and thumbnails) shipped in 0.5.16; its review's fixes and group 4 (7z and RAR, compressing selected files) shipped together in 0.5.17; the fourth review's fixes (archives) are in 0.5.18; then skins for R16 (the owner picked Drafting Sheet as the default look and wants Parts Bin and Layer Line as selectable skins too; the style study's source is in the project files, style-study/), and a UI review follows each group. Before that: the UI pass in `docs/PLAN.md` ("UI pass design") is done: actions (0.5.1), undo and asking (0.5.2) and one layout (0.5.3). The model file workspace followed (0.5.5), then six parallel packages A–F (0.5.6, PRs #3–#8 merged in #9). Phase 6 (Docker with sign-in) is on hold until the owner says the UI is ready; ask before starting it.
+Jerred's second round of requirements (R1–R17, `docs/PLAN.md`, "Requirements round 2") is being built in the agreed order of groups; groups 1 and 2 are built and both UI reviews' items fixed; Jerred's notes of 13 October (`docs/PLAN.md`, "Notes of 13 October": selection actions out of their own bar, a tabbed or otherwise more consistent layout from mock-ups, the same top bar on every page) are built in 0.5.14 as the Inspector rails layout he picked; group 3 (gray default render, 3MF colours and thumbnails) shipped in 0.5.16; its review's fixes and group 4 (7z and RAR, compressing selected files) shipped together in 0.5.17; the fourth review's fixes (archives) shipped in 0.5.18; skins for R16 are being built (Drafting Sheet and Classic in 0.5.19, Parts Bin and Layer Line next) (the owner picked Drafting Sheet as the default look and wants Parts Bin and Layer Line as selectable skins too; the style study's source is in the project files, style-study/), and a UI review follows each group. Before that: the UI pass in `docs/PLAN.md` ("UI pass design") is done: actions (0.5.1), undo and asking (0.5.2) and one layout (0.5.3). The model file workspace followed (0.5.5), then six parallel packages A–F (0.5.6, PRs #3–#8 merged in #9). Phase 6 (Docker with sign-in) is on hold until the owner says the UI is ready; ask before starting it.
 
 ---
 
 ## Unreleased
+
+Skins (R16; docs/PLAN.md, "Skins design"), step 1:
+
+- Settings › Appearance has a **Skin** box. **Drafting Sheet** is the new look and the default: square corners, fine rules, drafting-blue accent, Overpass lettering with Overpass Mono for sizes, counts, dates and file tags, a faint grid behind pictures and the 3D view, corner ticks on cards, section headings ruled off, and the status bar as a drawing's title block. Light, dark and Night all work with it.
+- **Classic** keeps the look from before skins. The skin is this computer's choice and changes at once, icons included.
+- Icons follow the skin's line weight and ends, and Home, Import, categories, Starred, folders, Unsorted, Settings and search have their own drawing in each skin, as does the logo.
+- The app bundles every skin's fonts (Overpass and Overpass Mono join Archivo).
+
+## 0.5.18 (2026-10-13)
 
 Fixes from the review of 0.5.17 (all 13 items; docs/PLAN.md, "0.5.18"):
 

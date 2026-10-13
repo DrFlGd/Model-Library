@@ -2,7 +2,7 @@
 // the theme, and the app's version with a link to the About page.
 import { html, useState, useEffect } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
-import { ui, THEMES, setTheme, setPref } from "./state.js";
+import { ui, THEMES, SKINS, setTheme, setSkin, setPref } from "./state.js";
 import { ctx } from "./context.js";
 import { api, isDesktop, openLibrary, renameLibrary, showLibraryFolder, setVariantFolders, setPreviews, remakePreviews, undoable, toast } from "./library.js";
 import { CommandBar } from "./layout.js";
@@ -126,7 +126,7 @@ function VariantFolders({ lib }) {
 }
 
 export function Settings() {
-  const s = useStore(ui, (st) => ({ library: st.library, recent: st.recent, theme: st.theme, viewColour: st.viewColour, fileColours: st.fileColours }));
+  const s = useStore(ui, (st) => ({ library: st.library, recent: st.recent, skin: st.skin, theme: st.theme, viewColour: st.viewColour, fileColours: st.fileColours }));
   const lib = s.library;
   const others = (s.recent || []).filter((p) => p !== lib?.path);
   return html`<${CommandBar} id="settings-head" title="Settings" /><div class="pages"><div class="library-settings">
@@ -151,6 +151,11 @@ export function Settings() {
     </section>
     <section class="ls-section">
       <h2>Appearance</h2>
+      <label class="field-block"><span>Skin</span>
+        <select id="skin-select" class="compact" value=${s.skin} onChange=${(e) => setSkin(e.target.value)}>
+          ${SKINS.map(([v, label]) => html`<option value=${v} key=${v}>${label}</option>`)}
+        </select>
+        <small class="muted">The app's look: its colours, lettering, shapes and icons. Each one has light and dark colours, chosen by Theme below.</small></label>
       <label class="field-block"><span>Theme</span>
         <select id="theme-select" class="compact" value=${s.theme} onChange=${(e) => setTheme(e.target.value)}>
           ${THEMES.map(([v, label]) => html`<option value=${v} key=${v}>${label}</option>`)}

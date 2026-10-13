@@ -7,7 +7,8 @@ Copies web/ to <out>/ui (tauri.conf.json's frontendDist), with CHANGELOG.md,
 THIRD_PARTY.md and build-info.json (date, commit, vendored library versions)
 for the About page. The app works offline,
 so the Google Fonts lines are dropped from index.html: with --fetch-fonts (CI)
-the Archivo font (SIL OFL) is bundled instead, otherwise system fonts are used.
+the skins' fonts (all SIL OFL, from google/fonts) are bundled instead, otherwise
+system fonts are used. A font file is only read when a skin in use needs it.
 """
 import argparse
 import datetime
@@ -22,7 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 ap = argparse.ArgumentParser()
 ap.add_argument("--out", type=Path, default=ROOT / "build/desktop")
 ap.add_argument("--fetch-fonts", action="store_true",
-                help="bundle the Archivo UI font (SIL OFL, from google/fonts) instead of loading it from Google Fonts")
+                help="bundle the skins' fonts (SIL OFL, from google/fonts) instead of loading them from Google Fonts")
 a = ap.parse_args()
 
 ui = a.out / "ui"
@@ -78,7 +79,13 @@ for name, path, pattern, fmt in (
     "parts": parts,
 }, indent=2) + "\n", encoding="utf-8")
 
-FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/archivo/"
+FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/"
+# (family, folder in google/fonts, file, weights, widths): the skins' fonts (docs/PLAN.md, "Skins design")
+FONTS = [
+    ("Archivo", "archivo", "Archivo%5Bwdth%2Cwght%5D.ttf", "100 900", "62% 125%"),
+    ("Overpass", "overpass", "Overpass%5Bwght%5D.ttf", "100 900", None),
+    ("Overpass Mono", "overpassmono", "OverpassMono%5Bwght%5D.ttf", "300 700", None),
+]
 index = ui / "index.html"
 html = index.read_text(encoding="utf-8")
 lines = [l for l in html.splitlines() if "fonts.googleapis.com" not in l and "fonts.gstatic.com" not in l]
@@ -87,12 +94,15 @@ if a.fetch_fonts:
     import urllib.request
     fonts = ui / "vendor/fonts"
     fonts.mkdir(parents=True, exist_ok=True)
-    for remote, local in (("Archivo%5Bwdth%2Cwght%5D.ttf", "Archivo-Variable.ttf"), ("OFL.txt", "Archivo-OFL.txt")):
-        (fonts / local).write_bytes(urllib.request.urlopen(FONT_URL + remote, timeout=60).read())
-    (fonts / "archivo.css").write_text(
-        "@font-face { font-family: 'Archivo'; src: url('Archivo-Variable.ttf') format('truetype');\n"
-        "  font-weight: 100 900; font-stretch: 62% 125%; font-display: swap; }\n")
-    font_css = '  <link rel="stylesheet" href="vendor/fonts/archivo.css">'
+    faces = []
+    for family, folder, remote, weights, widths in FONTS:
+        local = family.replace(" ", "") + "-Variable.ttf"
+        (fonts / local).write_bytes(urllib.request.urlopen(FONT_URL + folder + "/" + remote, timeout=60).read())
+        (fonts / (family.replace(" ", "") + "-OFL.txt")).write_bytes(urllib.request.urlopen(FONT_URL + folder + "/OFL.txt", timeout=60).read())
+        faces.append(f"@font-face {{ font-family: '{family}'; src: url('{local}') format('truetype');\n"
+                     f"  font-weight: {weights};{f' font-stretch: {widths};' if widths else ''} font-display: swap; }}\n")
+    (fonts / "fonts.css").write_text("".join(faces))
+    font_css = '  <link rel="stylesheet" href="vendor/fonts/fonts.css">'
 out_lines = []
 for l in lines:
     if font_css and 'href="styles.css"' in l:

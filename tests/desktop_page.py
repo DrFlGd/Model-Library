@@ -2677,6 +2677,23 @@ async def main():
             await pg.screenshot(path=str(out / "02-night.png"))
             await pg.select_option("#theme-select", "system")
 
+            # the skin (docs/PLAN.md, "Skins design"): Drafting Sheet unless chosen,
+            # changed at once (icons too) and kept
+            first = await pg.evaluate("() => document.documentElement.dataset.skin")
+            drawn = lambda: pg.evaluate("() => [...document.querySelectorAll('.nav-link[title=Home] svg g[data-sk]')].find((g) => getComputedStyle(g).display !== 'none')?.dataset.sk")
+            icon_before = await drawn()
+            await pg.select_option("#skin-select", "classic")
+            skin = await pg.evaluate("() => document.documentElement.dataset.skin")
+            icon_after = await drawn()
+            font = await pg.evaluate("() => getComputedStyle(document.body).fontFamily")
+            await pg.wait_for_timeout(500)
+            saved = json.loads((home / "config/prefs.json").read_text()).get("ml-ui", {}).get("skin")
+            await pg.screenshot(path=str(out / "02-classic.png"))
+            await pg.select_option("#skin-select", "drafting")
+            check("the skin is Drafting Sheet unless chosen; choosing one changes the look and icons at once and is kept",
+                  first == "drafting" and icon_before == "drafting" and skin == "classic" and icon_after == "classic"
+                  and font.startswith('"Archivo"') and saved == "classic", (first, icon_before, skin, icon_after, font, saved))
+
             # 6. a library made by a newer app opens read-only
             future = home / "Future"
             (future / "_library").mkdir(parents=True)
