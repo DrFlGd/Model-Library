@@ -114,6 +114,13 @@ fn password(path: &Path) -> Option<String> {
     passwords().lock().unwrap().get(path).cloned()
 }
 
+/// "That password didn't open the archive", and the password is forgotten, so
+/// the next try asks afresh instead of failing with it again.
+fn wrong_password(path: &Path) -> anyhow::Error {
+    passwords().lock().unwrap().remove(path);
+    anyhow!(WRONG_PASSWORD)
+}
+
 // ---- the cache ----
 
 fn cache_root() -> &'static Mutex<Option<PathBuf>> {
@@ -316,10 +323,10 @@ impl Seek for Joined {
     }
 }
 
-fn seven_error(e: sevenz_rust2::Error, locked: bool) -> anyhow::Error {
+fn seven_error(e: sevenz_rust2::Error, path: &Path, locked: bool) -> anyhow::Error {
     match e {
         sevenz_rust2::Error::PasswordRequired => anyhow!(LOCKED),
-        sevenz_rust2::Error::MaybeBadPassword(_) => anyhow!(if locked { WRONG_PASSWORD } else { LOCKED }),
+        sevenz_rust2::Error::MaybeBadPassword(_) => if locked { wrong_password(path) } else { anyhow!(LOCKED) },
         e => anyhow!("This 7z can't be read: {e}"),
     }
 }
@@ -327,14 +334,14 @@ fn seven_error(e: sevenz_rust2::Error, locked: bool) -> anyhow::Error {
 fn seven(path: &Path) -> Result<sevenz_rust2::ArchiveReader<Joined>> {
     let pw = password(path);
     let p = pw.as_deref().map(sevenz_rust2::Password::from).unwrap_or_else(sevenz_rust2::Password::empty);
-    sevenz_rust2::ArchiveReader::new(Joined::open(path)?, p).map_err(|e| seven_error(e, pw.is_some()))
+    sevenz_rust2::ArchiveReader::new(Joined::open(path)?, p).map_err(|e| seven_error(e, path, pw.is_some()))
 }
 
-fn rar_error(e: unrar::error::UnrarError, locked: bool) -> anyhow::Error {
+fn rar_error(e: unrar::error::UnrarError, path: &Path, locked: bool) -> anyhow::Error {
     use unrar::error::Code;
     match e.code {
-        Code::MissingPassword => anyhow!(if locked { WRONG_PASSWORD } else { LOCKED }),
-        Code::BadPassword => anyhow!(WRONG_PASSWORD),
+        Code::MissingPassword => if locked { wrong_password(path) } else { anyhow!(LOCKED) },
+        Code::BadPassword => wrong_password(path),
         Code::EOpen => anyhow!("A file of this RAR set is missing: {e}"),
         _ => anyhow!("This RAR can't be read: {e}"),
     }
@@ -395,8 +402,8 @@ pub fn list(path: &Path) -> Result<Vec<Value>> {
         Some(Format::Rar) => {
             let pw = password(path);
             let a = match &pw { Some(p) => unrar::Archive::with_password(path, p.as_bytes()), None => unrar::Archive::new(path) };
-            for e in a.open_for_listing().map_err(|e| rar_error(e, pw.is_some()))? {
-                let e = e.map_err(|e| rar_error(e, pw.is_some()))?;
+            for e in a.open_for_listing().map_err(|e| rar_error(e, path, pw.is_some()))? {
+                let e = e.map_err(|e| rar_error(e, path, pw.is_some()))?;
                 if e.is_directory() || e.is_split_before() { continue; }
                 add(rar_name(&e.filename), e.unpacked_size, dos_millis(e.file_time));
             }
@@ -432,12 +439,12 @@ pub fn each(path: &Path, cancel: &AtomicBool, f: &mut dyn FnMut(&str, u64, &mut 
                 }
             });
             if let Some(e) = failed { return Err(e); }
-            result.map_err(|e| seven_error(e, locked))
+            result.map_err(|e| seven_error(e, path, locked))
         }
         Some(Format::Rar) => {
             let pw = password(path);
             let a = match &pw { Some(p) => unrar::Archive::with_password(path, p.as_bytes()), None => unrar::Archive::new(path) };
-            let err = |e| rar_error(e, pw.is_some());
+            let err = |e| rar_error(e, path, pw.is_some());
             let mut at = a.open_for_processing().map_err(err)?;
             let scratch = scratch();
             std::fs::create_dir_all(&scratch)?;
@@ -627,6 +634,7 @@ pub(crate) mod tests {
         assert_eq!(e, LOCKED);
         set_password(&p, "nope");
         assert_eq!(read(&p, "a.txt", 100).unwrap_err().to_string(), WRONG_PASSWORD);
+        assert_eq!(read(&p, "a.txt", 100).unwrap_err().to_string(), LOCKED, "a wrong password is forgotten");
         set_password(&p, "pw");
         assert_eq!(read(&p, "a.txt", 100).unwrap(), b"secret");
     }

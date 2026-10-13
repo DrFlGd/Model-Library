@@ -1603,7 +1603,8 @@ impl App {
                 let path = self.file_path(&args).await?;
                 let file = arg(&args, "file").map_err(e2s)?;
                 let bytes = thumb::bytes_at(&path, args["entry"].as_str()).map_err(e2s)?;
-                j(json!({ "html": crate::docs::to_html(file, &bytes) }))
+                // a readme inside an archive is named by its entry
+                j(json!({ "html": crate::docs::to_html(args["entry"].as_str().unwrap_or(file), &bytes) }))
             }
             "model_cover" => {
                 // journalled: undo puts the old cover back (a picture it replaced is kept)

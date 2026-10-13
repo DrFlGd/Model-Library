@@ -51,3 +51,14 @@ export function TypeTags({ exts, max = 3 }) {
   if (!list.length) return null;
   return html`<span class="ft-tags">${list.slice(0, max).map(([e, n]) => html`<${TypeTag} key=${e} ext=${e} count=${n} />`)}${list.length > max ? html`<span class="ft-more muted" title=${list.slice(max).map(([e, n]) => `${n} ${typeOfExt(e).label}`).join(", ")}>+${list.length - max}</span>` : null}</span>`;
 }
+
+/** Which file of a split archive this is (1 for `name.7z.001` or `name.part1.rar`,
+ *  2 for `name.7z.002`, `name.part2.rar` or `name.r00`), or 0 for a whole file. */
+export function setPart(name) {
+  let m = /\.7z\.(\d{3})$/i.exec(name);
+  if (m) return Number(m[1]);
+  m = /\.part0*(\d+)\.rar$/i.exec(name);
+  if (m) return Number(m[1]);
+  m = /\.r(\d{2})$/i.exec(name);
+  return m ? Number(m[1]) + 2 : 0;
+}

@@ -511,6 +511,8 @@ input:invalid { border-color: var(--danger); }
 .tree-icon { flex: none; display: inline-flex; color: var(--graphite); }
 .tree-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .tree-size { flex: none; font-size: 12px; }
+.tree-part { flex: none; font-size: 12px; margin-right: 8px; }
+.tree-note button { font-size: 12.5px; padding: 1px 8px; margin-left: 4px; }
 .tree-note { font-size: 12.5px; padding: 4px 6px; }
 .tree .badge { font-size: 11px; padding: 1px 6px; border-color: var(--steel-2); color: var(--graphite); }
 @media (max-width: 860px) {

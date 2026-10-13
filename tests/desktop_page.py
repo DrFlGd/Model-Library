@@ -2195,9 +2195,33 @@ async def group4(pg):
     await pg.wait_for_selector('#file-panel [data-entry="VERSION"]')
     check("a RAR unfolds into its files", await pg.locator('#file-panel [data-entry="VERSION"]').count() == 1)
 
-    # a locked archive asks for its password, says when it's wrong, and opens with the right one
+    # a readme inside an archive shows as text, and a file inside an archive can be
+    # opened externally but not compressed again
+    await pg.click('#file-panel [data-entry="Parts/readme.txt"]')
+    await pg.wait_for_function("() => (document.querySelector('#doc-text')?.textContent || '').trim().length > 0", timeout=30000)
+    await pg.click('#file-panel [data-entry="Parts/readme.txt"]', button="right")
+    await pg.wait_for_selector("#context-menu")
+    items = await pg.eval_on_selector_all("#context-menu [data-action]", "els => els.map(e => e.dataset.action)")
+    await pg.keyboard.press("Escape")
+    check("a text file inside an archive shows as text; its menu has Open externally and no Compress to ZIP…",
+          "open-own" in items and "compress-files" not in items, items)
+
+    # Cancel leaves "Enter password…" on the row, and a wrong password isn't kept
     await pg.click('#file-panel [aria-label="Unfold locked.7z"]')
     await pg.wait_for_selector("#password-dialog")
+    await pg.fill("#archive-password", "nope")
+    await pg.press("#archive-password", "Enter")
+    await pg.wait_for_selector("#password-dialog .form-error")
+    await pg.click("#password-dialog-cancel")
+    await pg.wait_for_selector('#file-panel [data-password="locked.7z"]')
+    note = await pg.inner_text('#file-panel .tree-note')
+    await pg.click('#file-panel [data-password="locked.7z"]')
+    await pg.wait_for_selector("#password-dialog")
+    fresh = await pg.locator("#password-dialog .form-error").count() == 0
+    check("after Cancel a locked archive's row offers Enter password…, and a wrong password isn't tried again",
+          note.startswith("Locked with a password") and fresh, (note, fresh))
+
+    # a locked archive asks for its password, says when it's wrong, and opens with the right one
     await pg.fill("#archive-password", "nope")
     await pg.press("#archive-password", "Enter")
     await pg.wait_for_selector("#password-dialog .form-error")
@@ -2218,29 +2242,37 @@ async def group4(pg):
     await pg.wait_for_selector("#archive-dialog .archive-plan")
     chosen = await pg.input_value("#archive-select")
     options = await pg.eval_on_selector_all("#archive-select option", "els => els.map(e => e.value)")
+    await pg.select_option("#archive-mode", "copy")
     await pg.click("#archive-dialog button[type=submit]")
-    await pg.wait_for_selector("#archive-dialog .archive-verified", timeout=60000)
-    await pg.click("#archive-dialog button[type=submit]")
-    await pg.wait_for_selector("#archive-dialog", state="detached")
-    check("Extract archive… unpacks a 7z into the model, listing every archive in it",
+    await pg.wait_for_selector("#archive-dialog", state="detached", timeout=60000)
+    await pg.wait_for_function("() => document.querySelector('#toast')?.textContent.startsWith('Extracted parts.7z')")
+    said = await pg.inner_text("#toast")
+    check("Extract archive… unpacks a 7z into the model in one step, listing every archive in it; Copy keeps the archive",
           chosen == "parts.7z" and sorted(options) == ["locked.7z", "parts.7z", "version.rar"]
-          and (kit / "Parts/block.stl").is_file() and (kit / "parts.7z").is_file(), (chosen, options))
+          and (kit / "Parts/block.stl").is_file() and (kit / "parts.7z").is_file() and "Undo" in said, (chosen, options, said))
 
-    # R8. Compress to ZIP… for the selected folder: originals stay until the separate step
+    # R8. Compress to ZIP… for the selected folder: Move (the default) puts the files
+    # in the ZIP and takes them out, in one step, and Undo brings them back
     await select(["d:Arms"])
     await bar_action(pg, "compress-files")
     await pg.wait_for_selector("#archive-dialog .archive-plan")
     name = await pg.input_value("#archive-name")
     title = await pg.inner_text("#archive-dialog h2")
+    mode = await pg.input_value("#archive-mode")
     await pg.click("#archive-dialog button[type=submit]")
-    await pg.wait_for_selector("#archive-dialog .archive-verified", timeout=60000)
-    await pg.click("#archive-dialog button[type=submit]")
-    await pg.wait_for_selector("#archive-dialog", state="detached")
+    await pg.wait_for_selector("#archive-dialog", state="detached", timeout=60000)
+    await pg.wait_for_function("() => document.querySelector('#toast')?.textContent.startsWith('Compressed 2 files into Arms.zip')")
     with zipfile.ZipFile(kit / "Arms.zip") as z:
         names = sorted(z.namelist())
-    check("Compress to ZIP… puts the selected files in one ZIP and keeps the originals",
-          title == "Compress to ZIP" and name == "Arms.zip" and names == ["Arms/left.stl", "Arms/right.stl"]
-          and (kit / "Arms/left.stl").is_file() and (kit / "notes.txt").is_file(), (title, name, names))
+    moved = not (kit / "Arms/left.stl").exists() and (kit / "notes.txt").is_file()
+    await pg.click("#toast button:has-text('Undo')")
+    for _ in range(100):
+        if (kit / "Arms/left.stl").is_file() and not (kit / "Arms.zip").exists():
+            break
+        await pg.wait_for_timeout(100)
+    check("Compress to ZIP… puts the selected files in one ZIP and takes them out in one step, with Undo",
+          title == "Compress to ZIP" and name == "Arms.zip" and mode == "move" and names == ["Arms/left.stl", "Arms/right.stl"]
+          and moved and (kit / "Arms/right.stl").is_file(), (title, name, mode, names, moved))
 
     # R8. Make a model… packed into one ZIP, moved, and Undo
     before = {str(p.relative_to(kit)): p.read_bytes() for p in kit.rglob("*") if p.is_file() and "_thumbs" not in p.parts}

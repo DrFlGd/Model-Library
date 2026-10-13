@@ -14,12 +14,12 @@ import { useStore } from "../lib/store.js";
 import { ui, resolvedTheme, setPref } from "./state.js";
 import { ctx } from "./context.js";
 import { Icon } from "./icons.js";
-import { api, apiBytes, isDesktop, libraryUrl, openModelFile, openArchiveEntry, toast, loadOverview, recorded, followIds } from "./library.js";
+import { api, apiBytes, allowPassword, isDesktop, libraryUrl, openModelFile, openArchiveEntry, toast, loadOverview, recorded, followIds } from "./library.js";
 import { ViewSwitch, SortMenu } from "./layout.js";
 import { size } from "./details.js";
 import { openMenu, typing } from "./actions.js";
 import { fileSel, pick, pickEvent, listClick, show, view, clear } from "./filesel.js";
-import { TypeTag, isArchive } from "./filetypes.js";
+import { TypeTag, isArchive, setPart } from "./filetypes.js";
 import { PdfDocument } from "./document-viewer.js";
 import { GRAY, colourItems, colourName, viewColour, setViewColour, setModelColour } from "./colours.js";
 
@@ -300,6 +300,8 @@ export function PartsViews({ src, files, names, open, current, treeKey }) {
   </div>`;
 }
 
+const LOCKED_TEXT = /locked with a password|password didn't open/;
+
 export function Stage3D({ src, model, current, onInfo }) {
   const canvas = useRef(null);
   const viewer = useRef(null);
@@ -327,18 +329,25 @@ export function Stage3D({ src, model, current, onInfo }) {
     return () => { live = false; viewer.current?.dispose(); viewer.current = null; };
   }, []);
   useEffect(() => { viewer.current?.setTheme(resolvedTheme() !== "light"); }, [theme]);
+  // a file inside a 7z or RAR waits for the archive to open: say how far it has got, with Stop
+  const archive = current?.entry ? current.file.split("/").pop() : null;
+  const opening = useStore(ui, (s) => archive ? s.jobs.find((j) => j.label.startsWith(`Opening "${archive}"`)) : null);
+  const [again, setAgain] = useState(0);
   useEffect(() => {
     if (!state.ready || !current) return;
     let live = true;
-    setState((s) => ({ ...s, busy: true, error: "" }));
+    setState((s) => ({ ...s, busy: true, error: "", info: null }));
+    // the last file stays while a quick one loads; a slow one (an archive opening) clears it
+    const slow = setTimeout(() => { if (live) viewer.current?.clear(); }, 400);
     apiBytes("model_mesh", { ...srcArgs(src), file: current.file, entry: current.entry || null }).then((buf) => {
       if (!live) return;
       const info = viewer.current.show(buf);
       setState((s) => ({ ...s, busy: false, info }));
       onInfo?.(info);
-    }, (e) => { if (live) { viewer.current?.clear(); setState((s) => ({ ...s, busy: false, info: null, error: e.message || String(e) })); } });
-    return () => { live = false; };
-  }, [state.ready, src.id, current?.file, current?.entry]);
+    }, (e) => { if (live) { viewer.current?.clear(); setState((s) => ({ ...s, busy: false, info: null, error: e.message || String(e) })); } })
+      .finally(() => clearTimeout(slow));
+    return () => { live = false; clearTimeout(slow); };
+  }, [state.ready, src.id, current?.file, current?.entry, again]);
   const cover = () => setCover(model.id, { snapshot: viewer.current.snapshot() }, "Saved this view as the model's cover.");
   const info = state.info;
   const showingFile = !!info?.coloured && fileColours;
@@ -365,8 +374,8 @@ export function Stage3D({ src, model, current, onInfo }) {
   const colourLabel = showingFile ? "The file's colours" : `${colourName(base)}${own ? " (this model)" : ""}`;
   return html`<div class="stage-3d">
     <div class="stage-canvas" onContextMenu=${(e) => openMenu(e, viewItems())}><canvas ref=${canvas} id="viewer-canvas"></canvas>
-      ${state.busy ? html`<div class="stage-note">Loading…</div>` : null}
-      ${state.error ? html`<div class="stage-note form-error" role="alert">${state.error}</div>` : null}
+      ${state.busy ? html`<div class="stage-note" id="viewer-loading">${opening ? html`${opening.label}… ${opening.cancel ? html`<button type="button" class="ghost" id="viewer-stop" onClick=${opening.cancel}>Stop</button>` : null}` : "Loading…"}</div>` : null}
+      ${state.error ? html`<div class="stage-note form-error" role="alert">${state.error}${archive && /^Stopped/.test(state.error) ? html` <button type="button" class="ghost" id="viewer-open-again" onClick=${() => setAgain(again + 1)}>Open the archive</button>` : null}</div>` : null}
       ${!current ? html`<div class="stage-note muted">No 3D file this app can show (STL, OBJ or 3MF).</div>` : null}</div>
     <div class="stage-bar">
       <span class="stage-what" id="viewer-file">${current ? (current.entry ? `${current.file} › ${current.entry}` : current.file) : ""}</span>
@@ -441,9 +450,9 @@ export function Documents({ src, model, docs, current, setCurrent }) {
   const [text, setText] = useState(null);
   useEffect(() => {
     setText(null);
-    if (!doc || doc.entry || !MD.test(doc.file)) return;
+    if (!doc || !MD.test(doc.entry || doc.file)) return;
     let live = true;
-    api("model_doc", { ...srcArgs(src), file: doc.file }).then((r) => { if (live) setText(r.html); }, (e) => { if (live) setText(`<p>${String(e.message || e).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]))}</p>`); });
+    api("model_doc", { ...srcArgs(src), file: doc.file, entry: doc.entry || null }).then((r) => { if (live) setText(r.html); }, (e) => { if (live) setText(`<p>${String(e.message || e).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]))}</p>`); });
     return () => { live = false; };
   }, [src.id, doc?.file, doc?.entry]);
   if (!doc) return html`<div class="stage-note muted">No documents.</div>`;
@@ -451,12 +460,12 @@ export function Documents({ src, model, docs, current, setCurrent }) {
   return html`<div class="stage-docs">
     <div class="doc-list">${docs.map((d) => html`<button type="button" key=${d.file + (d.entry || "")} class=${`ghost${d.file === doc.file && d.entry === doc.entry ? " on" : ""}`} onClick=${() => setCurrent(d)}>${d.entry || d.file}</button>`)}</div>
     <div class="doc-view">
-      ${!doc.entry && MD.test(doc.file) ? html`<div class="doc-text-view" id="doc-text" onClick=${followLink} dangerouslySetInnerHTML=${{ __html: text || "" }}></div>`
+      ${MD.test(doc.entry || doc.file) ? html`<div class="doc-text-view" id="doc-text" onClick=${followLink} dangerouslySetInnerHTML=${{ __html: text || "" }}></div>`
         : /\.pdf$/i.test(doc.entry || doc.file) ? html`<${PdfDocument} key=${doc.file + (doc.entry || "")} src=${src} doc=${doc} model=${model} />`
         : html`<div class="stage-note muted">This kind of document opens in its own app.</div>`}
     </div>
-    <div class="stage-bar"><span class="stage-what">${doc.entry ? `${doc.file} / ${doc.entry}` : doc.file}</span>
-      ${isDesktop() && lib && model && !doc.entry ? html`<span class="stage-tools"><button type="button" class="ghost" onClick=${() => openModelFile(model, doc.file)}>${Icon.external(14)} Open externally</button></span>` : null}</div>
+    <div class="stage-bar"><span class="stage-what">${doc.entry ? `${doc.file} › ${doc.entry}` : doc.file}</span>
+      ${isDesktop() && lib && model ? html`<span class="stage-tools"><button type="button" class="ghost" onClick=${() => doc.entry ? openArchiveEntry(src, doc.file, doc.entry) : openModelFile(model, doc.file)}>${Icon.external(14)} Open externally</button></span>` : null}</div>
   </div>`;
 }
 
@@ -558,16 +567,19 @@ export function SelectionRows({ src, files, name, view = "folders", contextActio
     } else ordered.forEach((f) => addFile(f, 0));
   }
   const order = rows.filter((r) => !r.heading).map((r) => r.key);
+  const read = async (row) => {
+    setArchives((s) => ({ ...s, [row.rel]: { loading: true } }));
+    const id = src.id;
+    try { const entries = await api("model_zip", { ...srcArgs(src), file: row.rel }); if (source.current === id) setArchives((s) => ({ ...s, [row.rel]: { entries } })); }
+    catch (e) { if (source.current === id) setArchives((s) => ({ ...s, [row.rel]: { error: e.message || String(e) } })); }
+  };
+  // after Cancel on the password, or a wrong one: ask again from the row
+  const askAgain = (row) => { allowPassword(); read(row); };
   const unfold = async (row) => {
     const isZip = !row.entry && isArchive(row.rel);
     const now = folded[row.key] ?? isZip;
     setFolded((s) => ({ ...s, [row.key]: !now }));
-    if (isZip && !archives[row.rel]) {
-      setArchives((s) => ({ ...s, [row.rel]: { loading: true } }));
-      const id = src.id;
-      try { const entries = await api("model_zip", { ...srcArgs(src), file: row.rel }); if (source.current === id) setArchives((s) => ({ ...s, [row.rel]: { entries } })); }
-      catch (e) { if (source.current === id) setArchives((s) => ({ ...s, [row.rel]: { error: e.message || String(e) } })); }
-    }
+    if (isZip && !archives[row.rel]) return read(row);
   };
   // Opening a folder from tiles reveals its ancestors in the tree.
   useEffect(() => {
@@ -601,6 +613,9 @@ export function SelectionRows({ src, files, name, view = "folders", contextActio
         { id: "open-own", label: "Open externally", icon: "external", run: () => openModelFile({ rel: src.rel }, row.rel) },
         { id: "folder", label: "Show in folder", icon: "folder", run: () => ctx.platform.library.openPath([lib.path, src.rel, row.folder ? row.rel : splitRel(row.rel)[0]].filter(Boolean).join("/")) },
       ] : []),
+      ...(ownApp(src) && row.entry && !row.folder ? [
+        { id: "open-own", label: "Open externally", icon: "external", run: () => openArchiveEntry(src, row.file, row.entry) },
+      ] : []),
       ...(row.kind === "image" && !row.entry ? [{ id: "cover", label: "Use as cover", icon: "image", disabled: lib?.read_only ? "The library is read-only." : false, run: () => useAsCover(src.id, row.rel) }] : []), ...extra,
     ]);
   };
@@ -627,10 +642,12 @@ export function SelectionRows({ src, files, name, view = "folders", contextActio
         <input type="checkbox" class="pick-tick file-tick" tabindex="-1" checked=${sel.picked.includes(r.key)} aria-label=${`Select ${r.name}`} onClick=${(e) => { e.stopPropagation(); pick(r.key, "toggle", order); }} />
         <button type="button" class=${`tree-btn${sel.picked.includes(r.key) ? " on" : ""}${sel.shown === r.key ? " shown" : ""}`} data-key=${r.key} data-file=${!r.folder && !r.entry ? r.rel : null} data-dir=${r.folder ? r.rel : null} data-entry=${r.entry || null} aria-pressed=${sel.picked.includes(r.key)}
           onClick=${(e) => listClick(r.key, e, order)} onContextMenu=${(e) => menu(e, r)} title=${r.rel || name}>
-          <span class="tree-icon tree-type">${r.folder ? Icon.folder(13) : html`<${TypeTag} name=${r.entry || r.rel} />`}</span><span class="tree-name">${r.name}</span>${!r.folder ? html`<span class="muted tree-size">${size(r.size || 0)}</span>` : null}
+          <span class="tree-icon tree-type">${r.folder ? Icon.folder(13) : html`<${TypeTag} name=${r.entry || r.rel} />`}</span><span class="tree-name">${r.name}</span>${!r.folder && !r.entry && setPart(r.rel) ? html`<span class="muted tree-part" title=${setPart(r.rel) > 1 ? "Opened from the set's first file" : "The first file of a split archive"}>part ${setPart(r.rel)}</span>` : null}${!r.folder ? html`<span class="muted tree-size">${size(r.size || 0)}</span>` : null}
         </button>
       </div>
-      ${archives[r.rel]?.loading ? html`<p class="tree-note muted">Reading the archive…</p>` : archives[r.rel]?.error ? html`<p class="tree-note form-error">${archives[r.rel].error}</p>` : null}
+      ${archives[r.rel]?.loading ? html`<p class="tree-note muted">Reading the archive…</p>` : archives[r.rel]?.error ? (LOCKED_TEXT.test(archives[r.rel].error)
+        ? html`<p class="tree-note muted">Locked with a password. <button type="button" class="ghost" data-password=${r.rel} onClick=${() => askAgain(r)}>Enter password…</button></p>`
+        : html`<p class="tree-note form-error">${archives[r.rel].error}</p>`) : null}
     </li>`)}</ul>
   </div>`;
 }

@@ -57,6 +57,9 @@ function askPassword(args, wrong) {
   })));
 }
 
+/** Ask for passwords again straight away (the row's Enter password… after a Cancel). */
+export function allowPassword() { declined.clear(); }
+
 async function withArchive(call, cmd, args) {
   for (let tries = 0; ; tries++) {
     let error;
