@@ -2689,7 +2689,15 @@ async def main():
             await pg.wait_for_timeout(500)
             saved = json.loads((home / "config/prefs.json").read_text()).get("ml-ui", {}).get("skin")
             await pg.screenshot(path=str(out / "02-classic.png"))
+            others = {}
+            for name in ("partsbin", "layerline"):
+                await pg.select_option("#skin-select", name)
+                others[name] = (await pg.evaluate("() => document.documentElement.dataset.skin"), await drawn(),
+                                (await pg.evaluate("() => getComputedStyle(document.body).fontFamily")).strip('"').split(",")[0].strip('"'))
+                await pg.screenshot(path=str(out / f"02-{name}.png"))
             await pg.select_option("#skin-select", "drafting")
+            check("Parts Bin and Layer Line can be chosen too, each with its own icons and lettering",
+                  others == {"partsbin": ("partsbin", "partsbin", "Sofia Sans"), "layerline": ("layerline", "layerline", "Atkinson Hyperlegible")}, others)
             check("the skin is Drafting Sheet unless chosen; choosing one changes the look and icons at once and is kept",
                   first == "drafting" and icon_before == "drafting" and skin == "classic" and icon_after == "classic"
                   and font.strip('"').startswith('Archivo') and saved == "classic", (first, icon_before, skin, icon_after, font, saved))

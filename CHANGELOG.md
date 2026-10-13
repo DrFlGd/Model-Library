@@ -76,6 +76,13 @@ Skins (R16; docs/PLAN.md, "Skins design"), step 1:
 - Icons follow the skin's line weight and ends, and Home, Import, categories, Starred, folders, Unsorted, Settings and search have their own drawing in each skin, as does the logo.
 - The app bundles every skin's fonts (Overpass and Overpass Mono join Archivo).
 
+Skins, step 2:
+
+- **Parts Bin**: a workshop drawer cabinet. Machine-tool green, Sofia Sans with extra-condensed capitals for titles, black label-tape headings and status bar, a faint pegboard behind the pages, cards and panels with a heavier bottom edge like drawer fronts, heavy square-ended icons.
+- **Layer Line**: print bed and filament. Silk magenta, rounded M PLUS Rounded 1c headings over Atkinson Hyperlegible text, pill-shaped buttons, tags and menu rows, faint layer lines on pictures, the menu and the 3D view, and a spool colour for each category (its icon and count in the menu, and its tiles).
+- Both have light, dark and Night colours. Their fonts are bundled too; Layer Line's heading font is cut to the letters the app uses.
+- A page title gives way to the search box before it's shortened, and Home's category list keeps its icons beside the names.
+
 ## 0.5.18 (2026-10-13)
 
 Fixes from the review of 0.5.17 (all 13 items; docs/PLAN.md, "0.5.18"):

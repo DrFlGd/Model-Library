@@ -75,6 +75,8 @@ export function setPref(patch) {
  *  root, read by styles.css and by the icons drawn for each skin. */
 export const SKINS = [
   ["drafting", "Drafting Sheet"],
+  ["partsbin", "Parts Bin"],
+  ["layerline", "Layer Line"],
   ["classic", "Classic (the look before skins)"],
 ];
 export function applySkin() {

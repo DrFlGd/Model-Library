@@ -826,7 +826,7 @@ Jerred picked **Drafting Sheet** from the style study (https://claude.ai/artifac
 - Icons: thin lines (1.4), square ends.
 
 **Parts Bin and Layer Line (0.5.20).**
-- **Parts Bin:** workshop drawer cabinet. Machine-tool green accent, Sofia Sans (Extra Condensed capitals for titles), label-tape headings (light text on black tape), a faint pegboard ground, cards and panels with a heavier bottom edge like drawer fronts, the status bar as tape. Icons: heavy lines (2.3), square ends.
-- **Layer Line:** print bed and filament. Silk-magenta accent, M PLUS Rounded 1c headings and Atkinson Hyperlegible text, pill-shaped buttons, tags and menu rows, a faint layer-line texture on pictures, the menu and the 3D view. Each category gets a spool colour (its icon and count in the menu, its tiles), from a set of eight in order. Icons: medium lines (1.7), round ends.
+- **Parts Bin:** workshop drawer cabinet. Machine-tool green accent, Sofia Sans (Extra Condensed capitals for titles), label-tape headings (light text on black tape), a faint pegboard ground, cards and panels with a heavier bottom edge like drawer fronts, the status bar as tape. Icons: heavy lines (2.2), square ends.
+- **Layer Line:** print bed and filament. Silk-magenta accent, M PLUS Rounded 1c headings and Atkinson Hyperlegible text, pill-shaped buttons, tags and menu rows, a faint layer-line texture on pictures, the menu and the 3D view. Each category gets a spool colour (its icon and count in the menu, its tiles), from a set of eight in order. Icons: medium lines (1.7), round ends. Its heading font has Japanese letters too and is 3.6 MB, so the build keeps one weight (ExtraBold, used for every heading) and, with fontTools, cuts it to Latin letters and the app's symbols (about 170 KB); without fontTools it's bundled whole.
 
 Then UI review 5 looks at all four skins.

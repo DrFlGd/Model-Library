@@ -10,6 +10,8 @@
 | [unrar](https://crates.io/crates/unrar) and the UnRAR source by Alexander Roshal (in unrar_sys) | Reading RAR archives (it can't make them) | unrar: MIT or Apache-2.0; UnRAR: its own freeware licence, which allows reading and extracting RAR archives but not re-creating the RAR compression algorithm |
 | [Archivo](https://github.com/google/fonts/tree/main/ofl/archivo) | Interface font of the Classic skin (bundled into the app by `tools/build_desktop.py --fetch-fonts`) | SIL OFL 1.1 |
 | [Overpass](https://github.com/google/fonts/tree/main/ofl/overpass) and [Overpass Mono](https://github.com/google/fonts/tree/main/ofl/overpassmono) | Fonts of the Drafting Sheet skin (bundled the same way) | SIL OFL 1.1 |
+| [Sofia Sans](https://github.com/google/fonts/tree/main/ofl/sofiasans), [Condensed](https://github.com/google/fonts/tree/main/ofl/sofiasanscondensed) and [Extra Condensed](https://github.com/google/fonts/tree/main/ofl/sofiasansextracondensed) | Fonts of the Parts Bin skin (bundled the same way) | SIL OFL 1.1 |
+| [Atkinson Hyperlegible](https://github.com/google/fonts/tree/main/ofl/atkinsonhyperlegible) and [M PLUS Rounded 1c](https://github.com/google/fonts/tree/main/ofl/mplusrounded1c) (ExtraBold, cut to Latin letters) | Fonts of the Layer Line skin (bundled the same way) | SIL OFL 1.1 |
 | [Tauri](https://tauri.app) 2 and its dialog and opener plugins | The desktop app's window | MIT or Apache-2.0 |
 
 The app's shell, interface pieces and tests started as copies from [Claude Grid Workshop](https://github.com/DrFlGd/Claude-Grid-Workshop) (same owner).
