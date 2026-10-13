@@ -9,7 +9,7 @@ import { ctx, routeHash, schemaScope } from "./context.js";
 import { api, isDesktop, openLibrary, showLibraryFolder, rescan, followJob, loadOverview, toast, undoChange, finishChange, recorded } from "./library.js";
 import { sortFolder } from "./sort.js";
 import { Cover } from "./details.js";
-import { PageHead } from "./layout.js";
+import { CommandBar } from "./layout.js";
 import { CatIcon, iconOf } from "./caticons.js";
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
@@ -138,16 +138,17 @@ export function Home() {
   if (s.firstRun && !lib) return html`<${FirstRun} />`;
   const ov = s.overview;
   if (!lib) {
-    return html`<div class="home">
-      <${PageHead} title="Model Library" sub="Organise your 3D models into folders laid out by your own categories." />
+    return html`<${CommandBar} id="home-head" title="Model Library" /><div class="home">
+      <p class="page-lead">Organise your 3D models into folders laid out by your own categories.</p>
       ${s.error ? html`<p class="warn-note" role="alert">${s.error}</p>` : null}
       ${isDesktop() ? html`<div class="home-actions"><button type="button" class="primary" id="home-open-library" onClick=${() => openLibrary()}>Open a library…</button></div>` : null}
     </div>`;
   }
   const count = ov ? html`<span class="page-count" id="home-counts">${plural(ov.all, "model", "models")}${ov.unsorted ? `, ${ov.unsorted} unsorted` : ""}</span>` : null;
-  return html`<div class="home">
-    <${PageHead} title=${lib.name} count=${count} sub=${html`Your library is in <b>${lib.path}</b>. How its folders are laid out is in <a href="#/about" id="home-layout-link">About</a>.`}
-      menu=${{ id: "library-menu", label: "Library", icon: "folder", title: "Show in folder, read again, make previews, open another library", items: () => libraryItems(lib) }} />
+  return html`<${CommandBar} id="home-head" title=${lib.name} count=${count}
+      more=${{ id: "library-menu", title: "Library: show in folder, read again, make previews, open another library", items: () => libraryItems(lib) }} />
+  <div class="home">
+    <p class="page-lead">Your library is in <b>${lib.path}</b>. How its folders are laid out is in <a href="#/about" id="home-layout-link">About</a>.</p>
     ${s.error ? html`<p class="warn-note" role="alert">${s.error}</p>` : null}
     ${lib.read_only ? html`<p class="warn-note" role="alert">${lib.read_only}</p>` : null}
     <div class="home-grid">

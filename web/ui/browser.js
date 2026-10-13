@@ -13,7 +13,10 @@ import { api, toast } from "./library.js";
 import { ModelDetails, SelectedPanel, PlaceSummary, Cover, size } from "./details.js";
 import { MODEL_ACTIONS, menuItems, openMenu, usePageKeys, runKey, letter, selectAllKey, editDetails, writable } from "./actions.js";
 import { categoryItems } from "./categories.js";
-import { PageHead, ViewSwitch, SortMenu, SearchNote } from "./layout.js";
+import { CommandBar, ViewSwitch, SortMenu, SearchNote } from "./layout.js";
+import { Inspector } from "./inspector.js";
+import { fileSel, clear as clearFiles } from "./filesel.js";
+import { useFileSelection } from "./extract.js";
 import { UnsortedPreview } from "./unsorted-preview.js";
 import { CatIcon, iconOf } from "./caticons.js";
 
@@ -25,21 +28,20 @@ const SORTS = [["name", "Name"], ["added", "Recently added"], ["size", "Largest 
 const VIEWS = [["grid", "Grid", "grid"], ["list", "List", "list"]];
 const CTX = { page: "browse" };
 
-/** The place's title, as links back up its categories. */
-function Title({ scope, overview }) {
-  if (scope === "all") return html`<h1>All models</h1>`;
-  if (scope === "unsorted") return html`<h1>Unsorted</h1>`;
-  if (scope === "favs") return html`<h1>Starred</h1>`;
+/** The place's title for the command bar: its name large (with its icon), the
+ *  categories above it as small links. */
+function titleOf(scope, overview) {
+  if (scope === "all") return { title: "All models" };
+  if (scope === "unsorted") return { title: "Unsorted" };
+  if (scope === "favs") return { title: "Starred" };
   const [id, ...values] = scope.slice(7).split("/").map(decodeURIComponent);
   const schema = overview?.schemas?.find((s) => s.id === id);
   const crumbs = [[schema?.name || id, []], ...values.map((v, i) => [v, values.slice(0, i + 1)])];
-  // the place's own name large, the categories above it as a smaller line of links
   const [label] = crumbs[crumbs.length - 1];
-  const up = crumbs.slice(0, -1);
-  return html`<div class="title-stack">
-    ${up.length ? html`<p class="crumbs-up" id="crumbs-up">${up.map(([name, path], i) => html`${i ? html`<span class="crumb-sep"> › </span>` : null}<a href=${routeHash(`browse:${schemaScope(id, path)}`)}>${name}</a>`)}</p>` : null}
-    <h1 class="crumbs" title=${crumbs.map(([n]) => n).join(" › ")}><${CatIcon} icon=${iconOf(schema, values)} size=${22} fallback="layers" /><span class="crumbs-name">${label}</span></h1>
-  </div>`;
+  return {
+    up: crumbs.slice(0, -1).map(([name, path]) => [name, routeHash(`browse:${schemaScope(id, path)}`)]),
+    title: html`<h1 class="crumbs" title=${crumbs.map(([n]) => n).join(" › ")}><${CatIcon} icon=${iconOf(schema, values)} size=${20} fallback="layers" /><span class="crumbs-name">${label}</span></h1>`,
+  };
 }
 
 /** The place's name in words (the last of its crumbs). */
@@ -55,7 +57,7 @@ function placeName(scope, overview) {
 function categoryMenu(scope) {
   if (!scope.startsWith("schema:")) return null;
   const [id, ...values] = scope.slice(7).split("/").map(decodeURIComponent);
-  return { id: "category-menu", label: values.length ? "Subcategory" : "Category", icon: "layers", title: "Add, edit, rename or delete", items: () => categoryItems(id, values) };
+  return { id: "category-menu", title: `${values.length ? "Subcategory" : "Category"}: add, edit, rename or remove`, items: () => categoryItems(id, values) };
 }
 
 /** The category a scope shows, with its schema and its tree node (children, count). */
@@ -178,16 +180,6 @@ export function Browser() {
   const [text, setText] = useState(s.q);
   const [result, setResult] = useState(null);
   const [limit, setLimit] = useState(PAGE);
-  const [previewNarrow, setPreviewNarrow] = useState(() => matchMedia("(max-width: 899px)").matches);
-  const [previewOpen, setPreviewOpen] = useState(false);
-  useEffect(() => {
-    const query = matchMedia("(max-width: 899px)");
-    const changed = () => { setPreviewNarrow(query.matches); setPreviewOpen(false); };
-    query.addEventListener("change", changed);
-    return () => query.removeEventListener("change", changed);
-  }, []);
-  useEffect(() => { setPreviewOpen(false); }, [scope]);
-  useEffect(() => { if (s.navOpen) setPreviewOpen(false); }, [s.navOpen]);
   const seq = useRef(0);
   useLayoutEffect(() => { setText(s.q); }, [s.q]); // before paint, so nothing typed meanwhile is put back
   useEffect(() => { setLimit(PAGE); }, [scope, s.q, s.sort]);
@@ -215,6 +207,8 @@ export function Browser() {
   const items = result?.items || [];
   // only what's shown here can be selected (a model selected elsewhere isn't)
   const picked = items.filter((m) => s.picked.includes(m.id));
+  const fileSrc = useStore(fileSel, (x) => x.src);
+  const filesPicking = useFileSelection(scope === "unsorted" && picked.length === 1 && fileSrc?.id === picked[0].id ? fileSrc : null);
   const toggleFilter = (key, value) => {
     const f = filterOf(key, value);
     const on = filtersIn(s.q).some(([k, v]) => k === key && v === value);
@@ -234,7 +228,7 @@ export function Browser() {
     if (e.key === "F2") { if (sel.length === 1) { e.preventDefault(); const ok = writable(); if (ok === true) editDetails(sel, true); else toast(ok); } return; }
     if (l === "e" || l === "m" || l === "s") { if (sel.length) { e.preventDefault(); runKey(MODEL_ACTIONS, l.toUpperCase(), sel, CTX); } return; }
     if (selectAllKey(e)) { e.preventDefault(); ui.set({ picked: ids, anchor: ids[0] || null, selection: ids[ids.length - 1] || null }); return; }
-    if (e.key === "Escape") { if (sel.length) ui.set({ picked: [] }); return; }
+    if (e.key === "Escape") { if (fileSel.get().picked.length && scope === "unsorted") clearFiles(); else if (sel.length) ui.set({ picked: [] }); return; }
     if (e.key === "ContextMenu") {
       const at = (ids.includes(st.selection) && cardEl(st.selection)) || (sel[0] && cardEl(sel[0].id));
       if (at && sel.length) openMenu(at, menuItems(MODEL_ACTIONS, sel, CTX));
@@ -272,6 +266,7 @@ export function Browser() {
   const View = s.layout === "list" ? Row : Card;
   const name = placeName(scope, s.overview);
   const unsortedOne = scope === "unsorted" && picked.length === 1;
+  // files picked in the Unsorted preview take the bar over from the model
   // the answer for this place and search (the last one stays up while the next comes)
   const fresh = result && result.q === s.q && result.scope === scope && result.direct === direct ? result : null;
   const total = direct ? place.node.count : result?.total;
@@ -280,18 +275,20 @@ export function Browser() {
     : scope === "unsorted" ? "No models here yet."
     : html`No models here yet. Drop model files or folders on this window to add them here, or use <a href=${routeHash("import")}>Import</a>.`;
   const wider = s.q && scope !== "all" ? html`<a href=${routeHash("browse:all")} id="search-everywhere">Search all models</a>` : null;
-  return html`<div class="browser">
-    <div class="browse-main">
-      <${PageHead} title=${html`<${Title} scope=${scope} overview=${s.overview} />`} count=${count} menu=${categoryMenu(scope)} />
-      <div class="toolbar">
-        <label class="search small toolbar-search"><span class="visually-hidden">Search this place</span>
-          <input id="search" data-search type="search" value=${text} placeholder="Search names, authors, tags… or author:jo tag:presupported" autocomplete="off" spellcheck="false"
-            title="Search (/)" onInput=${(e) => setText(e.target.value)} /></label>
-        <${SortMenu} id="sort" options=${SORTS} value=${s.sort} onChange=${(v) => setPref({ sort: v })} />
-        ${subs.length ? html`<${ViewSwitch} id="cat-show" label="Show" views=${SHOW} value=${s.q ? "models" : show} onChange=${(v) => setPref({ catShow: { ...catShow, [scope]: v } })} />` : null}
-        ${previewNarrow && unsortedOne ? html`<button type="button" class="ghost" id="unsorted-preview-open" onClick=${() => { ui.set({ navOpen: false }); setPreviewOpen(true); }}>Preview files</button>` : null}
+  const head = titleOf(scope, s.overview);
+  const details = picked.length > 1 ? html`<${SelectedPanel} models=${picked} />`
+    : html`<${ModelDetails} id=${picked[0]?.id || null} row=${false} empty=${html`<${PlaceSummary} name=${name} result=${direct ? (fresh && whole?.scope === scope ? whole : null) : fresh} here=${direct && fresh ? fresh.total : null} />`} />`;
+  const selection = filesPicking || (picked.length ? { count: `${picked.length} ${picked.length === 1 ? "model" : "models"} selected`, onClear: () => ui.set({ picked: [] }),
+    items: menuItems(MODEL_ACTIONS, picked, CTX), buttons: 3 } : null);
+  return html`<${CommandBar} id="browse-head" up=${head.up} title=${head.title} count=${count} more=${categoryMenu(scope)} selection=${selection}
+      search=${html`<label class="search small toolbar-search"><span class="visually-hidden">Search this place</span>
+          <input id="search" data-search type="search" value=${text} placeholder="Search names, authors, tags… or author:jo" autocomplete="off" spellcheck="false"
+            title="Search (/). Typed filters: author:jo tag:presupported" onInput=${(e) => setText(e.target.value)} /></label>`}
+      tools=${html`${subs.length ? html`<${ViewSwitch} id="cat-show" label="Show" views=${SHOW} value=${s.q ? "models" : show} onChange=${(v) => setPref({ catShow: { ...catShow, [scope]: v } })} />` : null}
         <${ViewSwitch} id="layout-switch" views=${VIEWS} value=${s.layout === "list" ? "list" : "grid"} onChange=${(v) => setPref({ layout: v })} />
-      </div>
+        <${SortMenu} id="sort" options=${SORTS} value=${s.sort} onChange=${(v) => setPref({ sort: v })} />`} />
+  <div class="browser">
+    <div class="browse-main">
       ${chips.length ? html`<div class="filters" aria-label="Narrow down">${chips.map(([k, f]) => {
         const on = isOn(k, f.value);
         return html`<button type="button" class=${`chip-btn${on ? " on" : ""}`} key=${k + f.value} aria-pressed=${on ? "true" : "false"} data-filter=${filterOf(k, f.value)}
@@ -311,10 +308,10 @@ export function Browser() {
         ${result && result.total > items.length ? html`<button type="button" class="ghost more-btn" onClick=${() => setLimit(limit + PAGE)}>Show more (${result.total - items.length} left)</button>` : null}
       </div>
     </div>
-    ${picked.length > 1 ? html`<${SelectedPanel} models=${picked} />`
-      : unsortedOne ? (!previewNarrow || previewOpen ? html`<${UnsortedPreview} key=${picked[0].id} id=${picked[0].id} narrow=${previewNarrow} onClose=${() => setPreviewOpen(false)} />` : null)
-      : html`<${ModelDetails} id=${picked[0]?.id || null} empty=${html`<${PlaceSummary} name=${name} result=${direct ? (fresh && whole?.scope === scope ? whole : null) : fresh} here=${direct && fresh ? fresh.total : null} />`} />`}
-    ${previewNarrow && previewOpen && unsortedOne ? html`<button type="button" class="preview-shade" aria-label="Close model preview" onClick=${() => setPreviewOpen(false)}></button>` : null}
+    <${Inspector} page=${scope === "unsorted" ? "unsorted" : "browse"} open=${!matchMedia("(max-width: 1250px)").matches} want=${unsortedOne ? "files" : null} tabs=${[
+      { id: "files", label: "Files", icon: "folder", body: unsortedOne ? html`<${UnsortedPreview} key=${picked[0].id} id=${picked[0].id} />` : false },
+      { id: "details", label: "Details", icon: "info", body: details },
+    ]} />
   </div>`;
 }
 

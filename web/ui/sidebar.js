@@ -13,6 +13,7 @@ import { CatIcon, iconOf } from "./caticons.js";
 import { openMenu } from "./actions.js";
 import { categoryItems, addSubcategory } from "./categories.js";
 import { toast } from "./library.js";
+import { NavHead, ThemeButton } from "./chrome.js";
 
 const NARROW = "(max-width: 900px)";
 function useMedia(query) {
@@ -138,7 +139,7 @@ function CategoryPanel({ schema, path, route, open, canAdd }) {
   if (folded) {
     return html`<aside class="category-panel folded" id="category-panel" aria-label=${`${schema.name}'s subcategories`}>
       <button type="button" class="ghost panel-strip" id="category-panel-open" title="Show subcategories ([)" aria-label="Show subcategories ([)" onClick=${() => setPref({ catPanel: "open" })}>
-        ${Icon.chevronsRight(14)}<span class="panel-strip-name">${schema.name}</span></button>
+        <span class="panel-strip-icon"><${CatIcon} icon=${iconOf(schema)} size=${16} fallback="layers" /></span><span class="panel-strip-name">${schema.name}</span>${Icon.chevronsRight(13)}</button>
     </aside>`;
   }
   return html`<aside class="category-panel" id="category-panel" style=${{ width: `${width}px` }} aria-label=${`${schema.name}'s subcategories`}>
@@ -168,6 +169,7 @@ export function Sidebar() {
   const panelSchema = !narrow && shown ? ov?.schemas?.find((sc) => sc.id === shown.id) : null;
   return html`${s.navOpen ? html`<div class="nav-backdrop" onClick=${() => ui.set({ navOpen: false })}></div>` : null}
     <nav class=${`sidebar${s.navOpen ? " open" : ""}${s.navCollapsed ? " collapsed" : ""}`} aria-label="Library">
+      <${NavHead} />
       <ul class="nav-list">
         <${NavLink} route="home" label="Home" icon="home" current=${s.route} />
         <${NavLink} route="import" label="Import" icon="inbox" current=${s.route} />
@@ -198,6 +200,7 @@ export function Sidebar() {
         <${NavLink} route="duplicates" label="Duplicates" icon="stack" current=${s.route} />
         <${NavLink} route="settings" label="Settings" icon="cog" current=${s.route} />
         <${NavLink} route="about" label="About" icon="info" current=${s.route} />
+        <${ThemeButton} />
       </ul>
     </nav>
     ${panelSchema ? html`<${CategoryPanel} key=${panelSchema.id} schema=${panelSchema} path=${shown.path} route=${s.route} open=${s.open} canAdd=${canAdd} />` : null}`;

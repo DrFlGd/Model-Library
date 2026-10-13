@@ -699,5 +699,40 @@ Four notes after 0.5.12, added to the roadmap:
 3. **The same top bar on every page.** Proposed in the mock-ups: one header with fixed places (Back, where you are and the title, then search, view, sort, one main action and a ⋯ menu for the rest) that switches to a selection mode when files or models are selected ("3 files selected ✕" with the two or three most used actions, the rest in ⋯; Esc clears). That replaces the selection bar and Clear.
 4. **Compress to ZIP's layout.** The ZIP held a `_model-library/archive-manifest.json`; it should hold only the model's files at its root, in the model's folder (named as the model) beside `model.json` and the other library files. Fixed in 0.5.13: the manifest is no longer written (the journal keeps the file list and hashes for Undo), and older ZIPs that have it still skip it when extracted.
 
-Items 1–3 are built together once Jerred picks a layout, as one change to every page's header and side panels.
+Items 1–3 are built together once Jerred picks a layout, as one change to every page's header and side panels. He picked option 3, "Inspector rails" (13 October); design below.
+
+### Inspector rails design (0.5.14)
+
+**One command bar on every page.** The window's old top strip (menu button, name, theme button) goes; the menu button and the app's mark move to the top of the menu, the theme button to its foot beside Settings. Each page starts with the same bar (`CommandBar` in `layout.js`, replacing `PageHead` and the toolbar under it), one row high, with fixed places from left to right:
+
+1. ‹ Back, on pages you open from somewhere (a model's page);
+2. where you are: the categories above as small links, then the page's title large, then its count (a model: the star beside its name, "8 files · 40.8 MB");
+3. the page's search box (the place's models, Import's workspace; a model's page searches its files in the Files pane);
+4. its view switches (Subcategories / Models, Grid / List, Import's four views);
+5. Sort ▾;
+6. one main button (per page, below);
+7. ⋯, a menu with everything else the page can do (the old More ▾, Category ▾, Library ▾ and Import's four buttons).
+
+A page leaves out the places it has no use for; the rest keep their order. The main button per page: a model: Edit details…; a category: none beyond the Category menu, whose items move into ⋯ (one menu, the same as right-clicking the category); Import: Sort a folder… (Import folder…, Import file…, Import folders as categories…, Read again, Clear imported and Start again in ⋯); Duplicates: Look for duplicates; Home: none (its Library menu moves into ⋯). Settings and About have only the title.
+
+**Selection mode.** When something is selected, the same bar shows "✕ 3 files selected" (or models, or things on Import) with the two or three actions used most as buttons and the rest in ⋯; ✕ or Esc clears the selection and the bar goes back. The page's search, view switch and Sort stay in the bar meanwhile (only the place, the main button and ⋯ make way), so they can be changed without losing the selection and the bar keeps its shape. The buttons and menu items are the same list as the right-click menu (`fileActions`, `MODEL_ACTIONS`, Import's `importActions`), so the names and order can't drift. Buttons are `#bar-<action id>`, the menu `#bar-more`, its items `data-action=<id>`.
+
+- A model's files (its page, and the Unsorted preview): Make a model… and Send to another model…. The selection bar above the viewer and its Clear button are gone.
+- Models in a place (and Duplicates' picked model): Open (one model), Edit details…, Move to category…; Star, Delete, Show in folder and the rest in ⋯. On a model's own page its one model is not a selection.
+- Import: the first two of Import's actions (Make a model of these / Make this folder a model, Combine…), the rest in ⋯; setting the category stays a form in the panel, since it needs a choice.
+
+A model selected in a place shows its details in the inspector without an action row of its own (the bar has them); so does the several-selected panel.
+
+**Side panes fold to rails.** Every side pane has a rail: a thin strip with an icon and its name written down the strip for each tab. Click a name to open that tab; click the open one (or its « / » button, or [ / ]) to fold the pane to its rail. The left pane: Files on a model's page, Subcategories on a category's page. The right pane, the inspector, has tabs:
+
+- a model's page: Details, Media (its pictures, documents, readmes and videos as a list; click one to show it, right-click for its actions);
+- a place (all models, a category, Unsorted, Starred): Details (what the place holds, the selected model's details, or what several share); in Unsorted with one model selected also Files (the preview of its files beside the collection, as now);
+- Import: Details (the workspace, a folder or model, and the Category form);
+- Duplicates: Details.
+
+The inspector's width can be dragged and is kept (one width for all pages, `inspectorWidth`), and so are whether it's folded and which tab is open, per page (`inspector` and `inspectorTab`), since the model page starts folded and the others open. Below 900 px the rails stay and a pane opens over the page as a drawer, as the panels do now.
+
+**Showing is not selecting.** In a model's file lists a click shows a file or folder; its tick, Ctrl-click or Shift-click selects. So opening a model or showing a file doesn't put the bar into selection mode, and ✕ always has something to clear. Moving to another page or place starts with nothing selected.
+
+**What stays.** The menu on the left (its folded form is the icon rail of the mock-up), the category panel's tree, every page's contents, keys (E, M, S, N, Enter, Ctrl+A, Esc, [, ]), right-click menus and Undo. Not in this build: the mock-up's "type a command" in the search box (Ctrl+K), and a History tab (a model's own list of changes), which need new backend work; they go on the roadmap.
 

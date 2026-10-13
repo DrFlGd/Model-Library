@@ -30,15 +30,25 @@ async def panel_workspace_checks(pg, check, out=None):
     await pg.wait_for_selector('#file-panel-open')
     await pg.click('#file-panel-open')
 
-    # The model root is selectable, and Ctrl-click adds another row.
+    # A click shows a row without selecting it; its tick (or Ctrl-click) selects, and adds another row.
     root = pg.locator('#part-tree [data-key="d:"]')
     await root.click()
+    shown_only = await pg.locator('#part-tree .tree-btn.shown[data-key="d:"]').count() == 1 and await pg.locator('#part-tree .tree-btn[aria-pressed="true"]').count() == 0
+    check('a click shows a file row without selecting it, and the bar stays as it was', shown_only and await pg.locator('#mp-head.selecting').count() == 0)
+    await pg.locator('#part-tree li:has(> .file-selection-row [data-key="d:"]) > .file-selection-row .file-tick').click()
     files = pg.locator('#part-tree [data-file]')
     if await files.count():
         await files.first.click(modifiers=['Control'])
         check('the file panel shares a multi-selection across rows', await pg.locator('#part-tree .tree-btn[aria-pressed="true"]').count() == 2)
+        said = await pg.inner_text('#bar-count')
+        acts = await pg.eval_on_selector_all('#mp-head.selecting button[data-action]', 'els => els.map(e => e.dataset.action)')
+        check('selected files turn the command bar into their actions', said.endswith(' files selected') and acts[:1] == ['extract']
+              and await pg.locator('#mp-head.selecting #bar-more, #bar-send-model-files').count() >= 1, (said, acts, pg.viewport_size))
         await files.first.press('Escape')
-        check('Escape clears the file selection', await pg.locator('#part-tree .tree-btn[aria-pressed="true"]').count() == 0)
+        check('Escape clears the file selection', await pg.locator('#part-tree .tree-btn[aria-pressed="true"]').count() == 0 and await pg.locator('#mp-head.selecting').count() == 0)
+        await files.first.click(modifiers=['Control'])
+        await pg.click('#bar-clear')
+        check('✕ clears the file selection', await pg.locator('#part-tree .tree-btn[aria-pressed="true"]').count() == 0 and await pg.locator('#mp-head.selecting').count() == 0)
     search = pg.get_by_role('searchbox', name='Search files')
     await search.fill('no-such-file-workspace-check')
     check('file search filters the panel', await pg.locator('#part-tree [data-file]').count() == 0)
@@ -46,19 +56,24 @@ async def panel_workspace_checks(pg, check, out=None):
 
     # Agent B: filtered selection must be explicit; whole-model extraction is allowed.
     await pg.click("#select-visible-files")
-    check("Select visible files chooses only filtered files", await pg.locator("#extract-model").is_enabled())
+    check("Select visible files chooses only filtered files", await pg.locator("#bar-extract").is_enabled())
     await pg.click("#select-whole-model")
-    check("Select entire model enables extraction without excluding complete selections", await pg.locator("#extract-model").is_enabled())
-    check("Add files is discoverable on a model", await pg.locator("#mp-add-files").count() == 1)
-    await pg.click("#send-model-files")
+    check("Select entire model enables extraction without excluding complete selections", await pg.locator("#bar-extract").is_enabled())
+    await pg.click("#bar-clear")
+    await pg.click("#mp-more")
+    check("Add files is discoverable on a model", await pg.locator('#context-menu [data-action="add-files"]').count() == 1)
+    await pg.keyboard.press("Escape")
+    await pg.click("#select-whole-model")
+    await pg.click("#bar-send-model-files")
     await pg.wait_for_selector("#send-files-dialog")
     check("Send to another model has a searchable destination review", await pg.locator("#send-search").count() == 1)
     await pg.keyboard.press("Escape")
     await pg.wait_for_selector("#send-files-dialog", state="detached")
     await pg.set_viewport_size({'width': 700, 'height': 800})
-    await pg.wait_for_selector('#files-drawer-button')
-    check('the narrow file drawer starts closed', not await pg.locator('#file-panel').is_visible())
-    await pg.click('#files-drawer-button')
+    await pg.click("#bar-clear")
+    await pg.wait_for_selector('#file-panel-open')
+    check('the narrow file drawer starts closed, as its rail', await pg.locator('#file-panel').evaluate('(el) => el.offsetWidth') == 36)
+    await pg.click('#file-panel-open')
     await pg.wait_for_selector('#file-panel-close')
     check('Files opens the narrow drawer', await pg.locator('#file-panel.drawer').is_visible())
     await pg.click('#file-panel-close')
@@ -66,7 +81,7 @@ async def panel_workspace_checks(pg, check, out=None):
     await pg.wait_for_selector('#file-panel-close')
 
     # The navigation and both workspace ribbons are independent.
-    await pg.wait_for_selector('#details-panel-open')
+    await pg.wait_for_selector('#rail-details')
     async def settled_navigation(collapsed):
         # Click completion does not wait for Preact or the sidebar's width
         # transition. Observe its final state and attached edge, not a delay.
@@ -93,7 +108,7 @@ async def panel_workspace_checks(pg, check, out=None):
     check('expanding navigation restores the attached Files edge',
           abs(expanded['x'] - before['x']) <= 1, (before, expanded))
 
-    await pg.click('#details-panel-open')
+    await pg.click('#rail-details')
     await pg.wait_for_selector('#workspace-edit-name')
     initial = await pg.input_value('#workspace-edit-name')
     await pg.fill('#workspace-edit-name', initial + ' draft')
@@ -117,24 +132,24 @@ async def panel_workspace_checks(pg, check, out=None):
           wide['width'] > restored['width'] and
           restored['width'] > 100 and restored['height'] > 100,
           (wide, restored))
-    await pg.click('#details-panel-close')
+    await pg.click('#inspector-fold')
     await pg.set_viewport_size({'width': 800, 'height': 600})
-    await pg.click('#details-drawer-button')
+    await pg.click('#rail-details')
     check('Details remains reachable at 800 by 600',
-          await pg.locator('#workspace-details-panel.drawer').is_visible())
-    await pg.click('#details-panel-close')
+          await pg.locator('#workspace-details-panel').is_visible())
+    await pg.click('#inspector-fold')
     if out is not None:
         await pg.set_viewport_size({'width': 1280, 'height': 800})
-        await pg.click('#details-panel-open')
+        await pg.click('#rail-details')
         await pg.screenshot(path=str(out / 'agent-a-docked-workspace.png'))
-        await pg.click('#details-panel-close')
+        await pg.click('#inspector-fold')
     await pg.set_viewport_size(original_viewport or {'width': 1280, 'height': 900})
 
 
 async def details_refresh_checks(pg, check, out=None):
     """Agent A-1: clean refresh, true drafts, concurrent edits and Undo."""
-    await pg.wait_for_selector('#details-panel-open')
-    await pg.click('#details-panel-open')
+    await pg.wait_for_selector('#rail-details')
+    await pg.click('#rail-details')
     await pg.wait_for_selector('#workspace-edit-tags')
     tags_before = await pg.input_value('#workspace-edit-tags')
     notes_before = await pg.locator('#workspace-edit-notes').input_value()
@@ -265,4 +280,4 @@ async def details_refresh_checks(pg, check, out=None):
     """, arg=tags_before)
     if out is not None:
         await pg.screenshot(path=str(out / 'agent-a-details-refresh.png'))
-    await pg.click('#details-panel-close')
+    await pg.click('#inspector-fold')

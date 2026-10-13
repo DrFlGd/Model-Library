@@ -51,7 +51,7 @@ const placeText = (overview, m) => {
 };
 
 /** One model. `ctx`: the page it's on, for its actions. */
-export function ModelDetails({ id, empty = null, ctx = { page: "browse" }, row = true }) {
+export function ModelDetails({ id, empty = null, ctx = { page: "browse" }, row = false }) {
   const s = useStore(ui, (st) => ({ rev: st.catalogRev, favs: st.favs, overview: st.overview, readOnly: !!st.library?.read_only }));
   const [m, setM] = useState(null);
   const [error, setError] = useState("");
@@ -111,7 +111,7 @@ export function ModelDetails({ id, empty = null, ctx = { page: "browse" }, row =
 /** What every one of `lists` has (in the first one's order). */
 const common = (lists) => (lists.length ? lists[0].filter((x) => lists.every((l) => l.includes(x))) : []);
 
-/** Several models selected: the count, what they share, and the same row. */
+/** Several models selected: the count and what they share (their actions are in the command bar). */
 export function SelectedPanel({ models, ctx = { page: "browse" } }) {
   const overview = useStore(ui, (st) => st.overview);
   const authors = common(models.map((m) => m.authors || []));
@@ -126,8 +126,6 @@ export function SelectedPanel({ models, ctx = { page: "browse" } }) {
       <dt>Tags</dt><dd>${tags.length ? tags.map((t) => `#${t}`).join(" ") : html`<span class="muted">${models.some((m) => m.tags?.length) ? "Different" : "None"}</span>`}</dd>
       <dt>Category</dt><dd>${places.length === 1 ? places[0] : html`<span class="muted">${plural(places.length, "place", "different places")}</span>`}</dd>
     </dl>
-    <${ActionRow} targets=${models} ctx=${ctx} idPrefix="picked" />
-    <div><button type="button" class="ghost" id="picked-clear" title="Clear selection (Esc)" onClick=${() => ui.set({ picked: [] })}>Clear selection</button></div>
     <ul class="insp-files">${models.map((m) => html`<li key=${m.id}><span>${m.name}</span><span class="muted">${placeText(overview, m)}</span></li>`)}</ul>
     <p class="muted insp-later">Ctrl or Cmd-click adds or removes one, Shift-click selects a run, Ctrl+A selects everything shown and Esc clears.</p>
   </aside>`;

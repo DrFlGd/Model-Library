@@ -19,8 +19,9 @@ function route() {
     location.replace(routeHash(current.route));
     return;
   }
-  // the model last selected stays selected if the new place shows it
-  ui.set((s) => ({ route: next, navOpen: false, mobilePanel: null, menu: null, picked: s.selection ? [s.selection] : [], anchor: s.selection }));
+  // a new place starts with nothing selected (the command bar shows the place);
+  // the model last clicked stays where the arrow keys start
+  ui.set((s) => ({ route: next, navOpen: false, mobilePanel: null, menu: null, picked: [], anchor: s.selection }));
 }
 
 async function start() {

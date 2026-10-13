@@ -1,10 +1,15 @@
 // Shared model-file selection. Keys: d:<folder>, f:<file>, z:<zip>!<entry>.
 import { createStore } from "../lib/store.js";
 export const fileSel = createStore({ src: null, shown: "d:", picked: [], anchor: null });
+// Showing a file or folder isn't selecting it (docs/PLAN.md, "Inspector rails
+// design"): opening a model shows its main file with nothing selected; a click
+// in a file list shows; the tick, Ctrl-click and Shift-click select.
 export function reset(src, shown = "d:") {
-  fileSel.set({ src, shown, picked: shown === "d:" ? [] : [shown], anchor: shown });
+  fileSel.set({ src, shown, picked: [], anchor: shown });
 }
 export function show(key) { fileSel.set({ shown: key }); }
+/** Show it and start a Shift-click run from it. */
+export function view(key) { fileSel.set({ shown: key, anchor: key }); }
 export function pick(key, how = "one", order = []) {
   const s = fileSel.get();
   let picked;
@@ -59,3 +64,9 @@ export function pickedFiles(keys = fileSel.get().picked) {
   return { files: [...new Set(files)], entries };
 }
 export function pickEvent(key, e, order) { pick(key, e.shiftKey ? "range" : e.ctrlKey || e.metaKey ? "toggle" : "one", order); }
+/** A click in a file list: Ctrl or Cmd-click adds or removes it, Shift-click
+ *  selects the run, a plain click shows it. */
+export function listClick(key, e, order) {
+  if (e.shiftKey || e.ctrlKey || e.metaKey) pickEvent(key, e, order);
+  else view(key);
+}

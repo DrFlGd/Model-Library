@@ -10,7 +10,8 @@ import { ui } from "./state.js";
 import { ctx, routeHash } from "./context.js";
 import { api, isDesktop, followJob, loadOverview, toast, undoable, undoChange } from "./library.js";
 import { size, ModelDetails } from "./details.js";
-import { PageHead } from "./layout.js";
+import { CommandBar } from "./layout.js";
+import { Inspector } from "./inspector.js";
 import { Icon } from "./icons.js";
 import { confirmDialog } from "./dialogs.js";
 import { MODEL_ACTIONS, menuItems, openMenu, usePageKeys, selectAllKey, runKey, letter } from "./actions.js";
@@ -132,12 +133,13 @@ export function DuplicatesPage() {
   const revealAside = () => ctx.platform.library.openPath(`${lib.path}/${aside.rel}`);
 
   const count = data?.found ? plural(groups.length, "model with copies", "models with copies") : null;
-  return html`<div class="browser dupes-layout" id="dupes-page">
+  const pickedModel = pickedHere ? groups.flatMap((g) => g.models).find((m) => m.id === pickedHere) : null;
+  return html`<${CommandBar} id="dupes-head" title="Duplicates" count=${count}
+      primary=${html`<button type="button" class=${data?.found ? "ghost" : "primary"} id="dupes-find" disabled=${busy} onClick=${find}>${Icon.search(15)} Look for duplicates</button>`}
+      selection=${pickedModel ? { count: `1 model selected: ${pickedModel.name}`, onClear: () => setPicked(null), items: menuItems(MODEL_ACTIONS, [pickedModel], CTX), buttons: 3 } : null} />
+  <div class="browser dupes-layout" id="dupes-page">
    <div class="pages dupes-page">
-    <${PageHead} title="Duplicates" count=${count}
-      sub="Models whose 3D, slicer and archive files are all the same as another model's, and files found in more than one model. Files are compared by what's in them, not by their names.">
-      <button type="button" class=${data?.found ? "ghost" : "primary"} id="dupes-find" disabled=${busy} onClick=${find}>${Icon.search(15)} Look for duplicates</button>
-    </${PageHead}>
+    <p class="page-lead">Models whose 3D, slicer and archive files are all the same as another model's, and files found in more than one model. Files are compared by what's in them, not by their names.</p>
     ${error ? html`<p class="warn-note" role="alert">${error}</p>` : null}
     ${job ? html`<div class="home-actions"><span class="dupes-progress" id="dupes-progress" role="status">${progressText(job.progress)}</span>
       <button type="button" class="ghost" id="dupes-stop" onClick=${stop}>Stop</button></div>` : null}
@@ -175,9 +177,9 @@ export function DuplicatesPage() {
     </section>` : null}
     ${data?.found && !groups.length && !shared.length ? html`<p class="muted" id="dupes-none">No duplicates.</p>` : null}
    </div>
-   <${ModelDetails} id=${pickedHere} ctx=${CTX} empty=${html`<div class="place-summary">
+   <${Inspector} page="dupes" open=${!matchMedia("(max-width: 1250px)").matches} tabs=${[{ id: "details", label: "Details", icon: "info", body: html`<${ModelDetails} id=${pickedHere} ctx=${CTX} empty=${html`<div class="place-summary">
      <h2 class="insp-title">Duplicates</h2>
      ${data?.found ? html`<p>${plural(groups.length, "model has", "models have")} copies${data.wasted ? `; about ${size(data.wasted)} could be saved` : ""}.</p>` : html`<p>Not looked yet.</p>`}
-     <p class="muted insp-later">Click a model to see its details and files here; double-click or Enter opens it.</p></div>`} />
+     <p class="muted insp-later">Click a model to see its details and files here; double-click or Enter opens it.</p></div>`} />` }]} />
   </div>`;
 }

@@ -123,12 +123,12 @@ try:
     shot("00-first-run")
     # the first start asks where the library goes: take the suggested folder
     d.execute_script("document.querySelector('#use-default').click()")
-    if not wait("document.querySelector('.home h1') && !document.querySelector('#first-run')", 30, "the home page"):
+    if not wait("document.querySelector('#home-head h1') && !document.querySelector('#first-run')", 30, "the home page"):
         raise SystemExit("the library wasn't made; skipping the rest")
     time.sleep(0.5)
     shot("00-home")
     report["platform"] = d.execute_script("return window.__modlib?.platform?.kind || ''")
-    report["title"] = d.execute_script("return document.querySelector('.home h1').textContent")
+    report["title"] = d.execute_script("return document.querySelector('#home-head h1').textContent")
     print("platform:", report["platform"], "| library:", report["title"], flush=True)
     if report["platform"] != "desktop":
         failures.append(f"platform: {report['platform']}")

@@ -1,11 +1,11 @@
-// Mounts the interface islands into the page: top bar buttons, sidebar, the
-// main view for the current route, and the status bar.
+// Mounts the interface islands into the page: the menu, the main view for the
+// current route (each page starts with its command bar), and the status bar.
 import { html, render } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui, initState } from "./state.js";
 import { setContext, ctx } from "./context.js";
 import { Sidebar } from "./sidebar.js";
-import { TopButtons, StatusBar } from "./chrome.js";
+import { StatusBar } from "./chrome.js";
 import { Home } from "./home.js";
 import { Browser } from "./browser.js";
 import { Dialogs } from "./dialogs.js";
@@ -37,7 +37,6 @@ export function mountShell(context) {
   const info = context.platform.info || {};
   ui.set({ library: info.library || null, libraryError: info.library_error || null, recent: info.recent_libraries || [], firstRun: !!info.first_run });
   const mount = (id, C) => { const el = document.getElementById(id); if (el) render(html`<${C} />`, el); };
-  mount("topbuttons", TopButtons);
   mount("sidebar-root", Sidebar);
   mount("main-root", Main);
   mount("statusbar", StatusBar);
