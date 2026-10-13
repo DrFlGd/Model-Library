@@ -2297,6 +2297,59 @@ async def group4(pg):
     after = {str(p.relative_to(kit)): p.read_bytes() for p in kit.rglob("*") if p.is_file() and "_thumbs" not in p.parts}
     check("Undo takes the files back out of the ZIP", after == before and not dest.exists(), sorted(set(before) ^ set(after)))
 
+    # the review of 0.5.17 (docs/PLAN.md, "0.5.18"): what's inside archives counts
+    photo = solid_png((200, 40, 40))
+    with zipfile.ZipFile(kit / "Kinds.zip", "w") as z:
+        z.writestr("Resin/arm.stl", cube(5))
+        z.writestr("FDM/arm.stl", cube(5))
+        z.writestr("Renders/photo.png", photo)
+        z.writestr("find-me.txt", "here")
+    put(kit / "crypted.rar", (fx / "crypted.rar").read_bytes())
+    await api(pg, "library_scan", {"full": True})
+    await pg.goto(B + "#/settings")
+    await pg.goto(B + "#/model/archive-kit")
+    await pg.wait_for_selector('#model-page[data-model="archive-kit"]')
+    await pg.wait_for_selector('#variants button:text-is("Resin")', timeout=30000)
+    variants = await pg.eval_on_selector_all("#variants button", "els => els.map(e => e.textContent)")
+    check("variant folders inside archives are listed as variants", "Resin" in variants and "FDM" in variants, variants)
+    await pg.click('#variants button:text-is("All")')
+
+    # locked archives are marked, with Enter password… in their menu
+    await pg.wait_for_selector('#file-panel [data-file="crypted.rar"] .tree-lock', timeout=30000)
+    marked = await pg.eval_on_selector_all("#file-panel .tree-lock", "els => els.map(e => e.closest('[data-file]').dataset.file).sort()")
+    await pg.click('#file-panel [data-file="crypted.rar"]', button="right")
+    await pg.wait_for_selector("#context-menu")
+    items = await pg.eval_on_selector_all("#context-menu [data-action]", "els => els.map(e => e.dataset.action)")
+    await pg.keyboard.press("Escape")
+    check("archives that need a password have a lock mark and Enter password… in their menu",
+          marked == ["crypted.rar", "locked.7z"] and "password" in items, (marked, items))
+
+    # the files search looks inside archives, unfolding the one with a match
+    await pg.fill("#file-panel .parts-filter", "photo")
+    await pg.wait_for_selector('#file-panel [data-entry="Renders/photo.png"]', timeout=30000)
+    other = await pg.locator('#file-panel [data-entry="find-me.txt"]').count()
+    await pg.fill("#file-panel .parts-filter", "")
+    check("searching the files finds a file inside an archive and shows only the matches", other == 0, other)
+
+    # Media lists pictures inside archives, and one can be the cover
+    await open_tab(pg, "media")
+    await pg.wait_for_selector('#media-archives [data-key="z:Kinds.zip!Renders/photo.png"]', timeout=30000)
+    await pg.click('#media-archives [data-key="z:Kinds.zip!Renders/photo.png"]', button="right")
+    await pg.click('#context-menu [data-action="cover"]')
+    await pg.wait_for_function("() => document.querySelector('#toast')?.textContent.includes('cover')")
+    cover = kit / "_media/cover.png"
+    check("Media lists the pictures inside archives, and one can be the model's cover",
+          await wait_for(lambda: cover.is_file() and cover.read_bytes() == photo, 10), sorted(x.name for x in (kit / "_media").glob("*")) if (kit / "_media").is_dir() else None)
+
+    # Settings › Library › Opened archives, with Empty
+    await pg.goto(B + "#/settings")
+    await pg.wait_for_selector("#archive-cache-size")
+    held = await pg.inner_text("#archive-cache-size")
+    await pg.click("#archive-cache-empty")
+    await pg.wait_for_function("() => document.querySelector('#archive-cache-size')?.textContent === 'Empty'", timeout=30000)
+    left = [d for d in (home / "data/archive-cache").glob("*") if (d / "done").is_file()]
+    check("Settings shows the opened archives' size and Empty clears them", held != "Empty" and not left, (held, left))
+
 
 async def group3(pg):
     """Group 3 (docs/PLAN.md, "Group 3 design"): gray by default, a 3MF's own colours
