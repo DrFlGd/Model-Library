@@ -63,11 +63,15 @@ The sandbox has a network allowlist and is reset between sessions.
 
 ### Next (roadmap)
 
-Jerred's second round of requirements (R1–R17, `docs/PLAN.md`, "Requirements round 2") is being built in the agreed order of groups; groups 1 and 2 are built and both UI reviews' items fixed; group 3 (gray default render, 3MF colours and thumbnails) is next, then skins for R16 (the owner picked Drafting Sheet as the default look and wants Parts Bin and Layer Line as selectable skins too; the style study's source is in the project files, style-study/), and a UI review follows each group. Before that: the UI pass in `docs/PLAN.md` ("UI pass design") is done: actions (0.5.1), undo and asking (0.5.2) and one layout (0.5.3). The model file workspace followed (0.5.5), then six parallel packages A–F (0.5.6, PRs #3–#8 merged in #9). Phase 6 (Docker with sign-in) is on hold until the owner says the UI is ready; ask before starting it.
+Jerred's second round of requirements (R1–R17, `docs/PLAN.md`, "Requirements round 2") is being built in the agreed order of groups; groups 1 and 2 are built and both UI reviews' items fixed; Jerred's notes of 13 October (`docs/PLAN.md`, "Notes of 13 October": selection actions out of their own bar, a tabbed or otherwise more consistent layout from mock-ups, the same top bar on every page) wait on his pick of a mock-up; group 3 (gray default render, 3MF colours and thumbnails) is next, then skins for R16 (the owner picked Drafting Sheet as the default look and wants Parts Bin and Layer Line as selectable skins too; the style study's source is in the project files, style-study/), and a UI review follows each group. Before that: the UI pass in `docs/PLAN.md` ("UI pass design") is done: actions (0.5.1), undo and asking (0.5.2) and one layout (0.5.3). The model file workspace followed (0.5.5), then six parallel packages A–F (0.5.6, PRs #3–#8 merged in #9). Phase 6 (Docker with sign-in) is on hold until the owner says the UI is ready; ask before starting it.
 
 ---
 
 ## Unreleased
+
+- **Compress to ZIP puts the model's files at the root of the ZIP.** Before, the ZIP also held a `_model-library` folder with a list of its files; now it holds only your files, as they were laid out in the model. The ZIP goes in the model's own folder, beside its `model.json` and previews (which stay outside the ZIP, as before). ZIPs made by earlier versions still extract the same way.
+
+## 0.5.12 (2026-10-12)
 
 Fixes from the second UI review of 0.5.11 (Requirements round 2, R17; all 23 items, design in docs/PLAN.md, "UI review 2 (0.5.12)").
 
