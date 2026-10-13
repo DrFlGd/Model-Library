@@ -1146,10 +1146,14 @@ impl App {
                 j(lib.info())
             }
             "library_previews" => {
-                // how previews are drawn; the page then makes them again (thumbs_make)
+                // how previews are drawn; the page then offers to make them again (thumbs_make)
                 let lib = self.library()?;
-                lib.set_previews(args["colour"].as_str(), args["pictures"].as_bool() != Some(false))
-                    .map_err(e2s)?;
+                lib.set_previews(
+                    args["colour"].as_str(),
+                    args["pictures"].as_bool() != Some(false),
+                    args["file_colours"].as_bool() == Some(true),
+                )
+                .map_err(e2s)?;
                 j(lib.info())
             }
             "library_variants" => {
@@ -2050,6 +2054,12 @@ impl App {
                                     patch[k] = edit[k].clone();
                                 }
                             }
+                            // the colour 3D files are drawn in: "none" takes theirs away
+                            match edit["render_colour"].as_str().map(str::trim) {
+                                Some("none") => patch["render_colour"] = json!(""),
+                                Some(c) if !c.is_empty() => patch["render_colour"] = json!(c),
+                                _ => {}
+                            }
                             if let Some(f) = edit["fields"].as_object().filter(|f| !f.is_empty()) {
                                 patch["fields"] = Value::Object(f.clone());
                             }
@@ -2725,6 +2735,24 @@ mod tests {
         )
         .await;
         assert_eq!(q["total"], 0);
+        // a colour for all of them, then none
+        let colour_of = |app: &Arc<App>, ids: &[Value]| {
+            let (app, ids) = (app.clone(), ids.to_vec());
+            async move {
+                let mut out = vec![];
+                for id in ids {
+                    let m = call(&app, "model_get", json!({ "id": id })).await;
+                    out.push(m["details"]["render_colour"].clone());
+                }
+                out
+            }
+        };
+        let r = call(&app, "models_update", json!({ "ids": ids, "patch": { "render_colour": "#C8352B" } })).await;
+        let ids: Vec<Value> = ids.iter().map(|i| r["ids"][i.as_str().unwrap()].clone()).collect();
+        assert_eq!(colour_of(&app, &ids).await, vec![json!("#c8352b"); 2], "{r}");
+        let r = call(&app, "models_update", json!({ "ids": ids, "patch": { "render_colour": "none" } })).await;
+        let ids: Vec<Value> = ids.iter().map(|i| r["ids"][i.as_str().unwrap()].clone()).collect();
+        assert_eq!(colour_of(&app, &ids).await, vec![Value::Null; 2], "{r}");
         let _ = std::fs::remove_dir_all(&home);
     }
 

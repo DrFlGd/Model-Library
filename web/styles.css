@@ -1218,3 +1218,17 @@ input:invalid { border-color: var(--danger); }
 .colour-select { display: inline-flex; align-items: center; gap: 0; }
 .colour-select select { width: auto; }
 #settings-previews .field-row > span:first-child { min-width: 60px; }
+/* 0.5.17: swatch rows in menus and the colour dialog */
+.menu-swatches { display: flex; flex-wrap: nowrap; gap: 4px; padding: 2px 8px 4px; }
+.menu-item.menu-swatch { width: 28px; height: 28px; padding: 0; justify-content: center; border: 1px solid transparent; }
+.menu-swatch .swatch, .colour-swatches .swatch { width: 18px; height: 18px; margin: 0; vertical-align: 0; }
+.menu-swatch[aria-checked="true"], .colour-swatches button[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 2px var(--white); }
+.colour-swatches { display: grid; grid-template-columns: repeat(8, 32px); gap: 6px; }
+.colour-swatches button { width: 32px; height: 32px; padding: 0; justify-content: center; border: 1px solid var(--steel-2); border-radius: var(--radius-s); background: var(--white); }
+.colour-mine { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.colour-mine input[type="color"] { width: 44px; height: 34px; padding: 2px; border: 1px solid var(--steel-2); border-radius: var(--radius-s); background: var(--white); }
+.colour-mine input[type="text"] { width: 9em; font-family: var(--mono, monospace); }
+.colour-sample { width: 34px; height: 34px; border-radius: var(--radius-s); border: 1px solid #0003; }
+.field-row .colour-select select, .field-row select.compact { width: auto; min-width: 12em; }
+.field-block select.compact { width: auto; min-width: 14em; align-self: flex-start; justify-self: start; }
+#settings-previews .field-row > span:first-child, #settings-view-colour .field-row > span:first-child { min-width: 110px; }

@@ -204,9 +204,17 @@ export async function setVariantFolders(names) {
 /** How the library's previews are drawn (docs/PLAN.md, "Group 3 design"):
  *  `colour` ("#rrggbb", null: gray) and whether a 3MF's own picture is used;
  *  then every preview is made again, as a job with Stop. */
-export async function setPreviews(colour, pictures) {
-  await api("library_previews", { colour, pictures });
+/** Save how the library's previews are drawn (`look`: colour, pictures,
+ *  file_colours). The cards redraw as they come into view; the pictures kept in
+ *  the model folders are drawn again by `remakePreviews`. */
+export async function setPreviews(look) {
+  await api("library_previews", look);
   await refreshLibrary();
+  await loadOverview();
+}
+
+/** Draw every preview kept in the library again, as a job with Stop. */
+export async function remakePreviews() {
   const { job } = await api("thumbs_make", { force: true });
   const done = await followJob(job, "Making previews again");
   await loadOverview();

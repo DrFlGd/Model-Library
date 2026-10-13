@@ -3,7 +3,7 @@
 // and videos, and its files as folders, one list, by type or as a grid, with a
 // switch between variant folders), in the command bar, the Files pane and the
 // inspector's Details and Media (docs/PLAN.md, "Inspector rails design").
-import { html, useState, useEffect, useLayoutEffect } from "../lib/html.js";
+import { html, useState, useEffect, useLayoutEffect, useRef } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui, setPref } from "./state.js";
 import { routeHash, schemaScope } from "./context.js";
@@ -17,12 +17,14 @@ import { useFileSelection, fileActions, installExtractKeys } from "./extract.js"
 import { MODEL_ACTIONS, menuItems, usePageKeys, runKey, letter, editDetails, writable, typing } from "./actions.js";
 import { CommandBar } from "./layout.js";
 import { size } from "./details.js";
-import { Inspector } from "./inspector.js";
+import { Inspector, useWidth } from "./inspector.js";
 import { Icon } from "./icons.js";
 
 const CTX = { page: "model" };
 
 const MEDIA = new Set(["image", "doc", "video"]);
+/** The least room the 3D view gets beside the panels, and a folded panel's rail. */
+const STAGE = 440, RAIL = 36;
 
 export function ModelPage({ id }) {
   const s = useStore(ui, (st) => ({ rev: st.catalogRev, favs: st.favs, overview: st.overview, readOnly: !!st.library?.read_only, names: st.library?.variant_folders || [] }));
@@ -95,8 +97,19 @@ function ModelWorkspace({ model, names, narrow, onModelChange }) {
   const variants = variantsIn(model.files_list, names);
   const chosen = variant === undefined ? variants[0] || null : variant;
   const files = model.files_list.filter((f) => inVariant(f.rel, chosen, names));
-  const open = narrow ? prefs.mobilePanel === "files" : prefs.filePanelOpen !== false;
-  const toggle = () => narrow ? ui.set({ mobilePanel: open ? null : "files", navOpen: false }) : setPref({ filePanelOpen: !open });
+  // The 3D view keeps at least STAGE px: when the window can't fit it beside the
+  // panels, the inspector folds first, then the files panel; opening one then
+  // isn't kept, and they come back when the window grows.
+  const box = useRef(null);
+  const room = useWidth(box);
+  const fileW = Math.max(220, Math.min(480, prefs.filePanelWidth || 300));
+  const paneW = Math.max(260, Math.min(520, prefs.inspectorWidth || 340));
+  const filesFit = !room || room - fileW - RAIL >= STAGE;
+  const [crowdOpen, setCrowdOpen] = useState(false);
+  useLayoutEffect(() => setCrowdOpen(false), [filesFit]);
+  const open = narrow ? prefs.mobilePanel === "files" : filesFit ? prefs.filePanelOpen !== false : crowdOpen;
+  const paneFits = !room || room - (open ? fileW : RAIL) - paneW - RAIL >= STAGE;
+  const toggle = () => narrow ? ui.set({ mobilePanel: open ? null : "files", navOpen: false }) : filesFit ? setPref({ filePanelOpen: !open }) : setCrowdOpen(!open);
   useLayoutEffect(() => {
     setVariant(undefined); ui.set({ mobilePanel: null });
     const main = model.main;
@@ -122,15 +135,15 @@ function ModelWorkspace({ model, names, narrow, onModelChange }) {
   });
   const contextActions = () => fileActions(src, model);
   const media = (model.files_list || []).filter((f) => MEDIA.has(f.kind));
-  return html`<div class="model-workspace">
+  return html`<div class="model-workspace" ref=${box}>
     ${narrow && open ? html`<button type="button" class="file-panel-shade" aria-label="Close panel" onClick=${() => ui.set({ mobilePanel: null })}></button>` : null}
     <${FilePanel} src=${src} model=${model} files=${files} variants=${variants} variant=${chosen} setVariant=${setVariant} open=${open} toggle=${toggle} narrow=${narrow} contextActions=${contextActions} />
     <section class="workspace-viewing-area"><${WorkspaceStage} src=${src} model=${model} files=${files} contextActions=${contextActions} />
       ${model.details?.notes ? html`<details class="workspace-notes"><summary>Notes</summary><p>${model.details.notes}</p></details>` : null}
     </section>
-    <${Inspector} page="model" open=${false} tabs=${[
+    <${Inspector} page="model" open=${false} crowded=${!narrow && !paneFits} tabs=${[
       { id: "details", label: "Details", icon: "info", body: html`<div id="workspace-details-panel"><${WorkspaceDetails} model=${model} onModelChange=${onModelChange} /></div>` },
-      { id: "media", label: "Media", icon: "image", body: media.length
+      { id: "media", label: "Media", icon: "image", empty: !media.length, body: media.length
         ? html`<div class="media-list" id="media-list"><${SelectionRows} src=${src} files=${media} name=${model.name} view="all" contextActions=${contextActions} /></div>`
         : html`<p class="muted" id="media-list">No pictures, documents, readmes or videos in this model.</p>` },
     ]} />

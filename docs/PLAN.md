@@ -754,3 +754,19 @@ The mesh goes to the viewer as binary STL, as now; when the 3MF has colours it c
 **R11. A 3MF's own picture.** When a model's main file is a 3MF with a picture inside (the package's thumbnail relationship, else `Metadata/thumbnail.png`, then Bambu and Orca's `Metadata/plate_1.png` and `Metadata/top_1.png`), that PNG becomes the model's preview instead of a drawing, and so does a 3MF's tile in the parts grid. Only PNGs are used; anything else is drawn as before.
 
 The viewer's bar also says where the colour comes from when it isn't this computer's ("the file's colours" or "this model's colour").
+
+### 0.5.17: fixes from the review of 0.5.16
+
+Jerred chose all 11 items of the third UI review (https://claude.ai/artifact/LM7XCSyFMKrHVzvFAzg3RJ).
+
+1. **The 3D view keeps its room.** The model page measures its workspace. The 3D view keeps at least 440 px. When it can't have that beside the panels, the inspector folds to its rail first, then the files panel. Opening one while it's crowded isn't kept, and both come back when the window grows (`STAGE` in modelpage.js, `crowded` on the Inspector).
+2. **The whole model is in view.** 3/4, Top and Front fit the model to the tighter of the view's height and width (viewer.js `view()`).
+3. **The app's own colour dialog.** Other colour… opens a dialog with sixteen swatches (the usual eight, plus silver, bone, gold, brown, purple, pink, teal and navy), the system colour picker as a plain box, and a box for a code such as #3a9a4a. The value is read when you press Use this colour, so no guessing at cancellation is involved. Settings' colour boxes use it too (`ColourSelect`, `pickColour` in colours.js).
+4. **Colour ▾ has two parts.** "On this computer" has Same as the previews, a row of swatches and Other colour…. "For this model (saved with it)" has None, a row of swatches and Other colour…. Each part ticks its own setting. The file's colours stay at the top.
+5. **A model's colour in its details.** Edit details (one model) and the model page's Details panel have a **3D colour** box, with None. Edit details for several models has one too, with "Leave as it is" (`render_colour` in `models_update`, where "none" removes it). The library's Details panel lists it with a swatch. A change draws the model's stored preview again.
+6. **Two named settings, linked.** Library › Previews has **Preview colour**. Appearance › 3D view has **3D view colour**, which starts as **Same as the previews**. The viewer uses this computer's choice if there is one, else the library's preview colour, else gray.
+7. **View actions in ⋯.** The bar under the 3D view keeps 3/4, Top, Front and Colour ▾. Show edges and Use this view as the cover are in its ⋯ button and in a right-click on the view.
+8. **Settings boxes.** The Theme box is compact like the colour boxes.
+9. **No empty Media tab by itself.** An inspector tab marked `empty` isn't opened from the remembered choice. The first tab with something in it opens instead, unless you pick the empty one.
+10. **Drawing previews again is asked.** Changing a Previews setting saves it, and the cards show it as they come into view (their pictures are cached on this computer by look). A dialog then offers to draw the previews kept in the model folders again now, with the number of models, as a job with Stop. Not now leaves them until a model's preview is made again.
+11. **Previews in a 3MF's own colours.** Library › Previews has **Draw a 3MF file in its own colours when it has some** (`preview_file_colours` in library.json, off by default). The renderer colours each triangle the way the viewer does: the file's colour where it has one, else the preview or model colour. A 3MF's saved picture still comes first when pictures are on.

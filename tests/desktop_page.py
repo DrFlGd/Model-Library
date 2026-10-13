@@ -586,7 +586,8 @@ async def phase3(pg):
     check("a ZIP's parts are listed and shown without unzipping", entries == ["Extras/shield.stl"] and (dest / "extras.zip").is_file(), entries)
 
     # 22. "Use as cover" from the 3D view, the readme, the picture
-    await pg.click("#view-cover")
+    await pg.click("#viewer-more")
+    await pg.click('#context-menu [data-action="view-cover"]')
     await pg.wait_for_function("() => document.querySelector('.toast')?.textContent.includes('cover')")
     side = json.loads((dest / "model.json").read_text())
     snap = (dest / "_media/cover.png").read_bytes()[:4] == b"\x89PNG" if (dest / "_media/cover.png").exists() else False
@@ -2168,21 +2169,23 @@ async def group3(pg):
     btn = pg.locator("#viewer-colour")
     first = (await btn.get_attribute("data-colour"), await btn.get_attribute("data-source"))
     await btn.click()
-    offered = await labels_of(pg, "#context-menu .menu-item")
+    heads = await labels_of(pg, "#context-menu .menu-head")
+    offered = await pg.eval_on_selector_all("#context-menu [data-action]", "els => els.map(e => e.dataset.action)")
     await pg.click('#context-menu [data-action="colour-file"]')
     await pg.wait_for_function("() => /the file's colours/.test(document.querySelector('#viewer-size').textContent)")
     shown = await btn.get_attribute("data-source")
     await pg.wait_for_timeout(500)  # preferences are saved after a short pause
     kept = json.loads((home / "config/prefs.json").read_text()).get("ml-ui", {}).get("fileColours")
     await pg.screenshot(path=str(out / "group3-file-colours.png"))
-    check("3D files are drawn gray, and a 3MF's own colours are shown on request",
-          first == ("#a3a9ae", "computer") and any("The file's colours" in x for x in offered) and any("Use this colour for this model" in x for x in offered)
-          and shown == "file" and kept is True, (first, offered, shown, kept))
+    check("3D files are drawn gray, and a 3MF's own colours are shown on request; the menu has a part for this computer and one for the model",
+          first == ("#a3a9ae", "computer") and "colour-file" in offered and "colour-red" in offered and "model-colour-red" in offered
+          and "model-colour-none" in offered and any(h.startswith("On this computer") for h in heads) and any(h.startswith("For this model") for h in heads)
+          and shown == "file" and kept is True, (first, heads, offered, shown, kept))
     await btn.click()
     await pg.click('#context-menu [data-action="colour-file"]')
     await pg.wait_for_function("() => document.querySelector('#viewer-colour')?.dataset.source === 'computer'")
 
-    # R10. this computer's colour, from the menu; Settings shows the same
+    # R10. this computer's colour, from the menu; Settings shows the same; "Same as the previews"
     await btn.click()
     await pg.click('#context-menu [data-action="colour-blue"]')
     await pg.wait_for_function("() => document.querySelector('#viewer-colour')?.dataset.colour === '#2f6fd0'")
@@ -2191,66 +2194,186 @@ async def group3(pg):
     await pg.goto(B + "#/settings")
     await pg.wait_for_selector("#view-colour")
     in_settings = await pg.input_value("#view-colour")
-    await pg.select_option("#view-colour", "#a3a9ae")
+    await pg.select_option("#view-colour", "none")
     await pg.wait_for_timeout(500)
     back = json.loads((home / "config/prefs.json").read_text()).get("ml-ui", {}).get("viewColour")
-    check("this computer's 3D colour is chosen in the viewer or Settings, and gray again is the default",
+    check("this computer's 3D colour is chosen in the viewer or Settings, and by default it's the previews' colour",
           mine == "#2f6fd0" and in_settings == "#2f6fd0" and back is None, (mine, in_settings, back))
 
-    # R10. a model's own colour: saved in its model.json, its preview drawn in it, Undo
+    # review 3, item 3. Other colour… is the app's own colour dialog: a code typed in
     await pg.goto(B + f"#/model/{cid}")
     await pg.wait_for_selector("#viewer-size", timeout=30000)
     await btn.click()
-    await pg.click('#context-menu [data-action="colour-model"]')
-    await pg.wait_for_function("() => document.querySelector('#viewer-colour')?.dataset.source === 'model'")
+    await pg.click('#context-menu [data-action="colour-other"]')
+    await pg.wait_for_selector("#colour-dialog")
+    swatches = await pg.locator("#colour-dialog .colour-swatches button").count()
+    await pg.fill("#colour-code", "#3A9A4A")
+    sample = await pg.evaluate("() => getComputedStyle(document.querySelector('#colour-sample')).backgroundColor")
+    await pg.click("#colour-dialog button[type=submit]")
+    await pg.wait_for_function("() => document.querySelector('#viewer-colour')?.dataset.colour === '#3a9a4a'")
     await btn.click()
-    await pg.click('#context-menu [data-action="colour-red"]')
+    await pg.click('#context-menu [data-action="colour-other"]')
+    await pg.wait_for_selector("#colour-dialog")
+    await pg.keyboard.press("Escape")
+    await pg.wait_for_selector("#colour-dialog", state="detached")
+    still = await btn.get_attribute("data-colour")
+    await btn.click()
+    await pg.click('#context-menu [data-action="colour-previews"]')
+    await pg.wait_for_function("() => document.querySelector('#viewer-colour')?.dataset.colour === '#a3a9ae'")
+    check("Other colour… opens the app's colour dialog, takes a typed code, and Esc changes nothing",
+          swatches == 16 and sample == "rgb(58, 154, 74)" and still == "#3a9a4a", (swatches, sample, still))
+
+    # R10. a model's own colour from the menu's model part: saved in its model.json, its preview drawn in it, Undo
+    await btn.click()
+    await pg.click('#context-menu [data-action="model-colour-red"]')
     said = await toast_text(pg, "drawn in red")
     sidecar = lambda: json.loads((cubes / "model.json").read_text()) if (cubes / "model.json").is_file() else {}
     saved = await wait_for(lambda: sidecar().get("render_colour") == "#c8352b")
+    await pg.wait_for_function("() => document.querySelector('#viewer-colour')?.dataset.source === 'model'")
     redrawn = await wait_for(lambda: reddish(tint(cube_png)))
     on_page = await btn.get_attribute("data-colour")
     await pg.screenshot(path=str(out / "group3-model-colour.png"))
     check("a model can have a colour of its own: kept in its model.json, with its preview drawn in it",
           saved and redrawn and on_page == "#c8352b" and "red" in said, (sidecar().get("render_colour"), tint(cube_png), on_page, said))
+    await btn.click()
+    await pg.click('#context-menu [data-action="model-colour-blue"]')
+    await toast_text(pg, "drawn in blue")
+    await wait_for(lambda: sidecar().get("render_colour") == "#2f6fd0")
     await pg.click(".toast button:has-text('Undo')")
     await toast_text(pg, "^Undone")
-    undone = await wait_for(lambda: sidecar().get("render_colour") == "#a3a9ae")
+    undone = await wait_for(lambda: sidecar().get("render_colour") == "#c8352b")
     q = await api(pg, "models_query", {"scope": "unsorted", "q": "Colour cubes"})
     cid = q["items"][0]["id"]
     await pg.goto(B + f"#/model/{cid}")
     await pg.wait_for_selector("#viewer-size", timeout=30000)
     await btn.click()
-    await pg.click('#context-menu [data-action="colour-model-off"]')
+    await pg.click('#context-menu [data-action="model-colour-none"]')
     await pg.wait_for_function("() => document.querySelector('#viewer-colour')?.dataset.source === 'computer'")
     cleared = await wait_for(lambda: not sidecar().get("render_colour"))
     regray = await wait_for(lambda: grayish(tint(cube_png)))
-    check("Undo puts the model's colour back, and it can stop using one", undone and cleared and regray, (sidecar().get("render_colour"), tint(cube_png)))
+    check("Undo puts the model's colour back, and None takes it away", undone and cleared and regray, (sidecar().get("render_colour"), tint(cube_png)))
 
-    # R10, R11. the library's previews: their colour, and whether 3MF pictures are used
+    # review 3, item 5. the colour in Edit details (one model, then several) and in the Details panel
+    await open_tab(pg, "details")
+    await pg.wait_for_selector("#workspace-edit-colour")
+    await pg.select_option("#workspace-edit-colour", "#2f6fd0")
+    in_panel = await wait_for(lambda: sidecar().get("render_colour") == "#2f6fd0")
+    await pg.wait_for_function("() => document.querySelector('#viewer-colour')?.dataset.colour === '#2f6fd0'")
+    await pg.goto(B + "#/browse/unsorted")
+    await pg.wait_for_selector(".card:has(.card-name:text-is('Colour cubes'))")
+    await pg.click(".card:has(.card-name:text-is('Colour cubes'))")
+    await pg.click(".card:has(.card-name:text-is('Picture box'))", modifiers=["Control"])
+    await bar_action(pg, "edit")
+    await pg.wait_for_selector("#bulk-dialog #bulk-colour")
+    kept_first = await pg.input_value("#bulk-colour")
+    await pg.select_option("#bulk-colour", "#e8781e")
+    await pg.click("#bulk-dialog button[type=submit]")
+    await pg.wait_for_selector("#bulk-dialog", state="detached")
+    both = await wait_for(lambda: sidecar().get("render_colour") == "#e8781e" and json.loads((boxed / "model.json").read_text()).get("render_colour") == "#e8781e")
+    await clear_selection(pg)
+    await pg.click(".card:has(.card-name:text-is('Colour cubes'))")
+    await open_tab(pg, "details")
+    listed = await pg.inner_text("#details-colour") if await pg.locator("#details-colour").count() else ""
+    check("a model's 3D colour is in its Details and in Edit details, for one model or several",
+          in_panel and kept_first == "keep" and both and "Orange" in listed, (sidecar().get("render_colour"), kept_first, listed))
+    await clear_selection(pg)
+    for d in (cubes, boxed):
+        side = json.loads((d / "model.json").read_text())
+        side.pop("render_colour", None)
+        (d / "model.json").write_text(json.dumps(side))
+    await api(pg, "library_scan", {"full": False})
+    await remake_previews(pg, *[m["id"] for m in (await api(pg, "models_query", {"scope": "unsorted", "limit": 2000}))["items"] if m["rel"] in ("Unsorted/Colour cubes", "Unsorted/Picture box")])
+
+    # R10, R11. the library's previews: their colour, 3MF pictures, 3MF colours; drawing them again is offered
     await pg.goto(B + "#/settings")
     await pg.wait_for_selector("#settings-previews")
     await pg.select_option("#preview-colour", "#2f6fd0")
-    await toast_text(pg, "Made \\d+ previews? again", timeout=120000)
+    await pg.wait_for_selector("#ask-dialog")
+    asked = await pg.inner_text("#ask-dialog")
+    await pg.click("#ask-dialog-cancel")
+    await pg.wait_for_selector("#ask-dialog", state="detached")
+    untouched = grayish(tint(cube_png))
     stored = json.loads((library / "_library/library.json").read_text()).get("preview_colour")
+    view_follows = await pg.evaluate("async () => (await import('./ui/colours.js')).viewColour()")
+    await pg.click("#preview-file-colours")
+    await pg.wait_for_selector("#ask-dialog")
+    await pg.click("#ask-dialog button[type=submit]")
+    await toast_text(pg, "Made \\d+ previews? again", timeout=120000)
+    _, _, rows = png_rgba(cube_png.read_bytes())
+    px = [p for r in rows for p in r if p[3] > 200]
+    two = any(reddish(p) for p in px) and any(bluish(p) for p in px)
+    await pg.click("#preview-file-colours")
+    await pg.wait_for_selector("#ask-dialog")
+    await pg.click("#ask-dialog button[type=submit]")
+    await toast_text(pg, "Made \\d+ previews? again", timeout=120000)
     blue = tint(cube_png)
     await pg.click("#use-3mf-pictures")
-    await toast_text(pg, "drawn like the others", timeout=120000)
+    await pg.wait_for_selector("#ask-dialog")
+    await pg.click("#ask-dialog button[type=submit]")
+    await toast_text(pg, "Made \\d+ previews? again", timeout=120000)
     drawn = box_png.read_bytes() != magenta and bluish(tint(box_png))
     await pg.click("#use-3mf-pictures")
-    await toast_text(pg, "own pictures are used", timeout=120000)
+    await pg.wait_for_selector("#ask-dialog")
+    await pg.click("#ask-dialog button[type=submit]")
+    await toast_text(pg, "Made \\d+ previews? again", timeout=120000)
     pictured = box_png.read_bytes() == magenta
     await pg.select_option("#preview-colour", "#a3a9ae")
-    await toast_text(pg, "drawn in gray", timeout=120000)
+    await pg.wait_for_selector("#ask-dialog")
+    await pg.click("#ask-dialog button[type=submit]")
+    await toast_text(pg, "Made \\d+ previews? again", timeout=120000)
     meta = json.loads((library / "_library/library.json").read_text())
+    theme_w = await pg.evaluate("() => document.querySelector('#theme-select').getBoundingClientRect().width")
+    page_w = await pg.evaluate("() => document.querySelector('#settings-view-colour').getBoundingClientRect().width")
     await pg.screenshot(path=str(out / "group3-settings.png"))
-    check("the library's previews can be drawn in another colour, and 3MF pictures turned off and on",
-          stored == "#2f6fd0" and bluish(blue) and drawn and pictured and meta.get("preview_colour") is None
-          and meta.get("use_3mf_pictures") is True and grayish(tint(cube_png)), (stored, blue, drawn, pictured, meta.get("preview_colour"), tint(cube_png)))
+    check("the library's previews can be drawn in another colour, in 3MF colours, and 3MF pictures turned off and on; drawing them again is asked first",
+          "Draw them now" in asked and untouched and stored == "#2f6fd0" and view_follows == "#2f6fd0" and two and bluish(blue) and drawn and pictured
+          and meta.get("preview_colour") is None and meta.get("use_3mf_pictures") is True and meta.get("preview_file_colours") is False
+          and grayish(tint(cube_png)) and theme_w < page_w / 2, (asked[:60], untouched, stored, view_follows, two, blue, drawn, pictured, meta.get("preview_colour"), tint(cube_png), theme_w, page_w))
+
+    # review 3, items 1, 2, 7, 9. the model page in a 1000 px window: the 3D view keeps its room,
+    # the whole model is in view, Edges and the cover are in ⋯, an empty Media tab isn't opened
+    q = await api(pg, "models_query", {"scope": "unsorted", "q": "Colour cubes"})
+    cid = q["items"][0]["id"]
+    await pg.goto(B + f"#/model/{cid}")
+    await pg.wait_for_selector("#viewer-size", timeout=30000)
+    await pg.click("#rail-media")
+    await pg.wait_for_selector("#pane-media")
+    await pg.goto(B + "#/browse/unsorted")
+    await pg.goto(B + f"#/model/{cid}")
+    await pg.wait_for_selector("#viewer-size", timeout=30000)
+    tab = await pg.evaluate("() => document.querySelector('#inspector')?.dataset.tab || null")
+    await pg.set_viewport_size({"width": 1000, "height": 800})
+    await pg.wait_for_timeout(400)
+    stage_w = await pg.evaluate("() => document.querySelector('.stage-canvas').getBoundingClientRect().width")
+    folded = await pg.locator("#inspector .inspector-pane").count() == 0
+    bar_h = await pg.evaluate("() => document.querySelector('.stage-tools').getBoundingClientRect().height")
+    await pg.click("#viewer-more")
+    more = await pg.eval_on_selector_all("#context-menu [data-action]", "els => els.map(e => e.dataset.action)")
+    await pg.keyboard.press("Escape")
+    await pg.click("#viewer-canvas", button="right")
+    right = await pg.eval_on_selector_all("#context-menu [data-action]", "els => els.map(e => e.dataset.action)")
+    await pg.keyboard.press("Escape")
+    # the whole model is in view: in a tall, narrow view no pixel of the (red and blue) cubes touches its sides
+    await pg.set_viewport_size({"width": 1000, "height": 1200})
+    await pg.wait_for_timeout(600)
+    await btn.click()
+    await pg.click('#context-menu [data-action="colour-file"]')
+    await pg.click(".stage-tools button:text-is('3/4')")
+    await pg.wait_for_timeout(600)
+    w, h, rows = png_rgba(await pg.locator("#viewer-canvas").screenshot())
+    hit = lambda x: sum(1 for y in range(h) if reddish(rows[y][x]) or bluish(rows[y][x]))
+    edges = {"aspect": round(w / h, 2), "left": hit(1), "right": hit(w - 2), "middle": hit(w // 2)}
+    await btn.click()
+    await pg.click('#context-menu [data-action="colour-file"]')
+    await pg.screenshot(path=str(out / "review3-narrow-model.png"))
+    await pg.set_viewport_size({"width": 1400, "height": 900})
+    check("in a 1000 px window the 3D view keeps its room, its bar fits on one line, and Edges and the cover are in ⋯ and the right-click menu",
+          tab == "details" and stage_w >= 430 and folded and bar_h < 50 and more == ["view-edges", "view-cover"] and right == more,
+          (tab, stage_w, folded, bar_h, more, right))
+    check("a view taller than it's wide still shows the whole model", edges["aspect"] < 1 and edges["left"] == 0 and edges["right"] == 0 and edges["middle"] > 0, edges)
     shutil.rmtree(cubes)
     shutil.rmtree(boxed)
     await api(pg, "library_scan", {"full": False})
-
 
 async def main():
     server = start_server()

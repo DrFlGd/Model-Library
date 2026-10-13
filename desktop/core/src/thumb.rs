@@ -15,13 +15,15 @@ const H: usize = 300;
 pub const MAX_BYTES: u64 = 500 << 20;
 
 /// How previews look (docs/PLAN.md, "Group 3 design"): the colour they're drawn
-/// in and whether a 3MF's own picture is used instead. The library's settings
-/// (`preview_colour`, `use_3mf_pictures` in library.json), and a model's own
-/// colour (`render_colour` in its model.json).
+/// in, whether a 3MF's own picture is used instead, and whether a 3MF's own
+/// colours are drawn. The library's settings (`preview_colour`,
+/// `use_3mf_pictures`, `preview_file_colours` in library.json), and a model's
+/// own colour (`render_colour` in its model.json).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Look {
     pub colour: mesh::Rgb,
     pub pictures: bool,
+    pub file_colours: bool,
 }
 
 impl Default for Look {
@@ -29,6 +31,7 @@ impl Default for Look {
         Look {
             colour: mesh::GRAY,
             pictures: true,
+            file_colours: false,
         }
     }
 }
@@ -53,6 +56,7 @@ pub fn look_for(path: &Path) -> Look {
                 if let Some(b) = v["use_3mf_pictures"].as_bool() {
                     look.pictures = b;
                 }
+                look.file_colours = v["preview_file_colours"].as_bool().unwrap_or(false);
             }
             break;
         }
@@ -71,14 +75,17 @@ fn read_json(p: &Path) -> Option<serde_json::Value> {
 }
 
 /// The picture to use for a 3D file: the 3MF's own when there is one and the look
-/// allows it, else a drawing.
+/// allows it, else a drawing (in the file's own colours when it has some and the
+/// look asks for them; its other triangles in the look's colour).
 fn picture(name: &str, bytes: &[u8], look: Look) -> Result<Vec<u8>> {
     if look.pictures && name.to_ascii_lowercase().ends_with(".3mf") {
         if let Some(png) = mesh::picture_3mf(bytes) {
             return Ok(png);
         }
     }
-    render(&mesh::read(name, bytes)?, look.colour)
+    let m = mesh::read_mesh(name, bytes)?;
+    let own = if look.file_colours { m.colours.as_deref() } else { None };
+    render_coloured(&m.tris, own, look.colour)
 }
 
 /// Variant folders that hold the model without supports or with them, by name.
@@ -180,7 +187,7 @@ pub fn file_preview(cache: &Path, path: &Path, entry: Option<&str>) -> Result<St
     h.update(entry.unwrap_or("").as_bytes());
     h.update(format!("\0{}\0{modified}", meta.len()).as_bytes());
     let look = look_for(path);
-    h.update(format!("\0{}\0{}", mesh::colour_hex(look.colour), look.pictures).as_bytes());
+    h.update(format!("\0{}\0{}\0{}", mesh::colour_hex(look.colour), look.pictures, look.file_colours).as_bytes());
     let name = format!("{}.png", &hex::encode(h.finalize())[..32]);
     let out = cache.join(&name);
     if out.is_file() {
@@ -264,6 +271,11 @@ fn norm(a: [f32; 3]) -> [f32; 3] {
 /// Render triangles (Z up) as a PNG: orthographic three-quarter view, flat shaded,
 /// transparent background, drawn at twice the size and scaled down for smooth edges.
 pub fn render(tris: &[f32], colour: mesh::Rgb) -> Result<Vec<u8>> {
+    render_coloured(tris, None, colour)
+}
+
+/// As [`render`], each triangle in its own colour where `colours` gives one.
+pub fn render_coloured(tris: &[f32], colours: Option<&[Option<mesh::Rgb>]>, colour: mesh::Rgb) -> Result<Vec<u8>> {
     let base = colour.map(|c| c as f32);
     if tris.len() < 9 {
         bail!("nothing to draw");
@@ -295,8 +307,12 @@ pub fn render(tris: &[f32], colour: mesh::Rgb) -> Result<Vec<u8>> {
     let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
     let mut depth = vec![f32::MIN; sw * sh];
     let mut color = vec![[0u8; 4]; sw * sh];
-    for t in tris.chunks_exact(9) {
+    for (ti, t) in tris.chunks_exact(9).enumerate() {
         let v = [[t[0], t[1], t[2]], [t[3], t[4], t[5]], [t[6], t[7], t[8]]];
+        let base = match colours.and_then(|c| c.get(ti).copied().flatten()) {
+            Some(c) => c.map(|c| c as f32),
+            None => base,
+        };
         if !t.iter().all(|x| x.is_finite()) {
             continue;
         }
@@ -480,6 +496,34 @@ mod tests {
     }
 
     #[test]
+    fn previews_can_be_drawn_in_the_files_colours() {
+        let tri = [0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0, 0.0f32];
+        let solid = |png: Vec<u8>| -> Vec<[u8; 4]> {
+            let mut z = flate2::read::ZlibDecoder::new(&png[41..png.len() - 12]);
+            let mut raw = vec![];
+            std::io::Read::read_to_end(&mut z, &mut raw).unwrap();
+            raw.chunks(W * 4 + 1)
+                .flat_map(|r| r[1..].chunks(4).map(|p| [p[0], p[1], p[2], p[3]]).collect::<Vec<_>>())
+                .filter(|p| p[3] == 255)
+                .collect()
+        };
+        let plain = solid(render_coloured(&tri, None, mesh::GRAY).unwrap());
+        let red = solid(render_coloured(&tri, Some(&[Some([200, 40, 30])]), mesh::GRAY).unwrap());
+        assert!(!plain.is_empty() && plain.iter().all(|p| p[0].abs_diff(p[2]) < 20), "{:?}", plain[0]);
+        assert!(!red.is_empty() && red.iter().all(|p| p[0] > p[1].saturating_add(60)), "{:?}", red[0]);
+        // a triangle the file gives no colour is drawn in the look's
+        let none = solid(render_coloured(&tri, Some(&[None]), mesh::GRAY).unwrap());
+        assert_eq!(none, plain);
+        // the library's setting
+        let d = std::env::temp_dir().join(format!("modlib-look-fc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("_library")).unwrap();
+        std::fs::write(d.join("_library/library.json"), r#"{"preview_file_colours": true}"#).unwrap();
+        assert!(look_for(&d.join("M/a.3mf")).file_colours);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
     fn previews_follow_the_library_and_the_model() {
         let d = std::env::temp_dir().join(format!("modlib-look-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
@@ -488,7 +532,7 @@ mod tests {
         std::fs::create_dir_all(d.join("_library")).unwrap();
         assert_eq!(look_for(&m.join("a.stl")), Look::default());
         std::fs::write(d.join("_library/library.json"), r##"{"preview_colour": "#112233", "use_3mf_pictures": false}"##).unwrap();
-        assert_eq!(look_for(&m.join("a.stl")), Look { colour: [0x11, 0x22, 0x33], pictures: false });
+        assert_eq!(look_for(&m.join("a.stl")), Look { colour: [0x11, 0x22, 0x33], pictures: false, file_colours: false });
         std::fs::write(m.join("model.json"), r##"{"render_colour": "#ff0000"}"##).unwrap();
         assert_eq!(look_for(&m).colour, [255, 0, 0]);
         // a 3MF's own picture becomes the preview, unless the library says not to
