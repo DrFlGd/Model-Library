@@ -69,6 +69,10 @@ Jerred's second round of requirements (R1–R17, `docs/PLAN.md`, "Requirements r
 
 ## Unreleased
 
+- **Choices with round buttons line up again.** In Remove subcategory, Make a model and other dialogs with a choice, each round button stretched across the dialog and pushed its words off the side; now the button sits beside its words. A category's name in the top bar is no longer cut short when its category panel is open (the search box gives way first, and the grid/list switch shows only its icons below 1600 px).
+
+## 0.5.14 (2026-10-13)
+
 The Inspector rails layout Jerred picked from the mock-ups (his notes of 13 October, items 1 to 3; design in docs/PLAN.md, "Inspector rails design").
 
 - **One command bar on every page.** The same row at the top of Home, a category, All models, Unsorted, a model, Import, Duplicates, Settings and About: Back, where you are, the page's search, view and sort, one main button and ⋯ for everything else. The separate top bar is gone; the menu's own head has the fold button and the name, and Theme sits at the menu's foot.
