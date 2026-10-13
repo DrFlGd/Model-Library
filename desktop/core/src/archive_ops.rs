@@ -5,10 +5,12 @@ use crate::{archive, index::Index, library::Library, model, relayout};
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{collections::{BTreeMap, HashSet}, fs::{self, File}, io::{Read, Write}, path::{Path, PathBuf}, sync::atomic::{AtomicBool, Ordering}};
+use std::{collections::{BTreeMap, HashSet}, fs::{self, File}, io::Read, path::{Path, PathBuf}, sync::atomic::{AtomicBool, Ordering}};
 
 const MAX_FILES: usize = 20_000;
 const MAX_EXPANDED: u64 = 8 * 1024 * 1024 * 1024;
+// Older versions put this manifest inside the ZIP; extraction still skips it.
+// New ZIPs hold only the model's files, at the ZIP's root.
 const MANIFEST: &str = "_model-library/archive-manifest.json";
 fn field<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
 fn stopped(cancel: &AtomicBool) -> Result<()> {
@@ -178,7 +180,7 @@ pub fn plan(lib: &Library, ix: &Index, args: &Value) -> Result<Value> {
         "files": inputs, "output_paths": output_paths,
         "files_count": inputs.len(), "bytes": bytes,
         "required_bytes": if action == "compress" { bytes + (bytes / 10) + 1024 * 1024 } else { bytes },
-        "metadata": "Content files only; model.json and generated previews remain outside the ZIP. A separate archive-manifest.json records the original model and file checksums."
+        "metadata": "Only the model's files, at the ZIP's root. The ZIP goes in the model's folder beside model.json and the previews, which stay outside it."
     }))
 }
 /// Reject execution unless the entire current source/destination manifest is
@@ -231,9 +233,6 @@ fn make_zip(root: &Path, plan: &Value, to: &Path, cancel: &AtomicBool, progress:
         let mut src = File::open(safe(root,rel)?)?;
         std::io::copy(&mut src, &mut zip)?;
     }
-    zip.start_file(MANIFEST, opt)?;
-    let description = json!({"format":"model-library-content-zip-v1","model_id":plan["model_id"],"name":plan["name"],"files":plan["files"]});
-    zip.write_all(serde_json::to_string_pretty(&description)?.as_bytes())?;
     zip.finish()?.sync_all()?;
     // Re-open and hash every uncompressed entry; CRC/ZIP success is insufficient.
     let entries = zip_entries(to)?;
@@ -498,6 +497,7 @@ pub fn undo(lib: &Library, mut journal: Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     use crate::library::tests::temp_dir;
     fn setup(label: &str) -> (Library,Index,String) {
         let root = temp_dir(label);
@@ -521,6 +521,10 @@ mod tests {
         let r=execute(&lib,&p,false,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
         assert!(r["verified"].as_bool().unwrap());
         assert!(root.join("Kit.zip").is_file());
+        // The model's files sit at the ZIP's root, with nothing of the library's inside.
+        let z=zip::ZipArchive::new(File::open(root.join("Kit.zip")).unwrap()).unwrap();
+        let mut names: Vec<&str>=z.file_names().collect(); names.sort();
+        assert_eq!(names,["Parts/body.stl","README.pdf","weird.unknown"]);
         assert_eq!(model::read_sidecar(&root)["id"],id);
         let ix=Index::build(&lib,None,true);
         assert!(plan(&lib,&ix,&json!({"id":id,"action":"extract","file":"Kit.zip"})).is_err());

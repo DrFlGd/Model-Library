@@ -689,3 +689,15 @@ The second periodic review (R17), of 0.5.11, published for Jerred as "UI review 
 - **Icons and words.** Models has its own icon (a box); every category name with an icon shows its own or the layers icon (page title, menu, panel, Home); subcategory names line up when some have icons. Remove subcategory… (not Delete: no models are deleted) and Add subcategory everywhere. Remove subcategory and Merge categories are written without jargon. A search shows Models as the chosen view and says "in X and its subcategories".
 - **Next steps.** An empty category with subcategories says how to fill it under its tiles. Move to category… for models from Unsorted starts with "Choose a category…" rather than a warning.
 - **Layout.** The page title shows the place's own name large, with the categories above it as a smaller line of links. Below 1250 px the category panel starts folded (until you open or fold it yourself) and the empty summary beside the models is hidden; below 1500 px Grid / List are icons. The folded menu keeps the categories as their icons. A model's page keeps the category panel of the place it's filed in. Subcategory tiles show one picture per model. Open another library… sits beside Show in folder in Settings.
+
+## Notes of 13 October (Jerred)
+
+Four notes after 0.5.12, added to the roadmap:
+
+1. **Selected files' actions.** The bar that appears when files are selected (Make a model…, Send to another model…, Clear) sits in an odd place and adds a row of buttons. Its actions belong on the right-click menu (they already are) and in the top bar, not a bar of their own. Clear only took off the selection highlight while the file stayed shown, so it looked as if it did nothing. Without bogging the top bar down with buttons that suit a right-click or drop-down menu better.
+2. **A different menu style,** for example tabs (files, supplementary files, details each a tab) instead of panels that fold. Mock-ups first: published as "Menu layout mock-ups" for Jerred to pick from.
+3. **The same top bar on every page.** Proposed in the mock-ups: one header with fixed places (Back, where you are and the title, then search, view, sort, one main action and a ⋯ menu for the rest) that switches to a selection mode when files or models are selected ("3 files selected ✕" with the two or three most used actions, the rest in ⋯; Esc clears). That replaces the selection bar and Clear.
+4. **Compress to ZIP's layout.** The ZIP held a `_model-library/archive-manifest.json`; it should hold only the model's files at its root, in the model's folder (named as the model) beside `model.json` and the other library files. Fixed in 0.5.13: the manifest is no longer written (the journal keeps the file list and hashes for Undo), and older ZIPs that have it still skip it when extracted.
+
+Items 1–3 are built together once Jerred picks a layout, as one change to every page's header and side panels.
+
