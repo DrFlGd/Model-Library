@@ -11,7 +11,7 @@ import { TypeTag, fileType } from "./filetypes.js";
 import { SortMenu, ViewSwitch } from "./layout.js";
 import { openMenu, typing } from "./actions.js";
 import { MESH, LazyPreview, srcArgs, useAsCover, useSeen, queued } from "./parts.js";
-import { fileSel, keyParts, pick, pickEvent, show, clear } from "./filesel.js";
+import { fileSel, keyParts, pick, pickEvent, show, view, clear } from "./filesel.js";
 
 export const parentPath = (path) => path.replace(/\/$/, "").split("/").slice(0, -1).join("/");
 export function parentKey(key) {
@@ -75,7 +75,7 @@ export function Breadcrumb({ model, shown }) {
       path = path ? `${path}/${name}` : name; crumbs.push({ key: `z:${p.file}!${path}/`, name });
     }
   }
-  return html`<nav class="contents-breadcrumb" aria-label="File path">${crumbs.map((c, i) => html`<span key=${c.key}>${i ? html`<span class="muted"> › </span>` : null}<button type="button" class="ghost" data-crumb=${c.key} onClick=${() => pick(c.key)}>${c.name}</button></span>`)}</nav>`;
+  return html`<nav class="contents-breadcrumb" aria-label="File path">${crumbs.map((c, i) => html`<span key=${c.key}>${i ? html`<span class="muted"> › </span>` : null}<button type="button" class="ghost" data-crumb=${c.key} onClick=${() => view(c.key)}>${c.name}</button></span>`)}</nav>`;
 }
 function ArchivePicturePreview({ src, row, fallback }) {
   const ref = useRef(null), seen = useSeen(ref);
@@ -104,7 +104,7 @@ export function Contents({ src, model, files, shown, archive, entries, error, co
     : (files || []).filter((f) => !folder || f.rel.startsWith(folder + "/")).length;
   const scopeKey = archive ? (folder ? "z:" + archive + "!" + (folder.endsWith("/") ? folder : folder + "/") : null) : "d:" + folder;
   const open = (row) => {
-    pick(row.key);
+    view(row.key);
     if (!row.folder && !viewable(row.name) && isDesktop()) row.entry ? openArchiveEntry(src, row.file, row.entry) : openModelFile(model, row.file);
   };
   const select = (row, e) => { pickEvent(row.key, e, order); show(shown); };

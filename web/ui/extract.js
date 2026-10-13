@@ -42,7 +42,7 @@ export function extractionAction(src, model = src?.model) {
 }
 
 /** What can be done with a model's selected files, the same in every view
- *  (selection bar and every right-click menu on its files). */
+ *  (the command bar while files are selected, and every right-click menu on its files). */
 export function fileActions(src, model = src?.model) {
   if (!src || src.kind !== "model") return [];
   return [extractionAction(src, model), sendFilesAction(model)];
@@ -59,20 +59,16 @@ export function installExtractKeys() {
   return () => removeEventListener("keydown", key);
 }
 
-const BAR_IDS = { extract: "extract-model" };
-
-export function ExtractionBar({ src, model = src?.model }) {
+/** The command bar's selection mode for a model's selected files (docs/PLAN.md,
+ *  "Inspector rails design"): how many, and the same actions as their menus. */
+export function useFileSelection(src, model = src?.model) {
   const selection = useStore(fileSel);
   useStore(ui, (s) => s.library?.read_only);
-  if (!selection.picked.length) return null;
+  if (!src || !model || !selection.picked.length || (selection.src && selection.src.id !== model.id)) return null;
   const p = pickedFiles(selection.picked);
-  const count = new Set((model?.files_list || []).filter((f) => p.files.some((r) => !r || f.rel === r || f.rel.startsWith(`${r}/`))).map((f) => f.rel)).size + p.entries.length;
-  return html`<div class="extraction-bar" id="extraction-bar" aria-label="Selected files">
-    <span>${count || selection.picked.length} ${(count || selection.picked.length) === 1 ? "file selected" : "files selected"}</span>
-    ${fileActions(src, model).map((action) => html`<button type="button" class="ghost" key=${action.id} id=${BAR_IDS[action.id] || action.id} disabled=${!!action.disabled}
-      title=${action.disabled || (action.key ? `${action.label.replace(/…$/, "")} (${action.key})` : action.label)} onClick=${action.run}>${action.label}</button>`)}
-    <button type="button" class="ghost" onClick=${clear}>Clear</button>
-  </div>`;
+  const count = new Set((model.files_list || []).filter((f) => p.files.some((r) => !r || f.rel === r || f.rel.startsWith(`${r}/`))).map((f) => f.rel)).size + p.entries.length;
+  const n = count || selection.picked.length;
+  return { count: `${n} ${n === 1 ? "file selected" : "files selected"}`, onClear: clear, items: fileActions(src, model), buttons: 2 };
 }
 
 export function ExtractDialog({ model, keys }) {

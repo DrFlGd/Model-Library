@@ -5,7 +5,7 @@ import { useStore } from "../lib/store.js";
 import { ui, THEMES, setTheme } from "./state.js";
 import { ctx } from "./context.js";
 import { isDesktop, openLibrary, renameLibrary, showLibraryFolder, setVariantFolders, undoable } from "./library.js";
-import { PageHead } from "./layout.js";
+import { CommandBar } from "./layout.js";
 
 function RenameForm({ lib }) {
   const [name, setName] = useState(lib.name || "");
@@ -68,8 +68,7 @@ export function Settings() {
   const s = useStore(ui, (st) => ({ library: st.library, recent: st.recent, theme: st.theme }));
   const lib = s.library;
   const others = (s.recent || []).filter((p) => p !== lib?.path);
-  return html`<div class="pages"><div class="library-settings">
-    <${PageHead} title="Settings" />
+  return html`<${CommandBar} id="settings-head" title="Settings" /><div class="pages"><div class="library-settings">
     <section class="ls-section" id="settings-library">
       <h2>Library</h2>
       ${lib ? html`

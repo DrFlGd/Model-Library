@@ -6,7 +6,7 @@ import { html, useState, useEffect } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui } from "./state.js";
 import { ctx } from "./context.js";
-import { PageHead } from "./layout.js";
+import { CommandBar } from "./layout.js";
 
 const OS = { windows: "Windows", linux: "Linux", macos: "macOS" };
 const RELEASES = "https://github.com/DrFlGd/Model-Library/releases";
@@ -126,8 +126,8 @@ export function About() {
     ...(b ? [["Built", [b.date, b.commit].filter(Boolean).join(" · ")]] : []),
     ...(b?.parts || []).map((p) => [p.name, p.version]),
   ];
-  return html`<div class="pages"><div class="library-settings about-page" id="about-page">
-    <${PageHead} title="About" sub="Model Library: organise large collections of 3D model files in folders that make sense without the app." />
+  return html`<${CommandBar} id="about-head" title="About" /><div class="pages"><div class="library-settings about-page" id="about-page">
+    <p class="page-lead">Model Library: organise large collections of 3D model files in folders that make sense without the app.</p>
     <section class="ls-section" id="about-versions">
       <h2>Versions</h2>
       <dl class="about-versions">${rows.map(([k, v]) => html`<div key=${k}><dt>${k}</dt><dd>${v}</dd></div>`)}</dl>

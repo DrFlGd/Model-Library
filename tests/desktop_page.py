@@ -124,14 +124,29 @@ def model_folder(rel, files):
     return d
 
 
+async def clear_selection(pg):
+    """Clear what's selected (✕ in the bar), if anything is: the page's count and
+    ⋯ are in the bar only while nothing is. The bar can go back by itself (a new
+    place starts with nothing selected), so a ✕ that's gone is fine."""
+    x = pg.locator("header.cmdbar.selecting #bar-clear")
+    if await x.count():
+        try:
+            await x.click(timeout=3000)
+        except Exception:
+            pass
+
+
 async def count(pg):
+    await clear_selection(pg)
     await pg.wait_for_function("() => /\\d/.test(document.querySelector('#browse-count')?.textContent || '')")
     await pg.wait_for_timeout(250)  # the search waits for typing to pause
     return await pg.inner_text("#browse-count")
 
 
 async def search(pg, q):
-    """Search this place; the count once the results for `q` are shown."""
+    """Search this place; the count once the results for `q` are shown (the
+    count is in the bar when nothing is selected)."""
+    await clear_selection(pg)
     await pg.fill("#search", q)
     await pg.wait_for_function("q => document.querySelector('#browse-count')?.dataset.q === q", arg=q)
     return await pg.inner_text("#browse-count")
@@ -188,7 +203,7 @@ async def phase1(pg):
 
     # 11. search, with typed filters
     await pg.goto(B + "#/browse/all")
-    await pg.wait_for_selector(".page-head h1:has-text('All models')")
+    await pg.wait_for_selector(".cmdbar h1:has-text('All models')")
     await count(pg)
     found = [await search(pg, "tyrant"), await search(pg, "author:\"jo smith\""), await search(pg, "schema:wargames carni"), await search(pg, "in:\"space marines\"")]
     await search(pg, "nothing-like-this")
@@ -205,7 +220,7 @@ async def phase1(pg):
     check("a model shows its details, parts and cover", files == ["Arms/left.stl", "Arms/right.stl", "_media/cover.png", "body.stl", "readme.pdf"] and by == "Jo Smith" and cover, (files, by, cover))
 
     # 13. editing details writes model.json (the folder keeps its name)
-    await pg.click("#details-edit")
+    await bar_action(pg, "edit")
     await pg.fill("#edit-tags", "monster, big")
     await pg.fill("#edit-source", "https://example.com/tyrant")
     await pg.select_option("#field-scale", "32mm")
@@ -224,8 +239,8 @@ async def phase1(pg):
     # 14. starring
     await pg.click(".card:has-text('Carnifex')")
     await pg.wait_for_function("() => document.querySelector('#details-name')?.value === 'Carnifex'")
-    await pg.click("#details-star")
-    await pg.wait_for_selector('#details-star[aria-pressed="true"]')
+    await bar_action(pg, "star")
+    await pg.wait_for_selector(".card:has-text('Carnifex') .card-fav")
     favs = json.loads((library / "_library/library.json").read_text()).get("favourites", [])
     carni = json.loads((library / "Wargames/Warhammer 40k/Tyranid/Carnifex (Al Jones)/model.json").read_text())
     await pg.click('.sidebar a[href="#/browse/favs"]')
@@ -250,7 +265,9 @@ async def import_and_wait(pg):
 
 
 async def sort_rows(pg):
-    """The workspace as a list: every model's name."""
+    """The workspace as a list: every model's name (the view switch is in the
+    bar when nothing is selected)."""
+    await clear_selection(pg)
     await pg.click('[data-view="list"]')
     await pg.click('[data-filter="all"]')
     await pg.wait_for_selector("#sort-list")
@@ -281,9 +298,41 @@ async def clear_toast(pg):
 
 
 async def menu_item(pg, button, action):
-    """Open a page's menu (More ▾, Library ▾…) and pick one of its items."""
+    """Open a page's menu (⋯) and pick one of its items. The page's ⋯ is in the
+    bar while nothing is selected."""
+    if not button.startswith("header"):
+        await clear_selection(pg)
     await pg.click(button)
     await pg.click(f'#context-menu [data-action="{action}"]')
+
+
+async def bar_action(pg, action):
+    """Pick an action from the command bar while something is selected: its
+    button if it's one of the first, else from the bar's ⋯."""
+    await pg.wait_for_selector("header.cmdbar.selecting")
+    if await pg.locator(f"#bar-{action}").count():
+        await pg.click(f"#bar-{action}")
+    else:
+        await menu_item(pg, "header.cmdbar.selecting #bar-more", action)
+
+
+async def open_tab(pg, tab="details"):
+    """Open the inspector on this tab, unless it's already showing."""
+    # (selecting one Unsorted model turns to its Files tab just after the
+    # click, so look again once that has settled)
+    await pg.wait_for_selector(f"#rail-{tab}")
+    for _ in range(10):
+        if await pg.get_attribute(f"#rail-{tab}", "aria-pressed") != "true":
+            await pg.click(f"#rail-{tab}")
+        await pg.wait_for_timeout(200)
+        if await pg.get_attribute(f"#rail-{tab}", "aria-pressed") == "true":
+            break
+    await pg.wait_for_selector(f"#pane-{tab}")
+
+
+async def fold_inspector(pg):
+    if await pg.locator("#inspector-fold").count():
+        await pg.click("#inspector-fold")
 
 
 async def library_menu(pg, action):
@@ -293,6 +342,7 @@ async def library_menu(pg, action):
 async def start_again(pg):
     """Empty Import's workspace (Start again, under More ▾) if anything is in it."""
     await pg.wait_for_selector("#sort-page[data-ready]")
+    await clear_selection(pg)
     await pg.click("#import-more")
     item = pg.locator('#context-menu [data-action="import-clear"]')
     if await item.count():
@@ -310,6 +360,7 @@ async def toast_text(pg, pattern, timeout=30000):
 
 async def category_menu(pg, action):
     """Choose from the Category menu of the category page shown."""
+    await clear_selection(pg)
     await pg.click("#category-menu")
     await pg.click(f'#context-menu [data-action="{action}"]')
 
@@ -335,7 +386,7 @@ async def phase2(pg):
     await pg.screenshot(path=str(out / "09-import.png"), full_page=True)
     # a folder of parts read as two models becomes one
     await pg.click('#sort-tree .sw-folder[data-name="Armour Set"] .sw-name')
-    await pg.click("#sort-join")
+    await bar_action(pg, "sort-join")
     await pg.wait_for_selector('#sort-tree .sw-item[data-name="Armour Set"]')
     names = sorted(await sort_rows(pg))
     await pick_rows(pg, "Copy of Captain")
@@ -343,7 +394,7 @@ async def phase2(pg):
     guess = await pg.inner_text('#sort-list tr[data-name="Tyrant Prime"]')
     check("a messy folder is read as it is, with models proposed, warnings, and a model.json's place used", names == ["Armour Set", "Copy of Captain", "Hive Guard", "Tyrant Prime", "dragon", "tugboat"]
           and loose == 1 and dup == 1 and "→ Wargames › Warhammer 40k › Tyranid" in guess, (names, loose, dup, guess))
-    await pg.click("#sort-skip")
+    await bar_action(pg, "sort-skip")
     await pick_rows(pg, "Hive Guard", "Armour Set")
     await send_to(pg, "wargames", "Warhammer 40k\x1fTyranid")
     # (Tyrant Prime's model.json says where it goes: it's sorted already)
@@ -382,7 +433,7 @@ async def phase2(pg):
     await pg.goto(B + "#/browse/unsorted")
     await pg.wait_for_selector(".card:has(.card-name:text-is('tugboat'))")
     await pg.click(".card:has(.card-name:text-is('tugboat'))")
-    await pg.click("#unsorted-move")
+    await bar_action(pg, "move")
     await pg.select_option("#move-schema", "wargames")
     await pg.select_option("#move-place", "Warhammer 40k")
     await pg.fill("#move-new", "Necrons")  # a new subcategory, made as it moves
@@ -394,7 +445,7 @@ async def phase2(pg):
     await pg.click(".card:has-text('dragon')")
     await pg.click(".card:has-text('Gargoyle')", modifiers=["Control"])
     await pg.wait_for_selector("#picked-panel")
-    await pg.click("#picked-move")
+    await bar_action(pg, "move")
     await pg.select_option("#move-schema", "wargames")
     await pg.select_option("#move-place", "Warhammer 40k\x1fNecrons")
     await pg.click("#move-dialog button[type=submit]")
@@ -798,7 +849,7 @@ async def phase4(pg):
     await pg.wait_for_selector(".card:has(.card-name:text-is('Gargoyle'))")
     await pg.click(".card:has(.card-name:text-is('Gargoyle'))")
     await pg.click(".card:has(.card-name:text-is('dragon'))", modifiers=["Control"])
-    await pg.click("#picked-edit")
+    await bar_action(pg, "edit")
     await pg.fill("#bulk-tags-add", "painted, display")
     await pg.fill("#bulk-license", "CC-BY")
     await pg.click("#bulk-dialog button[type=submit]")
@@ -839,7 +890,7 @@ async def phase5(pg):
     await toast_text(pg, "^Set 3 models to go to")
     names = sorted(await sort_rows(pg))
     await pick_rows(pg, "hinge", "latch")
-    await pg.click("#sort-group")
+    await bar_action(pg, "sort-group")
     await toast_text(pg, "^Combined into one model")
     # the new model's details (named after its folder) before renaming it
     await pg.wait_for_function("() => document.querySelector('#details-name')?.value === 'NAS share'")
@@ -938,26 +989,27 @@ async def labels_of(pg, sel):
 
 
 async def ui_pass(pg):
-    # 33. one action row, and the same actions on right-click
+    # 33. the command bar's actions while a model is selected, and the same actions on right-click
     await pg.goto(B + "#/browse/unsorted")
     await count(pg)
     first = pg.locator(".results .card").first
     await first.click()
-    await pg.wait_for_selector("#unsorted-preview .action-row")
-    row = await labels_of(pg, "#unsorted-preview .action-row button")
+    await pg.wait_for_selector("#browse-head.selecting")
+    row = await labels_of(pg, "#browse-head.selecting button[data-action]")
+    bar_count = await pg.inner_text("#bar-count")
     await first.click(button="right")
     await pg.wait_for_selector("#context-menu")
     menu = await labels_of(pg, "#context-menu .menu-label")
     await pg.screenshot(path=str(out / "24-right-click.png"))
     await pg.keyboard.press("Escape")
     await pg.wait_for_selector("#context-menu", state="detached")
-    await pg.click("#unsorted-more")
+    await pg.click("#browse-head.selecting #bar-more")
     more = await labels_of(pg, "#context-menu .menu-label")
     await pg.keyboard.press("Escape")
-    check("the details panel and the right-click menu have the same actions, in the same order",
-          row == ["Open", "Edit details…", "Move to category…", "Star", "Show in folder", "More ▾"]
+    check("the command bar and the right-click menu have the same actions, in the same order",
+          row == ["Open", "Edit details…", "Move to category…"] and bar_count == "1 model selected"
           and menu == ["Open", "Edit details…", "Move to category…", "Star", "Show in folder", "Delete model…", "Compress to ZIP…", "Extract archive…", "Make a new preview", "Copy folder path"]
-          and more == ["Delete model…", "Compress to ZIP…", "Extract archive…", "Make a new preview", "Copy folder path"], (row, menu, more))
+          and more == ["Star", "Show in folder", "Delete model…", "Compress to ZIP…", "Extract archive…", "Make a new preview", "Copy folder path"], (row, bar_count, menu, more))
 
     # 34. keys: arrows and Shift, Ctrl+A, Esc, E, M, S, Ctrl+Z
     n = int((await count(pg)).split()[0])
@@ -966,9 +1018,9 @@ async def ui_pass(pg):
     await pg.keyboard.press("ArrowRight")
     b = await pg.evaluate("() => [...document.querySelectorAll('.results [aria-selected=true]')].map(e => e.dataset.model)")
     await pg.keyboard.press("Shift+ArrowLeft")
-    two = await pg.inner_text("#picked-panel h2")
+    two = await pg.inner_text("#bar-count")
     await pg.keyboard.press("Control+a")
-    every = await pg.inner_text("#picked-panel h2")
+    every = await pg.inner_text("#bar-count")
     await pg.keyboard.press("Escape")
     cleared = await pg.locator(".results [aria-selected=true]").count()
     await first.click()
@@ -1038,10 +1090,13 @@ async def ui_pass(pg):
     await pg.click("#part-tree [data-file='settings.ini']", button="right")
     file_menu = await labels_of(pg, "#context-menu .menu-label")
     await pg.keyboard.press("Escape")
-    mp_row = await labels_of(pg, "#model-page .action-row button")
+    await clear_selection(pg)
+    await pg.click("#mp-more")
+    mp_row = [await pg.inner_text("#mp-edit")] + await labels_of(pg, "#context-menu .menu-label")
+    await pg.keyboard.press("Escape")
     check("files with no viewer show details and open in their own app; the model page has the same row", "settings.ini" in fallback and "Open externally" in fallback
           and "Open externally" in file_menu and "Show in folder" in file_menu and "Make a model…" in file_menu
-          and mp_row == ["Edit details…", "Move to category…", "Add files…", "Star", "Show in folder", "More ▾"], (fallback, file_menu, mp_row))
+          and mp_row[:4] == ["Edit details…", "Move to category…", "Add files…", "Show in folder"], (fallback, file_menu, mp_row))
 
     # 39. Import: right-click, Ctrl+A and Esc, Ctrl+Z, and messages clear of the footer
     more = home / "More"
@@ -1060,7 +1115,7 @@ async def ui_pass(pg):
     await pg.keyboard.press("Escape")
     await pg.click(row + " .sw-name")
     await pg.keyboard.press("Control+a")
-    both = await pg.inner_text("#sort-picked")
+    both = await pg.inner_text("#bar-count")
     await pg.keyboard.press("Escape")
     none = await pg.locator("#sort-actions").count()
     await pick_rows(pg, "Widget")
@@ -1172,11 +1227,11 @@ async def ui_pass3(pg):
     q = await api(pg, "models_query", {"scope": "unsorted", "sort": "name"})
     knight = next(m for m in q["items"] if m["name"] == "Knight Armour")
     heads = []
-    for route, ready in [("#/", "#library-menu"), ("#/browse/all", "#browse-count"), ("#/browse/schema/household", "#category-menu"), (f"#/model/{knight['id']}", "#mp-head .action-row"),
+    for route, ready in [("#/", "#library-menu"), ("#/browse/all", "#browse-count"), ("#/browse/schema/household", "#category-menu"), (f"#/model/{knight['id']}", "#mp-edit"),
                          ("#/import", "#import-more"), ("#/duplicates", "#dupes-find"), ("#/settings", "#settings-about")]:
         await pg.goto(B + route)
-        await pg.wait_for_selector(f".page-head {ready}, {ready}")
-        heads.append(await pg.evaluate("() => { const h = document.querySelectorAll('.page-head'); return h.length === 1 ? h[0].querySelector('.page-title h1')?.textContent.trim() || null : h.length; }"))
+        await pg.wait_for_selector(f".cmdbar {ready}, {ready}")
+        heads.append(await pg.evaluate("() => { const h = document.querySelectorAll('.cmdbar'); return h.length === 1 ? h[0].querySelector('.bar-place h1')?.textContent.trim() || null : h.length; }"))
     check("every page starts with the same header", heads == ["My Models", "All models", "Household", "Knight Armour", "Import", "Duplicates", "Settings"], heads)
 
     # 46. one view switcher (icon, label, tooltip) and one sort menu; the list's headers sort too
@@ -1221,7 +1276,7 @@ async def ui_pass3(pg):
     await pg.wait_for_selector("#place-summary #place-counts")
     summary = await pg.inner_text("#place-summary #place-counts")
     await pg.click(".card:has(.card-name:text-is('Knight Armour'))")
-    await pg.click('#unsorted-tabs [data-view="details"]')
+    await open_tab(pg, "details")
     await pg.wait_for_function("() => document.querySelector('#details-name')?.value === 'Knight Armour'")
     side = library / "Unsorted/Knight Armour/model.json"
     before = json.loads(side.read_text()).get("authors") or []
@@ -1268,7 +1323,7 @@ async def ui_pass3(pg):
     name = await first.locator(".dupe-name").inner_text()
     await first.click()
     await pg.wait_for_function("n => document.querySelector('#model-details #details-name')?.value === n", arg=name)
-    dupes_row = await labels_of(pg, "#model-details .action-row button")
+    dupes_row = await labels_of(pg, "#dupes-head.selecting button[data-action]")
     await clear_toast(pg)
     await pg.screenshot(path=str(out / "31-duplicates-panel.png"))
     src = home / "Panel test"
@@ -1282,7 +1337,7 @@ async def ui_pass3(pg):
     await sort_rows(pg)
     await pick_rows(pg, "Widget two")
     inside = await pg.evaluate("() => !!document.querySelector('#sort-details #details-name') && !!document.querySelector('#sort-details #sort-actions')")
-    import_switch = await pg.eval_on_selector_all("#sort-page .toolbar .view-switch button", "els => els.map(e => !!e.querySelector('svg') && !!e.querySelector('.view-label'))")
+    import_switch = await pg.eval_on_selector_all("#import-head .view-switch button", "els => els.map(e => !!e.querySelector('svg') && !!e.querySelector('.view-label'))")
     await clear_toast(pg)
     await pg.screenshot(path=str(out / "32-import-panel.png"))
     await start_again(pg)
@@ -1331,11 +1386,12 @@ async def import_follow_ups(pg):
     # 52. the parts were read as models: every folder at the model's level is made one, and that's undone
     before = sorted(await tree_items(pg))
     await pg.click('#sort-tree .sw-folder[data-name="Knight"] .sw-name')
-    await pg.wait_for_selector("#sort-join-level")
-    level_label = await pg.inner_text("#sort-join-level")
+    await pg.wait_for_selector("#import-head.selecting #bar-more")
+    await pg.click("#import-head.selecting #bar-more")
+    level_label = await pg.inner_text('#context-menu [data-action="sort-join-level"]')
     await clear_toast(pg)
     await pg.screenshot(path=str(out / "33-import-level.png"))
-    await pg.click("#sort-join-level")
+    await pg.click('#context-menu [data-action="sort-join-level"]')
     said = await toast_text(pg, "^Made 3 folders into models")
     after = sorted(await tree_items(pg))
     await pg.click(".toast .toast-action")
@@ -1413,7 +1469,7 @@ async def model_workspace_extract(pg):
             const {fileSel} = await import('/ui/filesel.js');
             fileSel.set({picked: keys, anchor: keys[0] || null});
         }""", keys)
-        await pg.wait_for_selector("#extract-model")
+        await pg.wait_for_selector("#bar-extract")
 
     async def make(name):
         await pg.fill("#extract-name", name)
@@ -1429,7 +1485,7 @@ async def model_workspace_extract(pg):
         await pg.wait_for_function("() => document.querySelector('#toast')?.textContent.includes('Undone')")
 
     await select(["d:Presupported/Helmet", "d:Unsupported/Helmet"])
-    await pg.click("#extract-model")
+    await pg.click("#bar-extract")
     dest = await make("Helmet")
     moved = (dest / "Presupported/Helmet/helmet.stl").exists() and (dest / "Unsupported/Helmet/helmet.stl").exists()
     buttons = await pg.locator("#toast button").all_text_contents()
@@ -1441,7 +1497,7 @@ async def model_workspace_extract(pg):
     check("extraction Undo restores source files and sidecar exactly", before == after and not dest.exists())
 
     await select(["f:body.stl"])
-    await pg.click("#extract-model")
+    await pg.click("#bar-extract")
     await pg.locator('input[name="extract-where"]').nth(1).check()
     overview = await api(pg, "library_overview")
     category = next(s for s in overview["schemas"] if s["name"] == "Household")
@@ -1460,15 +1516,15 @@ async def model_workspace_extract(pg):
 
     archive = (source / "extras.zip").read_bytes()
     await select(["z:extras.zip!Parts/clip.stl"])
-    await pg.click("#extract-model")
+    await pg.click("#bar-extract")
     unpack_dest = await make("Unpacked clip")
     check("selected ZIP entries are unpacked and the ZIP stays unchanged", (unpack_dest / "clip.stl").exists()
           and (source / "extras.zip").read_bytes() == archive)
     await undo()
     model = await api(pg, "model_get", {"id": "workspace-extract"})
     await select(["f:" + f["rel"] for f in model["files_list"]])
-    enabled = not await pg.is_disabled("#extract-model")
-    await pg.click("#extract-model")
+    enabled = not await pg.is_disabled("#bar-extract")
+    await pg.click("#bar-extract")
     whole_dest = await make("Entire workspace")
     check("complete selection makes a new model and retires its empty source", enabled and not source.exists() and
           (whole_dest / "model.json").is_file() and (whole_dest / "extras.zip").is_file())
@@ -1479,7 +1535,7 @@ async def model_workspace_extract(pg):
     await pg.wait_for_selector('#model-page[data-model="workspace-extract"]')
     await select(["d:"])
     await pg.evaluate("""async () => {const {ui} = await import('/ui/state.js'); ui.set({library: {...ui.get().library, read_only: true}});} """)
-    readonly = await pg.get_attribute("#extract-model", "title")
+    readonly = await pg.get_attribute("#bar-extract", "title")
     check("whole-model extraction is enabled and read-only still forbids mutation", enabled and "read-only" in readonly, (enabled, readonly))
     await pg.evaluate("""async () => {const {ui} = await import('/ui/state.js'); ui.set({library: {...ui.get().library, read_only: false}});} """)
 
@@ -1602,21 +1658,25 @@ async def agent_d_reviewed_import(pg):
     put(src / "Terrain/Detail/photo.jpg", PNG)
     await pg.goto(B + "#/import")
     await pg.wait_for_selector("#sort-page[data-ready]")
-    controls = ["#import-sort", "#import-folder", "#import-file", "#import-categories"]
+    controls = ["#import-sort", "#import-more"]
     direct = all([await pg.is_visible(q) for q in controls])
     await pg.set_viewport_size({"width": 700, "height": 600})
     narrow = all([await pg.is_visible(q) for q in controls])
+    await pg.click("#import-more")
+    more = await labels_of(pg, "#context-menu .menu-label")
+    await pg.keyboard.press("Escape")
     await pg.set_viewport_size({"width": 1400, "height": 900})
-    check("Import actions are directly visible at desktop and narrow widths", direct and narrow)
+    check("Import's main button and ⋯ are in the bar at desktop and narrow widths, the other imports under ⋯", direct and narrow
+          and more[:3] == ["Import folder…", "Import file…", "Import folders as categories…"], more)
     pick(src)
-    await pg.click("#import-categories")
+    await menu_item(pg, "#import-more", "import-categories")
     await pg.wait_for_selector("#category-import .ci-tree")
     staged = not (library / "Agent D collection").exists()
     await pg.fill('.ci-node[data-depth="1"] > .ci-row .ci-name', "Landscape")
     await pg.locator('.ci-node[data-depth="1"] > .ci-options .ci-check input').check()
     await pg.fill('.ci-node[data-depth="1"] > .ci-options .ci-group-name', "Terrain files")
     await pg.click("#ci-back")
-    await pg.click("#import-categories")
+    await menu_item(pg, "#import-more", "import-categories")
     kept = await pg.input_value('.ci-node[data-depth="1"] > .ci-row .ci-name') == "Landscape"
     await pg.click("#ci-review")
     await pg.wait_for_selector(".ci-review")
@@ -1681,7 +1741,7 @@ async def review1(pg):
           and stage[1] == panel[1], (panel, stage))
 
     # leaving a Details box saves it, with Undo
-    await pg.click("#details-panel-open")
+    await open_tab(pg, "details")
     await pg.fill("#workspace-edit-tags", "review one")
     await pg.press("#workspace-edit-tags", "Tab")
     await pg.wait_for_function("() => document.querySelector('.toast')?.textContent.includes('Saved')")
@@ -1689,7 +1749,7 @@ async def review1(pg):
     undo = await pg.locator(".toast .toast-action:text-is('Undo')").count()
     check("leaving a box on a model's Details saves it, with Undo", side.get("tags") == ["review one"] and undo == 1
           and await pg.locator("#workspace-details-form button[type=submit]").count() == 0, (side.get("tags"), undo))
-    await pg.click("#details-panel-close")
+    await fold_inspector(pg)
 
     # a long dialog keeps its buttons in sight
     size = pg.viewport_size
@@ -1817,7 +1877,7 @@ async def review2(pg):
     await pg.goto(B + "#/browse/unsorted")
     await count(pg)
     await pg.locator(".results .card").first.click()
-    await pg.click("#unsorted-move")
+    await bar_action(pg, "move")
     await pg.wait_for_selector("#move-dialog")
     start = await pg.input_value("#move-schema")
     warned = await pg.locator("#move-dialog #change-preview").count()
@@ -1878,13 +1938,15 @@ async def group1(pg):
     await pg.wait_for_selector('#workspace-stage [data-key="f:base.stl"]')
     await pg.click('#contents-views [data-view="grid"]')
     grid = await menu_at('#workspace-stage .file-tile[data-key="f:base.stl"]')
-    bar = await labels_of(pg, "#extraction-bar button")
+    await pg.evaluate("async () => { const {fileSel} = await import('/ui/filesel.js'); fileSel.set({picked: ['f:base.stl'], anchor: 'f:base.stl'}); }")
+    await pg.wait_for_selector("#mp-head.selecting")
+    bar = await labels_of(pg, "#mp-head.selecting button[data-action]")
     await pg.click('#contents-views [data-view="list"]')
     await pg.wait_for_selector('#workspace-stage .contents-row[data-key="d:Parts"]')
     listed = await menu_at('#workspace-stage .contents-row[data-key="d:Parts"]')
     panel = await menu_at('.file-panel [data-key="f:Parts/arm.stl"]')
     check("a model's files have the same actions in the viewing area's grid and list, the file panel and the selection bar",
-          all(all(x in m for x in both) for m in (grid, listed, panel)) and bar == both + ["Clear"], (grid, listed, panel, bar))
+          all(all(x in m for x in both) for m in (grid, listed, panel)) and bar == both, (grid, listed, panel, bar))
 
     # ... and so does the Unsorted preview beside the collection
     await pg.goto(B + "#/browse/unsorted")
@@ -1892,12 +1954,14 @@ async def group1(pg):
     await card.click()
     await pg.wait_for_selector('#unsorted-preview .unsorted-file-tree [data-key="f:base.stl"]')
     preview_row = await menu_at('#unsorted-preview .unsorted-file-tree [data-key="f:base.stl"]')
-    preview_bar = await labels_of(pg, "#unsorted-preview #extraction-bar button")
+    await pg.evaluate("async () => { const {fileSel} = await import('/ui/filesel.js'); fileSel.set({picked: ['f:base.stl'], anchor: 'f:base.stl'}); }")
+    await pg.wait_for_selector("#browse-head.selecting #bar-extract")
+    preview_bar = await labels_of(pg, "#browse-head.selecting button[data-action]")
     await show_folder("d:")
     await pg.wait_for_selector('#unsorted-preview .unsorted-preview-stage [data-key="d:Parts"]')
     preview_stage = await menu_at('#unsorted-preview .unsorted-preview-stage [data-key="d:Parts"]')
     check("the Unsorted preview has the same file actions and selection bar",
-          all(x in preview_row for x in both) and all(x in preview_stage for x in both) and preview_bar == both + ["Clear"],
+          all(x in preview_row for x in both) and all(x in preview_stage for x in both) and preview_bar == both,
           (preview_row, preview_stage, preview_bar))
     await pg.screenshot(path=str(out / "40-unsorted-file-actions.png"))
 
@@ -1995,9 +2059,9 @@ async def main():
             await pg.screenshot(path=str(out / "00-first-run.png"))
             pick(library)
             await pg.click("#choose-library")
-            await pg.wait_for_selector(".home h1:not(:has-text('Where'))")
-            await pg.wait_for_function("() => document.querySelector('.home h1').textContent === 'My Models'")
-            title = await pg.inner_text(".home h1")
+            await pg.wait_for_selector("#home-head h1:not(:has-text('Where'))")
+            await pg.wait_for_function("() => document.querySelector('#home-head h1').textContent === 'My Models'")
+            title = await pg.inner_text("#home-head h1")
             made = (library / "_library/library.json").is_file() and (library / "Unsorted").is_dir() and (library / "_library/schemas").is_dir()
             status = await pg.inner_text(".statusbar")
             check("the first start asks where the library goes", "Where" in asked and not menu_off and title == "My Models" and made and str(library) in status, (asked, title, made, status))
@@ -2007,9 +2071,9 @@ async def main():
             labels = await pg.eval_on_selector_all(".sidebar .nav-label", "els => els.map(e => e.textContent.trim())")
             await pg.click('.sidebar a[href="#/browse/unsorted"]')
             await pg.wait_for_selector("#no-results")
-            unsorted = await pg.inner_text(".page-head h1")
+            unsorted = await pg.inner_text(".cmdbar h1")
             active = await pg.inner_text(".sidebar .nav-link.active .nav-label")
-            check("the menu's places open", labels == ["Home", "Import", "All models", "Unsorted", "Starred", "Duplicates", "Settings", "About"] and unsorted == "Unsorted" and active == "Unsorted", (labels, unsorted, active))
+            check("the menu's places open", labels == ["Model Library", "Home", "Import", "All models", "Unsorted", "Starred", "Duplicates", "Settings", "About", "Theme: System"] and unsorted == "Unsorted" and active == "Unsorted", (labels, unsorted, active))
 
             await phase1(pg)
             await phase2(pg)
@@ -2084,7 +2148,7 @@ async def main():
             await pg.set_viewport_size({"width": 700, "height": 800})
             await pg.wait_for_timeout(300)  # the drawer slides
             hidden = await pg.evaluate("() => document.querySelector('.sidebar').getBoundingClientRect().right <= 0")
-            await pg.click(".nav-burger")
+            await pg.click(".cmdbar .bar-burger")
             await pg.wait_for_selector(".sidebar.open")
             await pg.wait_for_timeout(300)
             shown = await pg.evaluate("() => document.querySelector('.sidebar').getBoundingClientRect().left >= 0")

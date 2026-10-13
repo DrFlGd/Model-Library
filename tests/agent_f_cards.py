@@ -161,7 +161,8 @@ async def card_checks(pg, library, base, out, api, check, png, cube):
     await pg.wait_for_selector('.card:has(.card-name:text-is("F card chosen"))')
     selected = pg.locator('.card:has(.card-name:text-is("F card chosen"))')
     await selected.click()
-    await pg.click('#unsorted-tabs [data-view="details"]')
+    await pg.wait_for_selector('#rail-files[aria-pressed="true"]')  # one Unsorted model shows its files first
+    await pg.click("#rail-details")
     await pg.wait_for_selector("#model-details")
     check("Agent F explicit cover overrides the automatic composition",
           await selected.locator(".thumb > img").count() == 1
@@ -198,8 +199,8 @@ async def card_checks(pg, library, base, out, api, check, png, cube):
           and not restored_source["files"]["cover_missing"]
           and await selected.locator(".thumb > img").count() == 1)
     await selected.click()
-    await pg.wait_for_selector("#unsorted-more")
-    await pg.click("#unsorted-more")
+    await pg.wait_for_selector("#browse-head.selecting #bar-more")
+    await pg.click("#browse-head.selecting #bar-more")
     await pg.click('#context-menu [data-action="auto-cover"]')
     await pg.wait_for_function("() => document.querySelector('#toast')?.textContent.includes('automatic preview')")
     # The reset is journalled, and the chosen picture remains on disk.

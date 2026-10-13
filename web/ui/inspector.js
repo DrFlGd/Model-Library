@@ -1,0 +1,94 @@
+// The inspector on the right of a page (docs/PLAN.md, "Inspector rails design"):
+// a pane with tabs, and a rail along the window's edge with each tab's icon and
+// name written down it. Click a name to open that tab; click the open one, its »
+// button or ] to fold the pane to its rail. Its width, whether it's folded and
+// the tab open are kept per page.
+import { html, useEffect, useRef, useState, useLayoutEffect } from "../lib/html.js";
+import { useStore } from "../lib/store.js";
+import { ui, setPref } from "./state.js";
+import { Icon } from "./icons.js";
+import { typing } from "./actions.js";
+
+const MIN = 260, MAX = 520;
+
+/** `page`: whose settings these are (model, browse, unsorted, import, dupes).
+ *  `tabs`: [{ id, label, icon, body }] (a tab without a body isn't shown).
+ *  `open`: whether it starts open on this page. `want`: a tab to show now
+ *  (when it changes, e.g. a model was selected in Unsorted). */
+export function Inspector({ page, tabs, open: startOpen = true, want = null, label = "Details" }) {
+  const st = useStore(ui, (s) => ({ open: s.inspector[page], tab: s.inspectorTab[page], width: s.inspectorWidth }));
+  const list = tabs.filter((t) => t.body !== undefined && t.body !== false);
+  // Below 900 px a pane covers the page, so it starts folded there and opening
+  // it isn't kept.
+  const narrow = useNarrow();
+  const [narrowOpen, setNarrowOpen] = useState(false);
+  const isOpen = narrow ? narrowOpen : st.open == null ? startOpen : st.open === "open";
+  const tab = list.find((t) => t.id === st.tab) || list[0];
+  const width = Math.max(MIN, Math.min(MAX, st.width || 340));
+  const set = (patch) => {
+    const prefs = {};
+    if ("tab" in patch) prefs.inspectorTab = { ...ui.get().inspectorTab, [page]: patch.tab };
+    if ("open" in patch) {
+      if (narrow) setNarrowOpen(patch.open);
+      else prefs.inspector = { ...ui.get().inspector, [page]: patch.open ? "open" : "folded" };
+    }
+    setPref(prefs);
+  };
+  const toggle = () => set({ open: !isOpen });
+  const last = useRef(want);
+  useEffect(() => {
+    if (want && want !== last.current && list.some((t) => t.id === want)) set({ tab: want });
+    last.current = want;
+  }, [want]);
+  useEffect(() => {
+    const key = (e) => {
+      if (e.key !== "]" || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || typing(e) || ui.get().dialog || ui.get().menu) return;
+      e.preventDefault();
+      toggle();
+    };
+    addEventListener("keydown", key);
+    return () => removeEventListener("keydown", key);
+  });
+  const stopResize = useRef(null);
+  useEffect(() => () => stopResize.current?.(), []);
+  const resize = (e) => {
+    e.preventDefault();
+    stopResize.current?.();
+    const start = e.clientX, before = width;
+    const move = (ev) => setPref({ inspectorWidth: Math.max(MIN, Math.min(MAX, before + start - ev.clientX)) });
+    const stop = () => { removeEventListener("pointermove", move); removeEventListener("pointerup", stop); removeEventListener("pointercancel", stop); };
+    stopResize.current = stop;
+    addEventListener("pointermove", move); addEventListener("pointerup", stop); addEventListener("pointercancel", stop);
+  };
+  const pick = (t) => (isOpen && tab?.id === t.id ? set({ open: false }) : set({ open: true, tab: t.id }));
+  return html`<div class=${`inspector-side${isOpen ? " open" : ""}`} id="inspector" data-page=${page} data-tab=${isOpen ? tab?.id : null}>
+    ${isOpen && tab ? html`<section class="inspector-pane" style=${{ width: `${width}px` }} aria-label=${tab.label} id=${`pane-${tab.id}`}>
+      <header class="pane-head"><strong>${tab.label}</strong>
+        <button type="button" class="ghost panel-fold" id="inspector-fold" title=${`Hide ${label.toLowerCase()} (])`} aria-label=${`Hide ${label.toLowerCase()} (])`} onClick=${toggle}>${Icon.chevronsRight(14)}</button></header>
+      <div class="pane-body">${tab.body}</div>
+      <div class="pane-resize" role="separator" aria-label="Width" aria-orientation="vertical" aria-valuemin=${MIN} aria-valuemax=${MAX} aria-valuenow=${width} tabIndex="0"
+        onPointerDown=${resize} onKeyDown=${(e) => { if (["ArrowLeft", "ArrowRight"].includes(e.key)) { e.preventDefault(); setPref({ inspectorWidth: Math.max(MIN, Math.min(MAX, width + (e.key === "ArrowLeft" ? 20 : -20))) }); } }}></div>
+    </section>` : null}
+    <${Rail} side="right" tabs=${list} current=${isOpen ? tab?.id : null} onPick=${pick} />
+  </div>`;
+}
+
+function useNarrow() {
+  const q = "(max-width: 899px)";
+  const [n, setN] = useState(() => matchMedia(q).matches);
+  useLayoutEffect(() => {
+    const mq = matchMedia(q), on = () => setN(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return n;
+}
+
+/** A rail: each tab's icon with its name written down the strip. */
+export function Rail({ side, tabs, current, onPick }) {
+  return html`<nav class=${`rail rail-${side}`} aria-label=${side === "right" ? "Inspector" : "Panes"}>
+    ${tabs.map((t) => html`<button type="button" key=${t.id} class="rail-tab" id=${`rail-${t.id}`} data-tab=${t.id} aria-pressed=${current === t.id ? "true" : "false"}
+      title=${current === t.id ? `Hide ${t.label}` : `Show ${t.label}`} onClick=${() => onPick(t)}>
+      ${Icon[t.icon] ? Icon[t.icon](16) : null}<span class="rail-name">${t.label}</span></button>`)}
+  </nav>`;
+}

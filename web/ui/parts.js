@@ -18,7 +18,7 @@ import { api, apiBytes, isDesktop, libraryUrl, openModelFile, openArchiveEntry, 
 import { ViewSwitch, SortMenu } from "./layout.js";
 import { size } from "./details.js";
 import { openMenu, typing } from "./actions.js";
-import { fileSel, pick, pickEvent, show, clear } from "./filesel.js";
+import { fileSel, pick, pickEvent, listClick, show, view, clear } from "./filesel.js";
 import { TypeTag } from "./filetypes.js";
 import { PdfDocument } from "./document-viewer.js";
 
@@ -580,7 +580,7 @@ export function SelectionRows({ src, files, name, view = "folders", contextActio
     else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
       const i = order.indexOf(e.target.closest?.("[data-key]")?.dataset.key || sel.shown);
       const j = e.key === "Home" ? 0 : e.key === "End" ? order.length - 1 : Math.max(0, Math.min(order.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)));
-      if (order[j]) { pick(order[j], e.shiftKey ? "range" : "one", order); [...e.currentTarget.querySelectorAll("[data-key]")].find((el) => el.dataset.key === order[j])?.focus(); }
+      if (order[j]) { if (e.shiftKey) pick(order[j], "range", order); else view(order[j]); [...e.currentTarget.querySelectorAll("[data-key]")].find((el) => el.dataset.key === order[j])?.focus(); }
       e.preventDefault();
     }
   };
@@ -589,8 +589,9 @@ export function SelectionRows({ src, files, name, view = "folders", contextActio
     <ul class="tree" id=${view === "folders" ? "part-tree" : view === "all" ? "all-files" : "by-type"}>${rows.map((r) => r.heading ? html`<li key=${r.key} class="file-type-heading" data-kind=${r.kind}>${r.heading}</li>` : html`<li key=${r.key} class=${r.folder ? "tree-dir" : "tree-file"}>
       <div class="file-selection-row" style=${{ paddingLeft: `${r.level * 14}px` }}>
         ${r.folder || (!r.entry && /\.zip$/i.test(r.rel)) ? html`<button class="ghost file-fold" type="button" aria-label=${`${(folded[r.key] ?? !r.folder) ? "Unfold" : "Fold"} ${r.name}`} aria-expanded=${!(folded[r.key] ?? !r.folder)} onClick=${() => unfold(r)}>${(folded[r.key] ?? !r.folder) ? "›" : "⌄"}</button>` : html`<span class="file-fold"></span>`}
-        <button type="button" class=${`tree-btn${sel.picked.includes(r.key) ? " on" : ""}`} data-key=${r.key} data-file=${!r.folder && !r.entry ? r.rel : null} data-dir=${r.folder ? r.rel : null} data-entry=${r.entry || null} aria-pressed=${sel.picked.includes(r.key)}
-          onClick=${(e) => pickEvent(r.key, e, order)} onContextMenu=${(e) => menu(e, r)} title=${r.rel || name}>
+        <input type="checkbox" class="pick-tick file-tick" tabindex="-1" checked=${sel.picked.includes(r.key)} aria-label=${`Select ${r.name}`} onClick=${(e) => { e.stopPropagation(); pick(r.key, "toggle", order); }} />
+        <button type="button" class=${`tree-btn${sel.picked.includes(r.key) ? " on" : ""}${sel.shown === r.key ? " shown" : ""}`} data-key=${r.key} data-file=${!r.folder && !r.entry ? r.rel : null} data-dir=${r.folder ? r.rel : null} data-entry=${r.entry || null} aria-pressed=${sel.picked.includes(r.key)}
+          onClick=${(e) => listClick(r.key, e, order)} onContextMenu=${(e) => menu(e, r)} title=${r.rel || name}>
           <span class="tree-icon tree-type">${r.folder ? Icon.folder(13) : html`<${TypeTag} name=${r.entry || r.rel} />`}</span><span class="tree-name">${r.name}</span>${!r.folder ? html`<span class="muted tree-size">${size(r.size || 0)}</span>` : null}
         </button>
       </div>

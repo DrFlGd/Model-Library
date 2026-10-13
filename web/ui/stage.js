@@ -8,7 +8,7 @@ import { size } from "./details.js";
 import { TypeTag, fileType } from "./filetypes.js";
 import { isDesktop, openModelFile, openArchiveEntry } from "./library.js";
 import { MESH, Stage3D, Pictures, Documents, Videos } from "./parts.js";
-import { fileSel, keyParts, pick } from "./filesel.js";
+import { fileSel, keyParts, pick, view } from "./filesel.js";
 import { Contents, Breadcrumb, parentKey, parentPath, isFolderKey, useArchive, childrenOf, sortChildren } from "./contents.js";
 
 export function WorkspaceStage({ src, model, files, contextActions }) {
@@ -25,13 +25,13 @@ export function WorkspaceStage({ src, model, files, contextActions }) {
   const siblings = sortChildren(childrenOf(p.kind === "entry" ? entries : files, parentPath(name), p.kind === "entry" ? archive : null), by).filter((r) => !r.folder);
   const step = (delta) => {
     const index = siblings.findIndex((r) => r.key === shown);
-    if (index >= 0 && siblings.length > 1) pick(siblings[(index + delta + siblings.length) % siblings.length].key);
+    if (index >= 0 && siblings.length > 1) view(siblings[(index + delta + siblings.length) % siblings.length].key);
   };
   useEffect(() => {
     const key = (e) => {
       if (e.defaultPrevented || typing(e) || ui.get().dialog || ui.get().menu || e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.target.closest?.(".file-panel, .filepanel, select, video")) return;
-      if (e.key === "Backspace" && shown !== "d:") { e.preventDefault(); pick(parentKey(shown)); }
+      if (e.key === "Backspace" && shown !== "d:") { e.preventDefault(); view(parentKey(shown)); }
       else if (!container && ["ArrowLeft", "ArrowRight"].includes(e.key)) { e.preventDefault(); step(e.key === "ArrowLeft" ? -1 : 1); }
     };
     addEventListener("keydown", key);
