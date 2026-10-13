@@ -771,7 +771,7 @@ Jerred chose all 11 items of the third UI review (https://claude.ai/artifact/LM7
 10. **Drawing previews again is asked.** Changing a Previews setting saves it, and the cards show it as they come into view (their pictures are cached on this computer by look). A dialog then offers to draw the previews kept in the model folders again now, with the number of models, as a job with Stop. Not now leaves them until a model's preview is made again.
 11. **Previews in a 3MF's own colours.** Library › Previews has **Draw a 3MF file in its own colours when it has some** (`preview_file_colours` in library.json, off by default). The renderer colours each triangle the way the viewer does: the file's colour where it has one, else the preview or model colour. A 3MF's saved picture still comes first when pictures are on.
 
-### Group 4 design (0.5.18)
+### Group 4 design (0.5.17)
 
 Archives: R7 and R8. The open points in the round-2 write-up are taken as proposed: multi-part RAR sets and split 7z archives open as one archive, and moving files into a ZIP removes the originals (copying leaves them).
 

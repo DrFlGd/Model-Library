@@ -30,7 +30,8 @@ export function runCheck(cmd, args, label, onProgress) {
         }
         if (j.done) {
           if (j.error) throw new Error(j.error);
-          return j.result?.stopped ? null : j.result;
+          // Stop wins even when the job finished before it heard: the person asked to stop.
+          return stopped || j.result?.stopped ? null : j.result;
         }
         await new Promise((r) => setTimeout(r, 250));
       }
