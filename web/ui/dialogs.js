@@ -291,7 +291,42 @@ function ConfirmDialog({ title, text, button, run }) {
 /** `{ title, text, button, run }`: `run()` is what happens after the red button. */
 export const confirmDialog = (opts) => ui.set({ dialog: { type: "confirm", ...opts } });
 
+/** A locked archive's password (docs/PLAN.md, "Group 4 design"). It shows over
+ *  any open dialog, so it has its own Esc and buttons rather than `Dialog`'s. */
+function PasswordDialog({ file, wrong, resolve }) {
+  const [password, setPassword] = useState("");
+  const box = useRef(null);
+  useLayoutEffect(() => {
+    box.current?.focus();
+    // before the dialog underneath sees the key
+    const key = (e) => { if (e.key === "Escape") { e.stopImmediatePropagation(); e.preventDefault(); resolve(null); } };
+    addEventListener("keydown", key, true);
+    return () => removeEventListener("keydown", key, true);
+  }, []);
+  return html`<div class="dialog-backdrop password-backdrop">
+    <form class="dialog" id="password-dialog" role="dialog" aria-modal="true" aria-label="This archive is locked" onSubmit=${(e) => { e.preventDefault(); if (password) resolve(password); }}>
+      <div class="dialog-head"><h2>This archive is locked</h2>
+        <button type="button" class="ghost" aria-label="Close" title="Close (Esc)" onClick=${() => resolve(null)}>${Icon.close(15)}</button></div>
+      <p>"${file}" needs its password to open. It's kept until the app closes and isn't saved.</p>
+      <label class="field-block"><span>Password</span>
+        <input id="archive-password" type="password" ref=${box} autocomplete="off" value=${password} onInput=${(e) => setPassword(e.target.value)} /></label>
+      <div class="dialog-foot">
+        ${wrong ? html`<p class="form-error" role="alert">That password didn't open it. Try again.</p>` : null}
+        <div class="dialog-actions">
+          <button type="button" class="ghost" id="password-dialog-cancel" onClick=${() => resolve(null)}>Cancel</button>
+          <button type="submit" class="primary" disabled=${!password}>Open</button>
+        </div>
+      </div>
+    </form>
+  </div>`;
+}
+
 export function Dialogs() {
+  const password = useStore(ui, (s) => s.password);
+  return html`<${MainDialog} />${password ? html`<${PasswordDialog} key=${password.file + password.wrong} ...${password} />` : null}`;
+}
+
+function MainDialog() {
   const dialog = useStore(ui, (s) => s.dialog);
   if (!dialog) return null;
   if (dialog.type === "archive-model") return html`<${ArchiveDialog} request=${dialog} />`;

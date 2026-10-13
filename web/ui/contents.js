@@ -7,7 +7,7 @@ import { ctx } from "./context.js";
 import { Icon } from "./icons.js";
 import { api, apiBytes, isDesktop, openModelFile, openArchiveEntry } from "./library.js";
 import { size } from "./details.js";
-import { TypeTag, fileType } from "./filetypes.js";
+import { TypeTag, fileType, isArchive } from "./filetypes.js";
 import { SortMenu, ViewSwitch } from "./layout.js";
 import { openMenu, typing } from "./actions.js";
 import { MESH, LazyPreview, srcArgs, useAsCover, useSeen, queued } from "./parts.js";
@@ -23,7 +23,7 @@ export function parentKey(key) {
   return `d:${parentPath(p.file)}`;
 }
 export const isFolderKey = (key) => key.startsWith("d:") || (key.startsWith("z:") && key.endsWith("/"));
-export const viewable = (name) => /\.(stl|obj|3mf|png|jpe?g|webp|gif|bmp|avif|pdf|md|markdown|txt|mp4|webm|m4v|mov|zip)$/i.test(name);
+export const viewable = (name) => isArchive(name) || /\.(stl|obj|3mf|png|jpe?g|webp|gif|bmp|avif|pdf|md|markdown|txt|mp4|webm|m4v|mov)$/i.test(name);
 
 /** Keep archive state tied to its source; late replies cannot replace another ZIP. */
 export function useArchive(src, file) {
@@ -68,7 +68,7 @@ export function Breadcrumb({ model, shown }) {
   const folder = p.kind === "folder" ? p.file : parentPath(p.file);
   let path = "";
   for (const name of folder.split("/").filter(Boolean)) { path = path ? `${path}/${name}` : name; crumbs.push({ key: `d:${path}`, name }); }
-  if (p.kind === "entry" || /\.zip$/i.test(p.file)) {
+  if (p.kind === "entry" || isArchive(p.file)) {
     crumbs.push({ key: `f:${p.file}`, name: p.file.split("/").pop() });
     path = "";
     for (const name of (p.entry || "").replace(/\/$/, "").split("/").filter(Boolean).slice(0, p.entry?.endsWith("/") ? undefined : -1)) {

@@ -66,6 +66,8 @@ for name, path, pattern, fmt in (
     ("Preact", "web/vendor/PREACT_NOTICE.txt", r"Preact (\d+\.\d+\.\d+)", "{}"),
     ("htm", "web/vendor/PREACT_NOTICE.txt", r"htm \(\S+ @ ([0-9a-f]{7})", "@ {}"),
     ("three.js", "web/vendor/three/three.core.js", r"REVISION = '(\d+)'", "r{}"),
+    ("7z reader (sevenz-rust2)", "desktop/core/Cargo.toml", r'sevenz-rust2 = \{ version = "([\d.]+)"', "{}"),
+    ("RAR reader (unrar)", "desktop/core/Cargo.toml", r'\nunrar = "([\d.]+)"', "{}"),
 ):
     v = found(path, pattern)
     if v:

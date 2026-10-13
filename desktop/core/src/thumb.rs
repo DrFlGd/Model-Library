@@ -130,7 +130,7 @@ pub fn pick_main_in(files: &[(String, u64, PathBuf)]) -> Option<(String, Option<
     {
         return Some((rel.clone(), None));
     }
-    for (rel, _, at) in files.iter().filter(|(r, _, _)| archive::is_zip(r)) {
+    for (rel, _, at) in files.iter().filter(|(r, _, _)| archive::is_archive(r)) {
         let Ok(entries) = archive::list(at) else {
             continue;
         };
@@ -146,12 +146,20 @@ pub fn pick_main_in(files: &[(String, u64, PathBuf)]) -> Option<(String, Option<
     None
 }
 
-/// A file's bytes, or an entry's inside a ZIP.
+/// A 7z or RAR up to this size is unpacked to draw a model's preview from it;
+/// bigger ones aren't, just for a preview (docs/PLAN.md, "Group 4 design").
+const OPEN_FOR_PREVIEW: u64 = 512 << 20;
+
+/// A file's bytes, or an entry's inside an archive, for drawing the model's preview.
 pub fn file_bytes(dir: &Path, rel: &str, entry: Option<&str>) -> Result<Vec<u8>> {
-    bytes_at(&dir.join(crate::library::rel_inside(rel)?), entry)
+    let path = dir.join(crate::library::rel_inside(rel)?);
+    match entry {
+        Some(e) => archive::read_opening(&path, e, MAX_BYTES, OPEN_FOR_PREVIEW),
+        None => bytes_at(&path, None),
+    }
 }
 
-/// The bytes of the file at `path`, or of an entry inside it (a ZIP).
+/// The bytes of the file at `path`, or of an entry inside it (an archive).
 pub fn bytes_at(path: &Path, entry: Option<&str>) -> Result<Vec<u8>> {
     match entry {
         Some(e) => archive::read(path, e, MAX_BYTES),

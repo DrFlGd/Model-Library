@@ -1,11 +1,12 @@
-//! Reviewed ZIP operations for a single existing model. Outputs are staged,
+//! Reviewed archive operations for a single existing model: compressing its
+//! files (all, or those selected) to a ZIP, and extracting a ZIP, 7z or RAR. Outputs are staged,
 //! read back and hashed before they are published. Source cleanup is opt-in,
 //! kept in the existing journal recovery directory and reversible.
 use crate::{archive, index::Index, library::Library, model, relayout};
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{collections::{BTreeMap, HashSet}, fs::{self, File}, io::Read, path::{Path, PathBuf}, sync::atomic::{AtomicBool, Ordering}};
+use std::{collections::HashSet, fs::{self, File}, io::Read, path::{Path, PathBuf}, sync::atomic::{AtomicBool, Ordering}};
 
 const MAX_FILES: usize = 20_000;
 const MAX_EXPANDED: u64 = 8 * 1024 * 1024 * 1024;
@@ -100,39 +101,51 @@ fn check_outputs(root: &Path, paths: &[String]) -> Result<()> {
     }
     Ok(())
 }
-fn zip_entries(path: &Path) -> Result<Vec<Value>> {
-    let mut z = zip::ZipArchive::new(File::open(path)?).context("This is not a readable ZIP archive.")?;
-    if z.len() > MAX_FILES + 500 { bail!("The ZIP has too many entries."); }
+/// Every file in an archive with its size and hash, checked for paths that can't
+/// be extracted safely (docs/PLAN.md, "Group 4 design": ZIP, 7z and RAR alike).
+fn archive_entries(path: &Path) -> Result<Vec<Value>> {
+    if archive::is_zip(&path.to_string_lossy()) {
+        let mut z = zip::ZipArchive::new(File::open(path)?).context("This is not a readable ZIP archive.")?;
+        if z.len() > MAX_FILES + 500 { bail!("The ZIP has too many entries."); }
+        for i in 0..z.len() {
+            let e = z.by_index_raw(i).context("The ZIP contains an unsupported or encrypted entry.")?;
+            if e.unix_mode().is_some_and(|mode| mode & 0o170000 == 0o120000) {
+                bail!("The ZIP contains a symbolic link; links cannot be extracted.");
+            }
+        }
+    }
     let (mut files, mut total) = (vec![], 0u64);
     let mut names = HashSet::new();
     let mut components = std::collections::HashMap::<String,String>::new();
-    for i in 0..z.len() {
-        let mut e = z.by_index(i).context("The ZIP contains an unsupported or encrypted entry.")?;
-        let name = e.name().to_string();
+    archive::each(path, &AtomicBool::new(false), &mut |name, size, data| {
         let rel = name.trim_end_matches('/');
         archive::safe_entry(rel)?;
-        if e.unix_mode().is_some_and(|mode| mode & 0o170000 == 0o120000) {
-            bail!("The ZIP contains a symbolic link; links cannot be extracted.");
-        }
-        if !names.insert(rel.to_lowercase()) { bail!("ZIP entries collide (including letter case): {rel}"); }
+        if !names.insert(rel.to_lowercase()) { bail!("Archive entries collide (including letter case): {rel}"); }
         let mut prefix = String::new();
         for part in rel.split('/') {
             if !prefix.is_empty() { prefix.push('/'); }
             prefix.push_str(part);
             if let Some(old) = components.insert(prefix.to_lowercase(), prefix.clone()) {
-                if old != prefix { bail!("ZIP paths differ only by case: {old} and {prefix}"); }
+                if old != prefix { bail!("Archive paths differ only by case: {old} and {prefix}"); }
             }
         }
-        if e.is_dir() { continue; }
         // This explanatory manifest does not become a second live model.json.
-        if manifest_entry(rel) { continue; }
-        total = total.checked_add(e.size()).ok_or_else(|| anyhow!("ZIP expanded size overflow."))?;
-        if total > MAX_EXPANDED || files.len() >= MAX_FILES { bail!("The ZIP is too large to extract safely."); }
-        let (sha, size) = hash_stream(&mut e, MAX_EXPANDED)?;
-        if size != e.size() { bail!("The ZIP's advertised size differs from its contents: {rel}"); }
+        if manifest_entry(rel) { return Ok(()); }
+        total = total.checked_add(size).ok_or_else(|| anyhow!("Archive expanded size overflow."))?;
+        if total > MAX_EXPANDED || files.len() >= MAX_FILES { bail!("The archive is too large to extract safely."); }
+        let (sha, n) = hash_stream(data, MAX_EXPANDED)?;
+        if n != size { bail!("The archive's advertised size differs from its contents: {rel}"); }
         files.push(json!({"path":rel,"size":size,"sha256":sha}));
-    }
+        Ok(())
+    })?;
     Ok(files)
+}
+/// Whether a model file is in the selection (folders select what's in them; none selects all).
+fn selected(rel: &str, selection: &[String]) -> bool {
+    selection.is_empty() || selection.iter().any(|s| rel == s || rel.starts_with(&format!("{s}/")))
+}
+fn selection_of(v: &Value) -> Vec<String> {
+    v["selection"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect()
 }
 pub fn plan(lib: &Library, ix: &Index, args: &Value) -> Result<Value> {
     let model_id = field(args, "id");
@@ -144,7 +157,9 @@ pub fn plan(lib: &Library, ix: &Index, args: &Value) -> Result<Value> {
     if !matches!(action, "compress" | "extract") { bail!("Choose ZIP compression or extraction."); }
     let archive_file = field(args, "file");
     let file = if archive_file.is_empty() && action == "compress" { "Model.zip" } else { archive_file };
-    if !file.to_ascii_lowercase().ends_with(".zip") { bail!("Choose a .zip archive."); }
+    if action == "compress" && !archive::is_zip(file) { bail!("Choose a .zip file name."); }
+    if action == "extract" && !archive::is_archive(file) { bail!("Choose a ZIP, 7z or RAR archive."); }
+    let selection: Vec<String> = if action == "compress" { args["files"].as_array().into_iter().flatten().filter_map(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string).collect() } else { vec![] };
     if action == "compress" && file.contains('/') { bail!("Create the ZIP in the model's top folder."); }
     let at = safe(&root, file)?;
     let mut inputs = vec![];
@@ -154,22 +169,23 @@ pub fn plan(lib: &Library, ix: &Index, args: &Value) -> Result<Value> {
     if action == "compress" {
         check_outputs(&root, &[file.to_string()])?;
         let mut total = 0u64;
-        for (rel, _) in content_files(&root)? {
+        for (rel, _) in content_files(&root)?.into_iter().filter(|(rel, _)| selected(rel, &selection)) {
             if rel == MANIFEST { bail!("The archive manifest path is reserved; rename that file first."); }
             let (sha, size) = file_hash(&safe(&root, &rel)?)?;
             total = total.checked_add(size).ok_or_else(|| anyhow!("Model size overflow."))?;
             if total > MAX_EXPANDED { bail!("This model is too large for one ZIP operation."); }
             inputs.push(json!({"path":rel,"sha256":sha,"size":size}));
         }
-        if inputs.is_empty() { bail!("This model has no content files to compress."); }
+        if inputs.is_empty() { bail!(if selection.is_empty() { "This model has no content files to compress." } else { "Choose files in the model to compress." }); }
+        if inputs.iter().any(|x| field(x, "path") == file) { bail!("The ZIP can't have the name of a file going into it."); }
         source_sha = String::new();
         bytes = total;
         output_paths.push(file.to_string());
     } else {
         if !at.is_file() { bail!("That archive is no longer in the model."); }
         (source_sha, _) = file_hash(&at)?;
-        inputs = zip_entries(&at)?;
-        if inputs.is_empty() { bail!("There are no files to extract from the ZIP."); }
+        inputs = archive_entries(&at)?;
+        if inputs.is_empty() { bail!("There are no files to extract from the archive."); }
         output_paths = inputs.iter().map(|x| field(x, "path").to_string()).collect();
         check_outputs(&root, &output_paths)?;
         bytes = inputs.iter().map(|x| x["size"].as_u64().unwrap_or(0)).sum();
@@ -177,7 +193,7 @@ pub fn plan(lib: &Library, ix: &Index, args: &Value) -> Result<Value> {
     Ok(json!({
         "action": action, "model": m.rel(), "model_id": model_id,
         "name": m.v["name"], "file": file, "source_sha256": source_sha,
-        "files": inputs, "output_paths": output_paths,
+        "files": inputs, "output_paths": output_paths, "selection": selection,
         "files_count": inputs.len(), "bytes": bytes,
         "required_bytes": if action == "compress" { bytes + (bytes / 10) + 1024 * 1024 } else { bytes },
         "metadata": "Only the model's files, at the ZIP's root. The ZIP goes in the model's folder beside model.json and the previews, which stay outside it."
@@ -207,7 +223,8 @@ fn validate(lib: &Library, plan: &Value) -> Result<PathBuf> {
     let outputs: Vec<String> = plan["output_paths"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
     check_outputs(&root, &outputs)?;
     if plan["action"] == "compress" {
-        let current: Vec<String> = content_files(&root)?.into_iter().map(|(rel,_)|rel).collect();
+        let selection = selection_of(plan);
+        let current: Vec<String> = content_files(&root)?.into_iter().map(|(rel,_)|rel).filter(|rel| selected(rel, &selection)).collect();
         let proposed: Vec<String> = plan["files"].as_array().into_iter().flatten().map(|x|field(x,"path").to_string()).collect();
         if current != proposed { bail!("Model files changed since the preview. Review the plan again."); }
         for f in plan["files"].as_array().into_iter().flatten() {
@@ -217,7 +234,7 @@ fn validate(lib: &Library, plan: &Value) -> Result<PathBuf> {
             }
         }
     } else if file_hash(&safe(&root,field(plan,"file"))?)?.0 != field(plan,"source_sha256") {
-        bail!("The source ZIP changed since the preview. Review the plan again.");
+        bail!("The archive changed since the preview. Review the plan again.");
     }
     Ok(root)
 }
@@ -235,31 +252,34 @@ fn make_zip(root: &Path, plan: &Value, to: &Path, cancel: &AtomicBool, progress:
     }
     zip.finish()?.sync_all()?;
     // Re-open and hash every uncompressed entry; CRC/ZIP success is insufficient.
-    let entries = zip_entries(to)?;
+    let entries = archive_entries(to)?;
     if entries != *inputs { bail!("ZIP verification failed: expanded bytes differ from the sources."); }
     Ok(())
 }
-fn unpack_zip(root: &Path, plan: &Value, stage: &Path, cancel: &AtomicBool, progress: &dyn Fn(usize,usize,&str)) -> Result<()> {
-    let mut z = zip::ZipArchive::new(File::open(safe(root,field(plan,"file"))?)?)?;
+fn unpack(root: &Path, plan: &Value, stage: &Path, cancel: &AtomicBool, progress: &dyn Fn(usize,usize,&str)) -> Result<()> {
     let entries = plan["files"].as_array().unwrap();
-    for (i,f) in entries.iter().enumerate() {
-        stopped(cancel)?;
-        let rel = field(f,"path");
-        progress(i,entries.len(),rel);
+    let wanted: std::collections::HashMap<&str, &Value> = entries.iter().map(|f| (field(f,"path"), f)).collect();
+    let mut written = 0;
+    archive::each(&safe(root,field(plan,"file"))?, cancel, &mut |name, _, data| {
+        let rel = name.trim_end_matches('/');
+        let Some(f) = wanted.get(rel) else { return Ok(()) };
+        progress(written,entries.len(),rel);
         let dest = safe(stage,rel)?;
         fs::create_dir_all(dest.parent().unwrap())?;
-        let mut entry = z.by_name(rel)?;
         let mut out = File::create(&dest)?;
         // Bound actual expanded output even if archive metadata is dishonest.
         let limit = f["size"].as_u64().unwrap_or(0);
-        let written = std::io::copy(&mut entry.take(limit + 1), &mut out)?;
-        if written != limit { bail!("The ZIP entry expanded to an unexpected size: {rel}"); }
+        let n = std::io::copy(&mut data.take(limit + 1), &mut out)?;
+        if n != limit { bail!("The archive's entry expanded to an unexpected size: {rel}"); }
         out.sync_all()?;
         let (hash,len)=file_hash(&dest)?;
-        if hash != field(f,"sha256") || len != f["size"].as_u64().unwrap_or(0) {
+        if hash != field(f,"sha256") || len != limit {
             bail!("Archive verification failed for {rel}. Nothing has been removed.");
         }
-    }
+        written += 1;
+        Ok(())
+    })?;
+    if written != entries.len() { bail!("Some files of the archive weren't found. Nothing has been removed."); }
     Ok(())
 }
 pub fn execute(lib: &Library, plan: &Value, remove_sources: bool, cancel: &AtomicBool, progress: &dyn Fn(usize,usize,&str)) -> Result<Value> {
@@ -271,7 +291,7 @@ pub fn execute(lib: &Library, plan: &Value, remove_sources: bool, cancel: &Atomi
     let stage = root.join(&stage_name);
     fs::create_dir(&stage)?;
     let mut j = json!({
-        "kind":"archive-op","id":id,"label":if plan["action"] == "compress" {"Compressed model to ZIP"} else {"Extracted ZIP into model"},
+        "kind":"archive-op","id":id,"label":if plan["action"] == "compress" { if selection_of(plan).is_empty() {"Compressed model to ZIP"} else {"Compressed files to ZIP"} } else {"Extracted archive into model"},
         "state":"running","created":crate::library::now(),"action":plan["action"],
         "model":plan["model"],"model_id":plan["model_id"],"file":plan["file"],
         "plan":plan,"remove_sources":remove_sources,"stage":stage_name,
@@ -284,7 +304,7 @@ pub fn execute(lib: &Library, plan: &Value, remove_sources: bool, cancel: &Atomi
             let (sha,len) = file_hash(&stage.join(field(plan,"file")))?;
             j["outputs"] = json!([{"path":plan["file"],"sha256":sha,"size":len}]);
         } else {
-            unpack_zip(&root,plan,&stage,cancel,progress)?;
+            unpack(&root,plan,&stage,cancel,progress)?;
             j["outputs"] = plan["files"].clone();
         }
         // A changed source invalidates cleanup AND publication, even if the
@@ -533,6 +553,46 @@ mod tests {
         for (n,hash) in before { assert_eq!(file_hash(&root.join(n)).unwrap().0,hash); }
     }
     #[test]
+    fn compress_selected_files_then_remove_only_those() {
+        let (lib,ix,id)=setup("archive-selected");
+        let root=lib.root().join("Unsorted/Kit");
+        let p=plan(&lib,&ix,&json!({"id":id,"action":"compress","file":"Parts.zip","files":["Parts"]})).unwrap();
+        assert_eq!(p["files"].as_array().unwrap().len(),1);
+        assert!(plan(&lib,&ix,&json!({"id":id,"action":"compress","file":"README.pdf","files":["README.pdf"]})).is_err());
+        fs::write(root.join("Parts/arm.stl"),b"arm").unwrap();
+        assert!(reviewed_plan(&lib,&ix,&json!({"id":id,"action":"compress","file":"Parts.zip","files":["Parts"],"reviewed_plan":p})).is_err(), "a file added to the selection needs a new review");
+        fs::write(root.join("other.txt"),b"not selected").unwrap();
+        let p=plan(&lib,&ix,&json!({"id":id,"action":"compress","file":"Parts.zip","files":["Parts"]})).unwrap();
+        let r=execute(&lib,&p,false,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        let z=zip::ZipArchive::new(File::open(root.join("Parts.zip")).unwrap()).unwrap();
+        let mut names: Vec<&str>=z.file_names().collect(); names.sort();
+        assert_eq!(names,["Parts/arm.stl","Parts/body.stl"]);
+        cleanup(&lib,field(&r,"journal"),&AtomicBool::new(false)).unwrap();
+        assert!(!root.join("Parts").exists());
+        assert!(root.join("README.pdf").is_file() && root.join("other.txt").is_file());
+        relayout::undo(&lib,field(&r,"journal"),&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert_eq!(fs::read(root.join("Parts/arm.stl")).unwrap(),b"arm");
+        assert!(!root.join("Parts.zip").exists());
+    }
+    #[test]
+    fn extracts_7z_and_rar() {
+        let (lib,ix,id)=setup("archive-7z-rar");
+        let root=lib.root().join("Unsorted/Kit");
+        archive::tests::make_7z(&root.join("Extra.7z"),&[("Extra/leg.stl",b"solid leg"),("Extra/notes.txt",b"notes")]);
+        let rar=fs::canonicalize(env!("CARGO_MANIFEST_DIR")).unwrap().join("../../tests/fixtures/version.rar");
+        fs::copy(rar,root.join("Version.rar")).unwrap();
+        let ix2=Index::build(&lib,None,true);
+        let _=ix;
+        for (file,out,bytes) in [("Extra.7z","Extra/leg.stl",&b"solid leg"[..]),("Version.rar","VERSION",&b"unrar-0.4.0"[..])] {
+            let p=plan(&lib,&ix2,&json!({"id":id,"action":"extract","file":file})).unwrap();
+            let r=execute(&lib,&p,false,&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+            assert_eq!(fs::read(root.join(out)).unwrap(),bytes);
+            cleanup(&lib,field(&r,"journal"),&AtomicBool::new(false)).unwrap();
+            assert!(!root.join(file).exists(), "removing the archive is the separate step");
+        }
+        assert!(plan(&lib,&ix2,&json!({"id":id,"action":"compress","file":"Kit.7z"})).is_err(), "it only makes ZIPs");
+    }
+    #[test]
     fn opt_in_cleanup_then_extract_and_undo() {
         let (lib,ix,id)=setup("archive-clean");
         let root=lib.root().join("Unsorted/Kit");
@@ -640,7 +700,7 @@ mod tests {
         let error=relayout::undo(&lib,field(&r,"journal"),&AtomicBool::new(false),&|_,_,_|{}).unwrap_err().to_string();
         assert!(error.contains("original Parts/body.stl") || error.contains("Original Parts/body.stl"));
         assert!(root.join("Kit.zip").exists(), "Undo must keep the last copy");
-        let zip=zip_entries(&root.join("Kit.zip")).unwrap();
+        let zip=archive_entries(&root.join("Kit.zip")).unwrap();
         assert!(zip.iter().any(|e|field(e,"path")=="Parts/body.stl"));
     }
     #[test]

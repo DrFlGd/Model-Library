@@ -24,7 +24,7 @@ function remember(key, bytes) {
   // Reject a clearly corrupt entry before handing it to the system renderer.
   const signature = [37, 80, 68, 70, 45]; // PDF header bytes, written numerically to avoid MIME sniffing.
   if (data.byteLength < signature.length || signature.some((b, i) => data[i] !== b)) {
-    throw new Error("The selected ZIP entry is not a valid PDF (missing PDF signature).");
+    throw new Error("The selected file in the archive is not a valid PDF (missing PDF signature).");
   }
   const url = URL.createObjectURL(new Blob([data], { type: "application/pdf" }));
   if (data.byteLength <= MAX_CACHE_BYTES) {
@@ -96,7 +96,7 @@ export function PdfDocument({ src, doc, model }) {
     ${view.busy ? html`<p role="status" class="stage-note muted">Opening the PDF…</p>` : null}
     ${view.error ? html`<p role="alert" class="form-error">This PDF could not be opened: ${view.error}. The archive has not been changed.</p>` : null}
     ${address ? html`<iframe class="doc-frame pdf-frame" key=${address} title=${doc.entry || doc.file} src=${address} onError=${() => setView((v) => ({ ...v, error: "The system PDF viewer could not display this file." }))}></iframe>` : null}
-    ${doc.entry ? html`<p class="pdf-temporary-note muted">This PDF is read from the ZIP without changing the archive. Page display depends on the system PDF viewer. If the page is blank, use Open externally.</p>` : null}
+    ${doc.entry ? html`<p class="pdf-temporary-note muted">This PDF is read from the archive without changing it. Page display depends on the system PDF viewer. If the page is blank, use Open externally.</p>` : null}
     ${isDesktop() && (doc.entry || model) ? html`<button type="button" class="ghost pdf-external" onClick=${() => doc.entry ? openArchiveEntry(src, doc.file, doc.entry) : openModelFile(model, doc.file)}>Open externally</button>` : null}
   </div>`;
 }
