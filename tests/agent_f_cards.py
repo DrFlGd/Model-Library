@@ -161,8 +161,8 @@ async def card_checks(pg, library, base, out, api, check, png, cube):
     await pg.wait_for_selector('.card:has(.card-name:text-is("F card chosen"))')
     selected = pg.locator('.card:has(.card-name:text-is("F card chosen"))')
     await selected.click()
-    if await pg.get_attribute("#rail-details", "aria-pressed") != "true":
-        await pg.click("#rail-details")
+    await pg.wait_for_selector('#rail-files[aria-pressed="true"]')  # one Unsorted model shows its files first
+    await pg.click("#rail-details")
     await pg.wait_for_selector("#model-details")
     check("Agent F explicit cover overrides the automatic composition",
           await selected.locator(".thumb > img").count() == 1

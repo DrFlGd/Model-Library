@@ -124,9 +124,20 @@ def model_folder(rel, files):
     return d
 
 
+async def clear_selection(pg):
+    """Clear what's selected (✕ in the bar), if anything is: the page's count and
+    ⋯ are in the bar only while nothing is. The bar can go back by itself (a new
+    place starts with nothing selected), so a ✕ that's gone is fine."""
+    x = pg.locator("header.cmdbar.selecting #bar-clear")
+    if await x.count():
+        try:
+            await x.click(timeout=3000)
+        except Exception:
+            pass
+
+
 async def count(pg):
-    if await pg.locator("#browse-head.selecting").count():
-        await pg.click("#bar-clear")
+    await clear_selection(pg)
     await pg.wait_for_function("() => /\\d/.test(document.querySelector('#browse-count')?.textContent || '')")
     await pg.wait_for_timeout(250)  # the search waits for typing to pause
     return await pg.inner_text("#browse-count")
@@ -135,8 +146,7 @@ async def count(pg):
 async def search(pg, q):
     """Search this place; the count once the results for `q` are shown (the
     count is in the bar when nothing is selected)."""
-    if await pg.locator("#bar-clear").count():
-        await pg.click("#bar-clear")
+    await clear_selection(pg)
     await pg.fill("#search", q)
     await pg.wait_for_function("q => document.querySelector('#browse-count')?.dataset.q === q", arg=q)
     return await pg.inner_text("#browse-count")
@@ -257,8 +267,7 @@ async def import_and_wait(pg):
 async def sort_rows(pg):
     """The workspace as a list: every model's name (the view switch is in the
     bar when nothing is selected)."""
-    if await pg.locator("#import-head.selecting").count():
-        await pg.click("#bar-clear")
+    await clear_selection(pg)
     await pg.click('[data-view="list"]')
     await pg.click('[data-filter="all"]')
     await pg.wait_for_selector("#sort-list")
@@ -291,8 +300,8 @@ async def clear_toast(pg):
 async def menu_item(pg, button, action):
     """Open a page's menu (⋯) and pick one of its items. The page's ⋯ is in the
     bar while nothing is selected."""
-    if not button.startswith("header") and await pg.locator("header.cmdbar.selecting #bar-clear").count():
-        await pg.click("#bar-clear")
+    if not button.startswith("header"):
+        await clear_selection(pg)
     await pg.click(button)
     await pg.click(f'#context-menu [data-action="{action}"]')
 
@@ -309,9 +318,15 @@ async def bar_action(pg, action):
 
 async def open_tab(pg, tab="details"):
     """Open the inspector on this tab, unless it's already showing."""
+    # (selecting one Unsorted model turns to its Files tab just after the
+    # click, so look again once that has settled)
     await pg.wait_for_selector(f"#rail-{tab}")
-    if await pg.get_attribute(f"#rail-{tab}", "aria-pressed") != "true":
-        await pg.click(f"#rail-{tab}")
+    for _ in range(10):
+        if await pg.get_attribute(f"#rail-{tab}", "aria-pressed") != "true":
+            await pg.click(f"#rail-{tab}")
+        await pg.wait_for_timeout(200)
+        if await pg.get_attribute(f"#rail-{tab}", "aria-pressed") == "true":
+            break
     await pg.wait_for_selector(f"#pane-{tab}")
 
 
@@ -327,8 +342,7 @@ async def library_menu(pg, action):
 async def start_again(pg):
     """Empty Import's workspace (Start again, under More ▾) if anything is in it."""
     await pg.wait_for_selector("#sort-page[data-ready]")
-    if await pg.locator("#import-head.selecting").count():
-        await pg.click("#bar-clear")
+    await clear_selection(pg)
     await pg.click("#import-more")
     item = pg.locator('#context-menu [data-action="import-clear"]')
     if await item.count():
@@ -346,6 +360,7 @@ async def toast_text(pg, pattern, timeout=30000):
 
 async def category_menu(pg, action):
     """Choose from the Category menu of the category page shown."""
+    await clear_selection(pg)
     await pg.click("#category-menu")
     await pg.click(f'#context-menu [data-action="{action}"]')
 
@@ -1075,8 +1090,7 @@ async def ui_pass(pg):
     await pg.click("#part-tree [data-file='settings.ini']", button="right")
     file_menu = await labels_of(pg, "#context-menu .menu-label")
     await pg.keyboard.press("Escape")
-    if await pg.locator("#bar-clear").count():
-        await pg.click("#bar-clear")
+    await clear_selection(pg)
     await pg.click("#mp-more")
     mp_row = [await pg.inner_text("#mp-edit")] + await labels_of(pg, "#context-menu .menu-label")
     await pg.keyboard.press("Escape")
