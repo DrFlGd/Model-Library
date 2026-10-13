@@ -2039,6 +2039,219 @@ async def review_checks(pg):
     await api(pg, "library_scan", {"full": True})
 
 
+def png_rgba(data):
+    """Decode an 8-bit RGBA or RGB PNG (what the app writes): (width, height, rows of pixels)."""
+    import struct, zlib
+    pos, idat, w = 8, b"", 0
+    while pos < len(data):
+        n, kind = struct.unpack(">I4s", data[pos:pos + 8])
+        body = data[pos + 8:pos + 8 + n]
+        if kind == b"IHDR":
+            w, h, depth, ctype = struct.unpack(">IIBB", body[:10])
+            assert depth == 8 and ctype in (2, 6), (depth, ctype)
+            bpp = 4 if ctype == 6 else 3
+        elif kind == b"IDAT":
+            idat += body
+        pos += 12 + n
+    raw, rows, prev = zlib.decompress(idat), [], bytearray(w * bpp)
+    stride = w * bpp
+    for y in range(h):
+        f, line = raw[y * (stride + 1)], bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+        for i in range(stride):
+            a_ = line[i - bpp] if i >= bpp else 0
+            b_, c_ = prev[i], prev[i - bpp] if i >= bpp else 0
+            if f == 1: line[i] = (line[i] + a_) & 255
+            elif f == 2: line[i] = (line[i] + b_) & 255
+            elif f == 3: line[i] = (line[i] + (a_ + b_) // 2) & 255
+            elif f == 4:
+                pa, pb, pc = abs(b_ - c_), abs(a_ - c_), abs(a_ + b_ - 2 * c_)
+                line[i] = (line[i] + (a_ if pa <= pb and pa <= pc else b_ if pb <= pc else c_)) & 255
+        rows.append([tuple(line[x * bpp:x * bpp + bpp]) + ((255,) if bpp == 3 else ()) for x in range(w)])
+        prev = line
+    return w, h, rows
+
+
+def tint(path):
+    """The average colour of a picture's solid pixels."""
+    _, _, rows = png_rgba(path.read_bytes())
+    px = [p for r in rows for p in r if p[3] > 200]
+    return tuple(round(sum(p[i] for p in px) / max(1, len(px))) for i in range(3))
+
+
+def bluish(c):
+    return c[2] > c[0] + 40 and c[2] > c[1] + 20
+
+
+def reddish(c):
+    return c[0] > c[1] + 40 and c[0] > c[2] + 40
+
+
+def grayish(c):
+    return max(c) - min(c) < 20
+
+
+def solid_png(rgb, size=8):
+    import struct, zlib
+    row = b"\0" + bytes(rgb) * size
+    chunk = lambda k, d: struct.pack(">I", len(d)) + k + d + struct.pack(">I", zlib.crc32(k + d))
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(row * size)) + chunk(b"IEND", b"")
+
+
+def three_mf(path, colours=None, picture=None):
+    """Two 10 mm cubes in a 3MF: in a colour group of `colours` when given, with
+    `picture` (PNG bytes) as the package's thumbnail."""
+    import zipfile
+    def box(oid, x0, pindex):
+        v = [(x0 + x, y, z) for z in (0, 10) for (x, y) in ((0, 0), (10, 0), (10, 10), (0, 10))]
+        t = [(0, 2, 1), (0, 3, 2), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4), (1, 2, 6), (1, 6, 5), (2, 3, 7), (2, 7, 6), (3, 0, 4), (3, 4, 7)]
+        props = f' pid="9" pindex="{pindex}"' if colours else ""
+        return (f'<object id="{oid}" type="model"{props}><mesh><vertices>' + "".join(f'<vertex x="{a_}" y="{b_}" z="{c_}"/>' for a_, b_, c_ in v)
+                + "</vertices><triangles>" + "".join(f'<triangle v1="{a_}" v2="{b_}" v3="{c_}"/>' for a_, b_, c_ in t) + "</triangles></mesh></object>")
+    group = ('<m:colorgroup id="9">' + "".join(f'<m:color color="{c}"/>' for c in colours) + "</m:colorgroup>") if colours else ""
+    model = ('<?xml version="1.0"?><model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" '
+             'xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02"><resources>' + group + box(1, 0, 0) + box(2, 14, 1)
+             + '</resources><build><item objectid="1"/><item objectid="2"/></build></model>')
+    rels = '<Relationship Target="/3D/3dmodel.model" Id="r0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>'
+    if picture:
+        rels += '<Relationship Target="/Metadata/thumbnail.png" Id="r1" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail"/>'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+                   '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+                   '<Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>'
+                   '<Default Extension="png" ContentType="image/png"/></Types>')
+        z.writestr("_rels/.rels", '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + rels + "</Relationships>")
+        z.writestr("3D/3dmodel.model", model)
+        if picture:
+            z.writestr("Metadata/thumbnail.png", picture)
+
+
+async def remake_previews(pg, *ids):
+    """Make these models' previews again and wait for it."""
+    job = (await api(pg, "thumbs_make", {"ids": list(ids), "force": True}))["job"]
+    await pg.wait_for_function("async (id) => (await window.__modlib.platform.api('job', { id })).done", arg=job, polling=200, timeout=60000)
+
+
+async def wait_for(cond, timeout=30):
+    end = time.time() + timeout
+    while time.time() < end:
+        if cond():
+            return True
+        await asyncio.sleep(0.2)
+    return cond()
+
+
+async def group3(pg):
+    """Group 3 (docs/PLAN.md, "Group 3 design"): gray by default, a 3MF's own colours
+    on request, other colours (this computer, a model, the library's previews), and
+    the picture a slicer saves in a 3MF."""
+    cubes = library / "Unsorted/Colour cubes"
+    three_mf(cubes / "cubes.3mf", colours=["#C8352B", "#2F6FD0"])
+    boxed = library / "Unsorted/Picture box"
+    magenta = solid_png((230, 20, 200))
+    three_mf(boxed / "box.3mf", picture=magenta)
+    await api(pg, "library_scan", {"full": False})
+    q = await api(pg, "models_query", {"scope": "unsorted", "limit": 2000})
+    ids = {m["rel"]: m["id"] for m in q["items"]}
+    cid, bid = ids["Unsorted/Colour cubes"], ids["Unsorted/Picture box"]
+    await remake_previews(pg, cid, bid)
+    cube_png, box_png = cubes / "_thumbs/model.png", boxed / "_thumbs/model.png"
+    await wait_for(lambda: cube_png.is_file() and box_png.is_file())
+
+    # R9. gray by default, even for a 3MF with colours of its own; R11. the slicer's picture
+    check("previews are gray by default and a 3MF's own picture is its preview",
+          grayish(tint(cube_png)) and box_png.read_bytes() == magenta, (tint(cube_png), box_png.stat().st_size))
+
+    # R9. the viewer: gray, the file's colours on request (kept on this computer)
+    await pg.goto(B + f"#/model/{cid}")
+    await pg.wait_for_function("() => /has colours/.test(document.querySelector('#viewer-size')?.textContent || '')", timeout=30000)
+    btn = pg.locator("#viewer-colour")
+    first = (await btn.get_attribute("data-colour"), await btn.get_attribute("data-source"))
+    await btn.click()
+    offered = await labels_of(pg, "#context-menu .menu-item")
+    await pg.click('#context-menu [data-action="colour-file"]')
+    await pg.wait_for_function("() => /the file's colours/.test(document.querySelector('#viewer-size').textContent)")
+    shown = await btn.get_attribute("data-source")
+    await pg.wait_for_timeout(500)  # preferences are saved after a short pause
+    kept = json.loads((home / "config/prefs.json").read_text()).get("ml-ui", {}).get("fileColours")
+    await pg.screenshot(path=str(out / "group3-file-colours.png"))
+    check("3D files are drawn gray, and a 3MF's own colours are shown on request",
+          first == ("#a3a9ae", "computer") and any("The file's colours" in x for x in offered) and any("Use this colour for this model" in x for x in offered)
+          and shown == "file" and kept is True, (first, offered, shown, kept))
+    await btn.click()
+    await pg.click('#context-menu [data-action="colour-file"]')
+    await pg.wait_for_function("() => document.querySelector('#viewer-colour')?.dataset.source === 'computer'")
+
+    # R10. this computer's colour, from the menu; Settings shows the same
+    await btn.click()
+    await pg.click('#context-menu [data-action="colour-blue"]')
+    await pg.wait_for_function("() => document.querySelector('#viewer-colour')?.dataset.colour === '#2f6fd0'")
+    await pg.wait_for_timeout(500)
+    mine = json.loads((home / "config/prefs.json").read_text()).get("ml-ui", {}).get("viewColour")
+    await pg.goto(B + "#/settings")
+    await pg.wait_for_selector("#view-colour")
+    in_settings = await pg.input_value("#view-colour")
+    await pg.select_option("#view-colour", "#a3a9ae")
+    await pg.wait_for_timeout(500)
+    back = json.loads((home / "config/prefs.json").read_text()).get("ml-ui", {}).get("viewColour")
+    check("this computer's 3D colour is chosen in the viewer or Settings, and gray again is the default",
+          mine == "#2f6fd0" and in_settings == "#2f6fd0" and back is None, (mine, in_settings, back))
+
+    # R10. a model's own colour: saved in its model.json, its preview drawn in it, Undo
+    await pg.goto(B + f"#/model/{cid}")
+    await pg.wait_for_selector("#viewer-size", timeout=30000)
+    await btn.click()
+    await pg.click('#context-menu [data-action="colour-model"]')
+    await pg.wait_for_function("() => document.querySelector('#viewer-colour')?.dataset.source === 'model'")
+    await btn.click()
+    await pg.click('#context-menu [data-action="colour-red"]')
+    said = await toast_text(pg, "drawn in red")
+    sidecar = lambda: json.loads((cubes / "model.json").read_text()) if (cubes / "model.json").is_file() else {}
+    saved = await wait_for(lambda: sidecar().get("render_colour") == "#c8352b")
+    redrawn = await wait_for(lambda: reddish(tint(cube_png)))
+    on_page = await btn.get_attribute("data-colour")
+    await pg.screenshot(path=str(out / "group3-model-colour.png"))
+    check("a model can have a colour of its own: kept in its model.json, with its preview drawn in it",
+          saved and redrawn and on_page == "#c8352b" and "red" in said, (sidecar().get("render_colour"), tint(cube_png), on_page, said))
+    await pg.click(".toast button:has-text('Undo')")
+    await toast_text(pg, "^Undone")
+    undone = await wait_for(lambda: sidecar().get("render_colour") == "#a3a9ae")
+    q = await api(pg, "models_query", {"scope": "unsorted", "q": "Colour cubes"})
+    cid = q["items"][0]["id"]
+    await pg.goto(B + f"#/model/{cid}")
+    await pg.wait_for_selector("#viewer-size", timeout=30000)
+    await btn.click()
+    await pg.click('#context-menu [data-action="colour-model-off"]')
+    await pg.wait_for_function("() => document.querySelector('#viewer-colour')?.dataset.source === 'computer'")
+    cleared = await wait_for(lambda: not sidecar().get("render_colour"))
+    regray = await wait_for(lambda: grayish(tint(cube_png)))
+    check("Undo puts the model's colour back, and it can stop using one", undone and cleared and regray, (sidecar().get("render_colour"), tint(cube_png)))
+
+    # R10, R11. the library's previews: their colour, and whether 3MF pictures are used
+    await pg.goto(B + "#/settings")
+    await pg.wait_for_selector("#settings-previews")
+    await pg.select_option("#preview-colour", "#2f6fd0")
+    await toast_text(pg, "Made \\d+ previews? again", timeout=120000)
+    stored = json.loads((library / "_library/library.json").read_text()).get("preview_colour")
+    blue = tint(cube_png)
+    await pg.click("#use-3mf-pictures")
+    await toast_text(pg, "drawn like the others", timeout=120000)
+    drawn = box_png.read_bytes() != magenta and bluish(tint(box_png))
+    await pg.click("#use-3mf-pictures")
+    await toast_text(pg, "own pictures are used", timeout=120000)
+    pictured = box_png.read_bytes() == magenta
+    await pg.select_option("#preview-colour", "#a3a9ae")
+    await toast_text(pg, "drawn in gray", timeout=120000)
+    meta = json.loads((library / "_library/library.json").read_text())
+    await pg.screenshot(path=str(out / "group3-settings.png"))
+    check("the library's previews can be drawn in another colour, and 3MF pictures turned off and on",
+          stored == "#2f6fd0" and bluish(blue) and drawn and pictured and meta.get("preview_colour") is None
+          and meta.get("use_3mf_pictures") is True and grayish(tint(cube_png)), (stored, blue, drawn, pictured, meta.get("preview_colour"), tint(cube_png)))
+    shutil.rmtree(cubes)
+    shutil.rmtree(boxed)
+    await api(pg, "library_scan", {"full": False})
+
+
 async def main():
     server = start_server()
     try:
@@ -2095,6 +2308,7 @@ async def main():
             await group2(pg)
             await review2(pg)
             await review_checks(pg)
+            await group3(pg)
 
             # 3. renaming the library
             await pg.click('.sidebar a[href="#/settings"]')

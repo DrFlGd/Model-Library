@@ -1,11 +1,14 @@
 // The 3D viewer (from Grid Workshop's): a model in a Z-up scene on a floor grid
 // in 10 mm squares, orbit with the mouse, three views, edges on or off.
-// Models arrive as binary STL from the core (it reads STL, OBJ and 3MF).
+// Models arrive as binary STL from the core (it reads STL, OBJ and 3MF); a 3MF's
+// colours come in it the way Materialise writes them (docs/PLAN.md, "Group 3 design").
 import * as THREE from "three";
 import { OrbitControls } from "./vendor/three/OrbitControls.js";
 import { STLLoader } from "./vendor/three/STLLoader.js";
 
 const STEP = 10; // mm
+/** The colour 3D files are drawn in when nothing else says (docs/PLAN.md, "Group 3 design"). */
+export const GRAY = "#a3a9ae";
 
 export class Viewer {
   constructor(canvas) {
@@ -30,7 +33,9 @@ export class Viewer {
     rim.position.set(-2, 2, 1);
     this.scene.add(rim);
 
-    this.material = new THREE.MeshStandardMaterial({ color: 0xf2b705, roughness: 0.55, metalness: 0.02, side: THREE.DoubleSide });
+    this.material = new THREE.MeshStandardMaterial({ color: GRAY, roughness: 0.55, metalness: 0.02, side: THREE.DoubleSide });
+    this.colour = GRAY;
+    this.fileColours = false;
     this.edgeMaterial = new THREE.LineBasicMaterial({ color: 0x18222d, transparent: true, opacity: 0.55 });
     this.mesh = null;
     this.edges = null;
@@ -77,6 +82,22 @@ export class Viewer {
     this.redraw();
   }
 
+  /** Draw in this colour ("#rrggbb"), or in the file's own colours when it has
+   *  some and `fileColours` is on. */
+  setColour(colour, fileColours) {
+    this.colour = colour || GRAY;
+    this.fileColours = !!fileColours;
+    this._paint();
+  }
+
+  _paint() {
+    const own = this.fileColours && !!this.mesh?.geometry.hasColors;
+    this.material.vertexColors = own;
+    this.material.color.set(own ? 0xffffff : this.colour);
+    this.material.needsUpdate = true;
+    this.redraw();
+  }
+
   setTheme(dark) {
     if (this.dark === !!dark) return;
     this.dark = !!dark;
@@ -96,6 +117,7 @@ export class Viewer {
     this.clear();
     this.mesh = new THREE.Mesh(geom, this.material);
     this.scene.add(this.mesh);
+    this._paint();
     const triangles = geom.attributes.position.count / 3;
     if (triangles < 2000000) {
       this.edges = new THREE.LineSegments(new THREE.EdgesGeometry(geom, 30), this.edgeMaterial);
@@ -106,7 +128,7 @@ export class Viewer {
     this._buildGrid(this.bbox);
     this.view("iso");
     const size = this.bbox.getSize(new THREE.Vector3());
-    return { x: size.x, y: size.y, z: size.z, triangles };
+    return { x: size.x, y: size.y, z: size.z, triangles, coloured: !!geom.hasColors };
   }
 
   clear() {

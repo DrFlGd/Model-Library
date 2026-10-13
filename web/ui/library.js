@@ -201,6 +201,19 @@ export async function setVariantFolders(names) {
   await refreshLibrary();
 }
 
+/** How the library's previews are drawn (docs/PLAN.md, "Group 3 design"):
+ *  `colour` ("#rrggbb", null: gray) and whether a 3MF's own picture is used;
+ *  then every preview is made again, as a job with Stop. */
+export async function setPreviews(colour, pictures) {
+  await api("library_previews", { colour, pictures });
+  await refreshLibrary();
+  const { job } = await api("thumbs_make", { force: true });
+  const done = await followJob(job, "Making previews again");
+  await loadOverview();
+  if (done.error) throw new Error(done.error);
+  return done.result || {};
+}
+
 export function showLibraryFolder() {
   const path = ui.get().library?.path;
   if (path) ctx.platform.library.openPath(path);

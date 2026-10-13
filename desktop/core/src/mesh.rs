@@ -1,7 +1,9 @@
 //! Reading 3D files into triangles (docs/PLAN.md, "Phase 3 design"): STL (binary
 //! and text), OBJ, and 3MF (including projects whose meshes live in separate
 //! files, with component and build transforms). The page gets binary STL, so it
-//! needs one loader; thumbnails are drawn from the same triangles.
+//! needs one loader; thumbnails are drawn from the same triangles. A 3MF's
+//! colours (docs/PLAN.md, "Group 3 design") are read per triangle and travel in
+//! the STL the way Materialise Magics writes them.
 
 use anyhow::{anyhow, bail, Context, Result};
 use std::collections::HashMap;
@@ -24,14 +26,45 @@ fn ext(name: &str) -> String {
         .unwrap_or_default()
 }
 
+/// A colour, red green blue.
+pub type Rgb = [u8; 3];
+
+/// Triangles and, when the file has them, a colour for each (None: no colour of
+/// its own).
+pub struct Mesh {
+    pub tris: Tris,
+    pub colours: Option<Vec<Option<Rgb>>>,
+}
+
 /// Read a 3D file's triangles from its bytes, by the file's name.
 pub fn read(name: &str, bytes: &[u8]) -> Result<Tris> {
-    match ext(name).as_str() {
-        "stl" => read_stl(bytes),
-        "obj" => read_obj(bytes),
-        "3mf" => read_3mf(bytes),
+    Ok(read_mesh(name, bytes)?.tris)
+}
+
+/// Read a 3D file's triangles and its colours (only 3MF files have them).
+pub fn read_mesh(name: &str, bytes: &[u8]) -> Result<Mesh> {
+    let tris = match ext(name).as_str() {
+        "stl" => read_stl(bytes)?,
+        "obj" => read_obj(bytes)?,
+        "3mf" => return read_3mf(bytes),
         e => bail!("can't show .{e} files in 3D"),
+    };
+    Ok(Mesh { tris, colours: None })
+}
+
+/// "#rrggbb" or "#rrggbbaa" (the alpha is dropped).
+pub fn parse_colour(s: &str) -> Option<Rgb> {
+    let h = s.trim().trim_matches('"').strip_prefix('#')?;
+    if !(h.len() == 6 || h.len() == 8) || !h.is_ascii() {
+        return None;
     }
+    let b = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).ok();
+    Some([b(0)?, b(2)?, b(4)?])
+}
+
+/// "#rrggbb".
+pub fn colour_hex(c: Rgb) -> String {
+    format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])
 }
 
 fn read_stl(b: &[u8]) -> Result<Tris> {
@@ -253,6 +286,10 @@ fn compose(outer: &Transform, inner: &Transform) -> Transform {
 struct Object {
     verts: Vec<[f32; 3]>,
     tris: Vec<[u32; 3]>,
+    /// Each triangle's property (group id, index), when any triangle has one.
+    props: Vec<Option<(String, usize)>>,
+    /// The object's own property (`pid`, `pindex`).
+    prop: Option<(String, usize)>,
     /// (model file, object id, transform)
     comps: Vec<(Option<String>, String, Transform)>,
 }
@@ -260,21 +297,49 @@ struct Object {
 struct ModelFile {
     objects: HashMap<String, Object>,
     build: Vec<(Option<String>, String, Transform)>,
+    /// Colour groups and base materials by id: their colours in order.
+    groups: HashMap<String, Vec<Rgb>>,
+}
+
+impl ModelFile {
+    fn colour(&self, prop: &Option<(String, usize)>) -> Option<Rgb> {
+        let (g, i) = prop.as_ref()?;
+        self.groups.get(g)?.get(*i).copied()
+    }
 }
 
 fn parse_model(xml: &str) -> ModelFile {
     let mut objects = HashMap::new();
     let mut build = vec![];
+    let mut groups: HashMap<String, Vec<Rgb>> = HashMap::new();
+    let mut group: Option<String> = None;
     let mut cur: Option<(String, Object)> = None;
     let mut in_build = false;
+    let index = |t: &Tag, k: &str| t.get(k).and_then(|x| x.trim().parse::<usize>().ok());
     for t in tags(xml) {
         match (t.name, t.closing) {
+            ("basematerials" | "colorgroup", false) if !t.empty => {
+                let id = t.get("id").unwrap_or("").to_string();
+                groups.entry(id.clone()).or_default();
+                group = Some(id);
+            }
+            ("basematerials" | "colorgroup", true) => group = None,
+            ("base" | "color", false) => {
+                if let Some(g) = &group {
+                    let c = t.get("displaycolor").or(t.get("color")).and_then(parse_colour);
+                    groups.get_mut(g).unwrap().push(c.unwrap_or(GRAY));
+                }
+            }
             ("object", false) => {
                 let id = t.get("id").unwrap_or("").to_string();
+                let o = Object {
+                    prop: t.get("pid").map(|p| (p.to_string(), index(&t, "pindex").unwrap_or(0))),
+                    ..Object::default()
+                };
                 if t.empty {
-                    objects.insert(id, Object::default());
+                    objects.insert(id, o);
                 } else {
-                    cur = Some((id, Object::default()));
+                    cur = Some((id, o));
                 }
             }
             ("object", true) => {
@@ -291,6 +356,17 @@ fn parse_model(xml: &str) -> ModelFile {
                 if let Some((_, o)) = cur.as_mut() {
                     let v = |k| t.get(k).and_then(|x| x.parse().ok()).unwrap_or(u32::MAX);
                     o.tris.push([v("v1"), v("v2"), v("v3")]);
+                    // a property of its own: `pid` (else the object's) and `p1`
+                    if let Some(p1) = index(&t, "p1") {
+                        let pid = t.get("pid").map(String::from).or_else(|| o.prop.as_ref().map(|p| p.0.clone()));
+                        if let Some(pid) = pid {
+                            o.props.resize(o.tris.len() - 1, None);
+                            o.props.push(Some((pid, p1)));
+                        }
+                    } else if let Some(pid) = t.get("pid") {
+                        o.props.resize(o.tris.len() - 1, None);
+                        o.props.push(Some((pid.to_string(), 0)));
+                    }
                 }
             }
             ("component", false) => {
@@ -313,12 +389,158 @@ fn parse_model(xml: &str) -> ModelFile {
             _ => {}
         }
     }
-    ModelFile { objects, build }
+    ModelFile {
+        objects,
+        build,
+        groups,
+    }
+}
+
+/// The colour a 3D file is drawn in when nothing else says.
+pub const GRAY: Rgb = [0xa3, 0xa9, 0xae];
+
+/// What a slicer's project says about colours: its filament (extruder) colours,
+/// and which extruder each object, part (by component object id) and range of
+/// triangles prints with. Extruders count from 1.
+#[derive(Default)]
+struct Slicer {
+    palette: Vec<Rgb>,
+    objects: HashMap<String, usize>,
+    parts: HashMap<(String, String), usize>,
+    /// PrusaSlicer's volumes: (first triangle, last triangle, extruder) in an object
+    volumes: HashMap<String, Vec<(usize, usize, usize)>>,
+}
+
+impl Slicer {
+    fn pick(&self, extruder: usize) -> Option<Rgb> {
+        self.palette.get(extruder.max(1) - 1).copied()
+    }
+    fn object(&self, id: &str) -> Option<Rgb> {
+        if self.palette.is_empty() {
+            return None;
+        }
+        self.pick(self.objects.get(id).copied().unwrap_or(1))
+    }
+    fn part(&self, object: &str, part: &str) -> Option<Rgb> {
+        self.pick(*self.parts.get(&(object.to_string(), part.to_string()))?)
+    }
+    fn volume(&self, object: &str, tri: usize) -> Option<Rgb> {
+        let v = self.volumes.get(object)?;
+        let (_, _, e) = v.iter().find(|(a, b, _)| (*a..=*b).contains(&tri))?;
+        self.pick(*e)
+    }
+
+    /// Bambu Studio and OrcaSlicer (`model_settings.config`, `project_settings.config`)
+    /// or PrusaSlicer (`Slic3r_PE_model.config`, `Slic3r_PE.config`).
+    fn read<R: Read + std::io::Seek>(zip: &mut zip::ZipArchive<R>) -> Slicer {
+        let mut text = |name: &str| -> Option<String> {
+            let real = zip.file_names().find(|n| n.eq_ignore_ascii_case(name))?.to_string();
+            let mut f = zip.by_name(&real).ok()?;
+            if f.size() > 32 << 20 {
+                return None;
+            }
+            let mut s = String::new();
+            f.read_to_string(&mut s).ok()?;
+            Some(s)
+        };
+        let mut sl = Slicer::default();
+        if let Some(cfg) = text("Metadata/project_settings.config") {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&cfg) {
+                sl.palette = v["filament_colour"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|c| c.as_str().and_then(parse_colour).unwrap_or(GRAY))
+                    .collect();
+            }
+            if let Some(xml) = text("Metadata/model_settings.config") {
+                let (mut obj, mut part): (Option<String>, Option<String>) = (None, None);
+                for t in tags(&xml) {
+                    match (t.name, t.closing) {
+                        ("object", false) if !t.empty => obj = t.get("id").map(String::from),
+                        ("object", true) => obj = None,
+                        ("part", false) if !t.empty => part = t.get("id").map(String::from),
+                        ("part", true) => part = None,
+                        ("metadata", false) if t.get("key") == Some("extruder") => {
+                            let Some(e) = t.get("value").and_then(|v| v.trim().parse().ok()) else {
+                                continue;
+                            };
+                            match (&obj, &part) {
+                                (Some(o), Some(p)) => {
+                                    sl.parts.insert((o.clone(), p.clone()), e);
+                                }
+                                (Some(o), None) => {
+                                    sl.objects.insert(o.clone(), e);
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        } else if let Some(cfg) = text("Metadata/Slic3r_PE.config") {
+            let list = |key: &str| -> Vec<String> {
+                cfg.lines()
+                    .filter_map(|l| l.trim_start_matches(';').trim().strip_prefix(key))
+                    .filter_map(|r| r.trim_start().strip_prefix('='))
+                    .next()
+                    .map(|v| v.split(';').map(|x| x.trim().trim_matches('"').to_string()).collect())
+                    .unwrap_or_default()
+            };
+            let (ext, fil) = (list("extruder_colour"), list("filament_colour"));
+            sl.palette = (0..ext.len().max(fil.len()))
+                .map(|i| {
+                    ext.get(i)
+                        .and_then(|c| parse_colour(c))
+                        .or_else(|| fil.get(i).and_then(|c| parse_colour(c)))
+                        .unwrap_or(GRAY)
+                })
+                .collect();
+            if let Some(xml) = text("Metadata/Slic3r_PE_model.config") {
+                let (mut obj, mut vol): (Option<String>, Option<(usize, usize)>) = (None, None);
+                for t in tags(&xml) {
+                    match (t.name, t.closing) {
+                        ("object", false) if !t.empty => obj = t.get("id").map(String::from),
+                        ("object", true) => obj = None,
+                        ("volume", false) if !t.empty => {
+                            let n = |k: &str| t.get(k).and_then(|v| v.trim().parse().ok());
+                            vol = n("firstid").zip(n("lastid"));
+                        }
+                        ("volume", true) => vol = None,
+                        ("metadata", false) if t.get("key") == Some("extruder") => {
+                            let Some(e) = t.get("value").and_then(|v| v.trim().parse::<usize>().ok()) else {
+                                continue;
+                            };
+                            let Some(o) = &obj else { continue };
+                            match vol {
+                                Some((a, b)) if e > 0 => sl.volumes.entry(o.clone()).or_default().push((a, b, e)),
+                                None if e > 0 => {
+                                    sl.objects.insert(o.clone(), e);
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        sl
+    }
 }
 
 struct ThreeMf<R: Read + std::io::Seek> {
     zip: zip::ZipArchive<R>,
     files: HashMap<String, ModelFile>,
+    slicer: Slicer,
+}
+
+/// Where emitted triangles go: their positions and colours.
+#[derive(Default)]
+struct Out {
+    tris: Tris,
+    colours: Vec<Option<Rgb>>,
 }
 
 impl<R: Read + std::io::Seek> ThreeMf<R> {
@@ -343,99 +565,174 @@ impl<R: Read + std::io::Seek> ThreeMf<R> {
         Ok(())
     }
 
+    /// Emit object `id` of `file` and its components. `top`: the build item's
+    /// object, when this is one of its components; `inherited`: the colour it
+    /// passes down.
+    #[allow(clippy::too_many_arguments)]
     fn emit(
         &mut self,
         file: &str,
         id: &str,
         m: &Transform,
-        out: &mut Tris,
+        out: &mut Out,
+        top: Option<&str>,
+        inherited: Option<Rgb>,
         depth: usize,
     ) -> Result<()> {
         if depth > 16 {
             bail!("the 3MF's components nest too deep");
         }
         self.load(file)?;
-        let Some(o) = self.files[file].objects.get(id) else {
+        let mf = &self.files[file];
+        let Some(o) = mf.objects.get(id) else {
             return Ok(());
         };
-        for t in &o.tris {
+        let own = match top {
+            None => self.slicer.object(id),
+            Some(t) => self.slicer.part(t, id),
+        }
+        .or(inherited);
+        let objects = mf.colour(&o.prop);
+        for (k, t) in o.tris.iter().enumerate() {
             for &i in t {
                 let v = o
                     .verts
                     .get(i as usize)
                     .ok_or_else(|| anyhow!("a triangle uses a missing vertex"))?;
-                out.extend_from_slice(&apply(m, *v));
+                out.tris.extend_from_slice(&apply(m, *v));
             }
+            let c = o
+                .props
+                .get(k)
+                .and_then(|p| mf.colour(p))
+                .or(objects)
+                .or_else(|| if top.is_none() { self.slicer.volume(id, k) } else { None })
+                .or(own);
+            out.colours.push(c);
         }
-        if out.len() > MAX_TRIANGLES * 9 {
+        if out.tris.len() > MAX_TRIANGLES * 9 {
             bail!("too many triangles");
         }
         let comps = o.comps.clone();
+        let top = top.unwrap_or(id).to_string();
         for (path, cid, t) in comps {
             let f = path.unwrap_or_else(|| file.to_string());
-            self.emit(&f, &cid, &compose(m, &t), out, depth + 1)?;
+            self.emit(&f, &cid, &compose(m, &t), out, Some(&top), own, depth + 1)?;
         }
         Ok(())
     }
 }
 
-fn read_3mf(b: &[u8]) -> Result<Tris> {
-    let zip = zip::ZipArchive::new(Cursor::new(b)).context("this 3MF isn't a valid ZIP")?;
+fn read_3mf(b: &[u8]) -> Result<Mesh> {
+    let mut zip = zip::ZipArchive::new(Cursor::new(b)).context("this 3MF isn't a valid ZIP")?;
+    let slicer = Slicer::read(&mut zip);
     let mut m = ThreeMf {
         zip,
         files: HashMap::new(),
+        slicer,
     };
     // the root model part, from _rels/.rels
     let mut root = "3D/3dmodel.model".to_string();
-    if let Some(rels) = m.entry_name("_rels/.rels") {
-        let mut xml = String::new();
-        m.zip.by_name(&rels)?.read_to_string(&mut xml)?;
-        let target = tags(&xml)
-            .find(|t| {
-                t.name == "Relationship" && t.get("Type").is_some_and(|ty| ty.ends_with("/3dmodel"))
-            })
-            .and_then(|t| {
-                t.get("Target")
-                    .map(|v| v.trim_start_matches('/').to_string())
-            });
-        if let Some(t) = target {
-            root = t;
-        }
+    if let Some(t) = m.relationship("/3dmodel") {
+        root = t;
     }
     m.load(&root)?;
-    let mut out = vec![];
+    let mut out = Out::default();
     let build = m.files[&root].build.clone();
     if build.is_empty() {
         let ids: Vec<String> = m.files[&root].objects.keys().cloned().collect();
         for id in ids {
-            m.emit(&root.clone(), &id, &IDENTITY, &mut out, 0)?;
+            m.emit(&root.clone(), &id, &IDENTITY, &mut out, None, None, 0)?;
         }
     } else {
         for (path, id, t) in build {
             let f = path.unwrap_or_else(|| root.clone());
-            m.emit(&f, &id, &t, &mut out, 0)?;
+            m.emit(&f, &id, &t, &mut out, None, None, 0)?;
         }
     }
-    if out.is_empty() {
+    if out.tris.is_empty() {
         bail!("no meshes in this 3MF");
     }
-    Ok(out)
+    let coloured = out.colours.iter().any(Option::is_some);
+    Ok(Mesh {
+        tris: out.tris,
+        colours: coloured.then_some(out.colours),
+    })
+}
+
+impl<R: Read + std::io::Seek> ThreeMf<R> {
+    /// The target of the package relationship whose type ends with `kind`.
+    fn relationship(&mut self, kind: &str) -> Option<String> {
+        let rels = self.entry_name("_rels/.rels")?;
+        let mut xml = String::new();
+        self.zip.by_name(&rels).ok()?.read_to_string(&mut xml).ok()?;
+        let target = tags(&xml)
+            .find(|t| t.name == "Relationship" && t.get("Type").is_some_and(|ty| ty.ends_with(kind)))
+            .and_then(|t| t.get("Target").map(|v| v.trim_start_matches('/').to_string()));
+        target
+    }
+}
+
+/// The picture a slicer saved in a 3MF (docs/PLAN.md, "Group 3 design", R11):
+/// the package's thumbnail, else Bambu and Orca's plate pictures. PNG only.
+pub fn picture_3mf(b: &[u8]) -> Option<Vec<u8>> {
+    let zip = zip::ZipArchive::new(Cursor::new(b)).ok()?;
+    let mut m = ThreeMf {
+        zip,
+        files: HashMap::new(),
+        slicer: Slicer::default(),
+    };
+    let mut names: Vec<String> = m.relationship("/thumbnail").into_iter().collect();
+    names.extend(
+        ["Metadata/thumbnail.png", "Metadata/plate_1.png", "Metadata/top_1.png"].map(String::from),
+    );
+    for n in names {
+        let Some(real) = m.entry_name(&n) else { continue };
+        let Ok(mut f) = m.zip.by_name(&real) else { continue };
+        if f.size() > 16 << 20 {
+            continue;
+        }
+        let mut png = vec![];
+        if f.read_to_end(&mut png).is_ok() && png.starts_with(b"\x89PNG\r\n\x1a\n") {
+            return Some(png);
+        }
+    }
+    None
 }
 
 /// Binary STL of the triangles (normals worked out), for the page's viewer.
 pub fn to_stl(t: &[f32]) -> Vec<u8> {
+    to_stl_coloured(t, None)
+}
+
+/// As [`to_stl`], with each triangle's colour when there are some, the way
+/// Materialise Magics writes them: "COLOR=" and a default colour in the header,
+/// then in each triangle's attribute word 5 bits each of red, green and blue
+/// (bit 15 set: the default colour).
+pub fn to_stl_coloured(t: &[f32], colours: Option<&[Option<Rgb>]>) -> Vec<u8> {
     let n = t.len() / 9;
     let mut out = Vec::with_capacity(84 + n * 50);
-    out.extend_from_slice(&[0u8; 80]);
+    let mut header = [0u8; 80];
+    if colours.is_some() {
+        header[..6].copy_from_slice(b"COLOR=");
+        header[6..9].copy_from_slice(&GRAY);
+        header[9] = 255;
+    }
+    out.extend_from_slice(&header);
     out.extend_from_slice(&(n as u32).to_le_bytes());
-    for tri in t.chunks_exact(9) {
+    for (k, tri) in t.chunks_exact(9).enumerate() {
         for v in normal(tri) {
             out.extend_from_slice(&v.to_le_bytes());
         }
         for v in tri {
             out.extend_from_slice(&v.to_le_bytes());
         }
-        out.extend_from_slice(&[0, 0]);
+        let word: u16 = match colours.and_then(|c| c.get(k).copied().flatten()) {
+            Some([r, g, b]) => (r as u16 >> 3) | ((g as u16 >> 3) << 5) | ((b as u16 >> 3) << 10),
+            None if colours.is_some() => 0x8000,
+            None => 0,
+        };
+        out.extend_from_slice(&word.to_le_bytes());
     }
     out
 }
@@ -535,4 +832,92 @@ pub mod tests {
         let t = read("b.3mf", &three_mf(true)).unwrap();
         assert_eq!(t, vec![20., 0., 5., 22., 0., 5., 20., 2., 5.]);
     }
+
+    fn zip_of(files: &[(&str, &str)]) -> Vec<u8> {
+        let mut buf = Cursor::new(vec![]);
+        {
+            let mut z = zip::ZipWriter::new(&mut buf);
+            let o = zip::write::SimpleFileOptions::default();
+            for (n, body) in files {
+                z.start_file(*n, o).unwrap();
+                z.write_all(body.as_bytes()).unwrap();
+            }
+            z.finish().unwrap();
+        }
+        buf.into_inner()
+    }
+
+    const TRI: &str = r#"<vertices><vertex x="0" y="0" z="0"/><vertex x="1" y="0" z="0"/><vertex x="0" y="1" z="0"/></vertices>"#;
+
+    #[test]
+    fn reads_3mf_colour_groups_and_base_materials() {
+        let model = format!(
+            r##"<model><resources><basematerials id="5"><base name="PLA" displaycolor="#FF0000FF"/><base name="b" displaycolor="#00ff00"/></basematerials><m:colorgroup id="6"><m:color color="#0000FF"/></m:colorgroup><object id="1" pid="5" pindex="1"><mesh>{TRI}<triangles><triangle v1="0" v2="1" v3="2"/><triangle v1="0" v2="1" v3="2" pid="6" p1="0"/><triangle v1="0" v2="1" v3="2" p1="0"/></triangles></mesh></object><object id="2"><mesh>{TRI}<triangles><triangle v1="0" v2="1" v3="2"/></triangles></mesh></object></resources><build><item objectid="1"/><item objectid="2"/></build></model>"##
+        );
+        let m = read_mesh("c.3mf", &zip_of(&[("3D/3dmodel.model", &model)])).unwrap();
+        assert_eq!(m.tris.len(), 36);
+        // the object's own colour, a colour group's, the object's group by p1, none
+        assert_eq!(m.colours.unwrap(), vec![Some([0, 255, 0]), Some([0, 0, 255]), Some([255, 0, 0]), None]);
+        // a 3MF without colours has none
+        assert!(read_mesh("a.3mf", &three_mf(false)).unwrap().colours.is_none());
+    }
+
+    #[test]
+    fn reads_bambu_and_prusa_extruder_colours() {
+        // Bambu/Orca: object 2's components are parts; part 1 prints with extruder 2
+        let root = r#"<model xmlns:p="x"><resources><object id="2"><components><component p:path="/3D/Objects/object_1.model" objectid="1"/><component p:path="/3D/Objects/object_1.model" objectid="3"/></components></object></resources><build><item objectid="2"/></build></model>"#;
+        let parts = format!(r#"<model><resources><object id="1"><mesh>{TRI}<triangles><triangle v1="0" v2="1" v3="2"/></triangles></mesh></object><object id="3"><mesh>{TRI}<triangles><triangle v1="0" v2="1" v3="2"/></triangles></mesh></object></resources></model>"#);
+        let settings = r#"<config><object id="2"><metadata key="extruder" value="1"/><part id="1" subtype="normal_part"><metadata key="extruder" value="2"/></part><part id="3"/></object><plate><metadata key="extruder" value="9"/></plate></config>"#;
+        let b = zip_of(&[
+            ("3D/3dmodel.model", root),
+            ("3D/Objects/object_1.model", &parts),
+            ("Metadata/model_settings.config", settings),
+            ("Metadata/project_settings.config", r##"{"filament_colour": ["#FFFFFF", "#FF8000FF"]}"##),
+        ]);
+        let m = read_mesh("b.3mf", &b).unwrap();
+        assert_eq!(m.colours.unwrap(), vec![Some([255, 128, 0]), Some([255, 255, 255])]);
+
+        // PrusaSlicer: the object prints with extruder 2, triangles 1-1 with extruder 1
+        let model = format!(r#"<model><resources><object id="1"><mesh>{TRI}<triangles><triangle v1="0" v2="1" v3="2"/><triangle v1="0" v2="1" v3="2"/></triangles></mesh></object></resources><build><item objectid="1"/></build></model>"#);
+        let cfg = r#"<config><object id="1" instances_count="1"><metadata type="object" key="extruder" value="2"/><volume firstid="1" lastid="1"><metadata type="volume" key="extruder" value="1"/></volume></object></config>"#;
+        let b = zip_of(&[
+            ("3D/3dmodel.model", &model),
+            ("Metadata/Slic3r_PE_model.config", cfg),
+            ("Metadata/Slic3r_PE.config", "; extruder_colour = \"\";\"#00FF00\"\n; filament_colour = #FF0000;#0000FF\n"),
+        ]);
+        let m = read_mesh("p.3mf", &b).unwrap();
+        assert_eq!(m.colours.unwrap(), vec![Some([0, 255, 0]), Some([255, 0, 0])]);
+    }
+
+    #[test]
+    fn colours_travel_in_the_stl() {
+        let t = read("a.3mf", &three_mf(false)).unwrap();
+        let b = to_stl_coloured(&t, Some(&[Some([255, 0, 0])]));
+        assert_eq!(&b[..6], b"COLOR=");
+        assert_eq!(u16::from_le_bytes([b[84 + 48], b[84 + 49]]), 0x1f);
+        let b = to_stl_coloured(&t, Some(&[None]));
+        assert_eq!(u16::from_le_bytes([b[84 + 48], b[84 + 49]]), 0x8000);
+        // still read as the same triangles
+        assert_eq!(read("x.stl", &b).unwrap(), t);
+    }
+
+    #[test]
+    fn finds_a_3mf_picture() {
+        let png = "\u{89}PNG";
+        assert!(picture_3mf(&three_mf(false)).is_none());
+        let mut real = vec![0x89u8];
+        real.extend_from_slice(b"PNG\r\n\x1a\nrest");
+        let mut buf = Cursor::new(vec![]);
+        {
+            let mut z = zip::ZipWriter::new(&mut buf);
+            let o = zip::write::SimpleFileOptions::default();
+            z.start_file("Metadata/thumbnail.png", o).unwrap();
+            z.write_all(png.as_bytes()).unwrap(); // not really a PNG: skipped
+            z.start_file("Metadata/plate_1.png", o).unwrap();
+            z.write_all(&real).unwrap();
+            z.finish().unwrap();
+        }
+        assert_eq!(picture_3mf(&buf.into_inner()), Some(real));
+    }
+
 }

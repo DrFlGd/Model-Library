@@ -21,6 +21,7 @@ import { openMenu, typing } from "./actions.js";
 import { fileSel, pick, pickEvent, listClick, show, view, clear } from "./filesel.js";
 import { TypeTag } from "./filetypes.js";
 import { PdfDocument } from "./document-viewer.js";
+import { GRAY, colourItems, colourName, viewColour, setViewColour, setModelColour } from "./colours.js";
 
 export const MESH = /\.(stl|obj|3mf)$/i;
 const MD = /\.(md|markdown|txt)$/i;
@@ -305,6 +306,15 @@ export function Stage3D({ src, model, current, onInfo }) {
   const [state, setState] = useState({ busy: false, error: "", info: null });
   const [edges, setEdges] = useState(false);
   const theme = useStore(ui, (s) => s.theme);
+  // the colour (docs/PLAN.md, "Group 3 design"): the file's own when shown, else
+  // the model's, else this computer's
+  const computer = useStore(ui, (s) => s.viewColour) || GRAY;
+  const fileColours = useStore(ui, (s) => s.fileColours);
+  const saved = model?.details?.render_colour || model?.render_colour || null;
+  const [own, setOwn] = useState(saved);
+  useLayoutEffect(() => setOwn(saved), [model?.id, saved]);
+  const base = own || computer;
+  useEffect(() => { viewer.current?.setColour(base, fileColours); }, [base, fileColours, state.ready]);
   useEffect(() => {
     let live = true;
     import("../viewer.js").then(({ Viewer }) => {
@@ -330,6 +340,19 @@ export function Stage3D({ src, model, current, onInfo }) {
   }, [state.ready, src.id, current?.file, current?.entry]);
   const cover = () => setCover(model.id, { snapshot: viewer.current.snapshot() }, "Saved this view as the model's cover.");
   const info = state.info;
+  const showingFile = !!info?.coloured && fileColours;
+  const saveOwn = async (hex) => { const v = await setModelColour(model, hex); if (v) setOwn(hex); };
+  const colourMenu = (e) => {
+    const writable = model && !ui.get().library?.read_only;
+    openMenu(e.currentTarget, [
+      ...(info?.coloured ? [{ id: "colour-file", label: "The file's colours", icon: fileColours ? "check" : null, run: () => setPref({ fileColours: !fileColours }) }, { sep: true }] : []),
+      ...colourItems(base, (hex) => (own && writable ? saveOwn(hex) : setViewColour(hex))),
+      ...(writable ? [{ sep: true }, own
+        ? { id: "colour-model-off", label: "Stop using a colour for this model", run: () => saveOwn(null) }
+        : { id: "colour-model", label: "Use this colour for this model", sub: "Saved with the model; its preview is drawn in it too", run: () => saveOwn(computer) }] : []),
+    ]);
+  };
+  const colourLabel = showingFile ? "The file's colours" : `${colourName(base)}${own ? " (this model)" : ""}`;
   return html`<div class="stage-3d">
     <div class="stage-canvas"><canvas ref=${canvas} id="viewer-canvas"></canvas>
       ${state.busy ? html`<div class="stage-note">Loading…</div>` : null}
@@ -337,9 +360,12 @@ export function Stage3D({ src, model, current, onInfo }) {
       ${!current ? html`<div class="stage-note muted">No 3D file this app can show (STL, OBJ or 3MF).</div>` : null}</div>
     <div class="stage-bar">
       <span class="stage-what" id="viewer-file">${current ? (current.entry ? `${current.file} › ${current.entry}` : current.file) : ""}</span>
-      ${info ? html`<span class="muted" id="viewer-size">${info.x.toFixed(1)} × ${info.y.toFixed(1)} × ${info.z.toFixed(1)} mm · ${info.triangles.toLocaleString()} triangles</span>` : null}
+      ${info ? html`<span class="muted" id="viewer-size">${info.x.toFixed(1)} × ${info.y.toFixed(1)} × ${info.z.toFixed(1)} mm · ${info.triangles.toLocaleString()} triangles${showingFile ? " · the file's colours" : own ? " · this model's colour" : info.coloured ? " · has colours (Colour ▾)" : ""}</span>` : null}
       <span class="stage-tools">
         ${["iso", "top", "front"].map((v) => html`<button type="button" class="ghost" key=${v} title=${{ iso: "Look from above at an angle", top: "Look from the top", front: "Look from the front" }[v]} onClick=${() => viewer.current?.view(v)}>${v === "iso" ? "3/4" : v[0].toUpperCase() + v.slice(1)}</button>`)}
+        <button type="button" class="ghost colour-btn" id="viewer-colour" aria-haspopup="menu" data-colour=${showingFile ? "file" : base} data-source=${showingFile ? "file" : own ? "model" : "computer"}
+          title=${`Colour: ${colourLabel}${info?.coloured ? " (this file has colours of its own)" : ""}`} onClick=${colourMenu}>
+          <span class="swatch" style=${{ background: showingFile ? "conic-gradient(#c8352b, #f2b705, #3a9a4a, #2f6fd0, #c8352b)" : base }}></span>Colour ▾</button>
         <button type="button" class="ghost" aria-pressed=${edges ? "true" : "false"} title="Show the edges of the triangles" onClick=${() => { setEdges(!edges); viewer.current?.setEdges(!edges); }}>Edges</button>
         ${model ? html`<button type="button" class="ghost" id="view-cover" disabled=${!info || !!ui.get().library?.read_only} title="Save this view as the model's cover picture" onClick=${cover}>Use as cover</button>` : null}
       </span>

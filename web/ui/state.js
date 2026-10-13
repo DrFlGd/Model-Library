@@ -31,6 +31,8 @@ export const ui = createStore({
   inspector: {},           // per page: the inspector "open" or "folded" (none: the page's default)
   inspectorTab: {},        // per page: the inspector's tab
   inspectorWidth: 340,
+  viewColour: null, // the colour 3D files are drawn in on this computer (null: gray)
+  fileColours: false, // show a 3MF's own colours
   workspaceDirty: false,   // uncommitted workspace Details draft
   partsView: "folders",    // a model's files: folders | all | type | grid
   filePanelWidth: 300,
@@ -52,14 +54,14 @@ const LAYOUT_KEY = "ml-ui";
 export function initState(store) {
   prefs = store.prefs;
   const saved = prefs.get(LAYOUT_KEY, {}) || {};
-  ui.set({ favs: prefs.get("ml-favs", []) || [], theme: saved.theme || "system", sort: saved.sort || "name", layout: saved.layout || "grid", open: saved.open || {}, partsView: saved.partsView || "folders", sortView: saved.sortView || "folders", filePanelWidth: Math.max(220, Math.min(480, Number(saved.filePanelWidth) || 300)), filePanelOpen: saved.filePanelOpen !== false, navCollapsed: !!saved.navCollapsed, inspector: saved.inspector || {}, inspectorTab: saved.inspectorTab || {}, inspectorWidth: Math.max(260, Math.min(520, Number(saved.inspectorWidth) || 340)), filePanelView: saved.filePanelView || "folders", contentsView: saved.contentsView || "grid", contentsSort: saved.contentsSort || "name", catPanel: ["open", "folded"].includes(saved.catPanel) ? saved.catPanel : null, catPanelWidth: Math.max(180, Math.min(420, Number(saved.catPanelWidth) || 230)), catShow: saved.catShow || {} });
+  ui.set({ favs: prefs.get("ml-favs", []) || [], theme: saved.theme || "system", sort: saved.sort || "name", layout: saved.layout || "grid", open: saved.open || {}, partsView: saved.partsView || "folders", sortView: saved.sortView || "folders", filePanelWidth: Math.max(220, Math.min(480, Number(saved.filePanelWidth) || 300)), filePanelOpen: saved.filePanelOpen !== false, navCollapsed: !!saved.navCollapsed, inspector: saved.inspector || {}, inspectorTab: saved.inspectorTab || {}, inspectorWidth: Math.max(260, Math.min(520, Number(saved.inspectorWidth) || 340)), filePanelView: saved.filePanelView || "folders", contentsView: saved.contentsView || "grid", contentsSort: saved.contentsSort || "name", catPanel: ["open", "folded"].includes(saved.catPanel) ? saved.catPanel : null, catPanelWidth: Math.max(180, Math.min(420, Number(saved.catPanelWidth) || 230)), catShow: saved.catShow || {}, viewColour: /^#[0-9a-f]{6}$/i.test(saved.viewColour || "") ? saved.viewColour : null, fileColours: !!saved.fileColours });
   applyTheme();
   matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", applyTheme);
 }
 
 function savePrefs() {
   const s = ui.get();
-  prefs?.set(LAYOUT_KEY, { theme: s.theme, sort: s.sort, layout: s.layout, open: s.open, partsView: s.partsView, sortView: s.sortView, filePanelWidth: s.filePanelWidth, filePanelOpen: s.filePanelOpen, navCollapsed: s.navCollapsed, inspector: s.inspector, inspectorTab: s.inspectorTab, inspectorWidth: s.inspectorWidth, filePanelView: s.filePanelView, contentsView: s.contentsView, contentsSort: s.contentsSort, catPanel: s.catPanel, catPanelWidth: s.catPanelWidth, catShow: s.catShow });
+  prefs?.set(LAYOUT_KEY, { theme: s.theme, sort: s.sort, layout: s.layout, open: s.open, partsView: s.partsView, sortView: s.sortView, filePanelWidth: s.filePanelWidth, filePanelOpen: s.filePanelOpen, navCollapsed: s.navCollapsed, inspector: s.inspector, inspectorTab: s.inspectorTab, inspectorWidth: s.inspectorWidth, filePanelView: s.filePanelView, contentsView: s.contentsView, contentsSort: s.contentsSort, catPanel: s.catPanel, catPanelWidth: s.catPanelWidth, catShow: s.catShow, viewColour: s.viewColour, fileColours: s.fileColours });
 }
 
 export function setPref(patch) {
