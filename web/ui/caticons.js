@@ -5,7 +5,7 @@ import { html } from "../lib/html.js";
 import { Icon } from "./icons.js";
 import { libraryUrl } from "./library.js";
 
-const svg = (d, size = 16) => html`<svg width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+const svg = (d, size = 16) => html`<svg class="icon" width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
   stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 
 /** name: [label, words to search by, drawing] */

@@ -806,3 +806,27 @@ Jerred chose all 13 items of the fourth UI review (https://claude.ai/artifact/YK
 13. **Import's details line is short.** One file reads "Robot.7z · 55 KB". Folders and groups count their files by kind with singular and plural names ("3 files (2 3D files, 1 picture)", or "3 3D files" when they're all one kind).
 
 Not in this round: a preview chosen from a variant folder inside an archive, and videos inside archives.
+
+### Skins design (R16; 0.5.19 and 0.5.20)
+
+Jerred picked **Drafting Sheet** from the style study (https://claude.ai/artifact/4JaZ78oGCgyStmr8YTsaDX) as the app's look, and wants **Parts Bin** and **Layer Line** as skins to choose from too, each with its own colours, fonts, shapes and icons, in light and dark.
+
+**Where it's chosen.** Settings › Appearance has a **Skin** box above Theme: Drafting Sheet (the default), Parts Bin, Layer Line and **Classic** (the look before skins, kept so nothing is lost). It's this computer's choice, saved with the other layout settings (`skin` in `ml-ui`). Theme stays as it is (Follow the system, Light, Dark, Night): every skin has a light and a dark set of colours, and Night keeps its dim warm colours with the skin's fonts, shapes and icons. A computer that never chose gets Drafting Sheet.
+
+**How it works.**
+- The skin is `data-skin` on the page's root, beside `data-theme`. Each skin is a block of the existing colour names in `web/styles.css` (text, muted, background, lines, surface, accent and its text, selection, danger, focus, the top bar, picture backgrounds) for light and for dark, plus new names for what used to be written in place: `--font-head` and `--font-mono`, `--radius-s` and `--radius-m`, `--accent-hover`, `--accent-edge`, `--star`, `--folder`, `--chrome-ink` (the top bar's text) and the icon line (`--icon-stroke`, `--icon-cap`, `--icon-join`).
+- The skins' fonts (all SIL OFL) are bundled into the app when it's built (`tools/build_desktop.py --fetch-fonts`, as Archivo is now), and a font file is only read when the skin in use needs it. In a browser they come from Google Fonts.
+- Icons keep their names. Every icon's line weight, ends and corners follow the skin. The icons the study drew per skin (home, import, layers, star, folder, cube, settings, search) carry a drawing for each skin; the one for the skin in use shows, so changing skin needs no reload.
+- Anything a skin adds beyond colours (grid paper, tape labels, layer lines) is a few rules under its `data-skin`, never a change to the pages' markup.
+
+**Drafting Sheet (0.5.19).** Technical-drawing sheet: square corners (2 px at most), fine 1 px rules, drafting-blue accent, Overpass for headings and text and Overpass Mono for counts, sizes, dates and file-type tags.
+- The 3D view, the picture backgrounds and the page ground have a faint grid.
+- The top bar has an ink rule under it. The status bar is the title block: mono capitals in cells divided by rules, with the library's name and folder in accent (paths keep their case).
+- Section headings are small mono capitals followed by a rule. Cards and panels carry corner ticks in the accent. File-type tags are outlined in their colour instead of filled. The selected item is pale blue with a blue outline. Counts in the menu read [12].
+- Icons: thin lines (1.4), square ends.
+
+**Parts Bin and Layer Line (0.5.20).**
+- **Parts Bin:** workshop drawer cabinet. Machine-tool green accent, Sofia Sans (Extra Condensed capitals for titles), label-tape headings (light text on black tape), a faint pegboard ground, cards and panels with a heavier bottom edge like drawer fronts, the status bar as tape. Icons: heavy lines (2.2), square ends.
+- **Layer Line:** print bed and filament. Silk-magenta accent, M PLUS Rounded 1c headings and Atkinson Hyperlegible text, pill-shaped buttons, tags and menu rows, a faint layer-line texture on pictures, the menu and the 3D view. Each category gets a spool colour (its icon and count in the menu, its tiles), from a set of eight in order. Icons: medium lines (1.7), round ends. Its heading font has Japanese letters too and is 3.6 MB, so the build keeps one weight (ExtraBold, used for every heading) and, with fontTools, cuts it to Latin letters and the app's symbols (about 170 KB); without fontTools it's bundled whole.
+
+Then UI review 5 looks at all four skins.

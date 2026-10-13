@@ -18,7 +18,12 @@ export function NavHead() {
   return html`<div class="nav-head-row">
     <button type="button" class="ghost topicon nav-burger" aria-label=${matchMedia("(max-width: 900px)").matches ? "Close the menu" : nav.collapsed ? "Expand navigation" : "Collapse navigation"} aria-expanded=${nav.open ? "true" : "false"} title="Expand or collapse navigation" onClick=${toggleNav}>${Icon.menu(18)}</button>
     <a class="brand" href="#/" title="Home">
-      <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8.5l9-4.5 9 4.5-9 4.5z"/><path d="M3 12.5l9 4.5 9-4.5"/><path d="M3 16.5l9 4.5 9-4.5" class="accent"/></svg>
+      <svg class="brand-mark icon" viewBox="0 0 40 40" aria-hidden="true">
+        <g data-sk="classic" transform="scale(1.6667)"><path d="M3 8.5l9-4.5 9 4.5-9 4.5z"/><path d="M3 12.5l9 4.5 9-4.5"/><path d="M3 16.5l9 4.5 9-4.5" class="accent"/></g>
+        <g data-sk="drafting" fill="none"><rect x="2.5" y="2.5" width="35" height="35" stroke="var(--ink)" stroke-width="1.5"/><path d="M20 8l10 5.5v11L20 30l-10-5.5v-11z" stroke="var(--tool)" stroke-width="1.6" stroke-linejoin="miter"/><path d="M10 13.5 20 19l10-5.5M20 19v11" stroke="var(--tool)" stroke-width="1.6"/><path d="M7 34h26M7 32.5v3M33 32.5v3" stroke="var(--ink)" stroke-width="1"/></g>
+        <g data-sk="partsbin" stroke="none"><rect x="3" y="5" width="34" height="30" rx="2" fill="var(--ink)"/><rect x="7" y="9" width="26" height="9" fill="var(--tool)"/><path d="M10 13.5h3M15 13.5h3M20 13.5h7" stroke="var(--tool-ink)" stroke-width="2" stroke-linecap="square"/><rect x="15" y="24" width="10" height="4" rx="1" fill="var(--white)"/></g>
+        <g data-sk="layerline" stroke="none"><path d="M13 3h14l-3 8h-8z" fill="var(--tool)"/><rect x="18.5" y="11" width="3" height="4" fill="var(--tool)"/><rect x="8" y="18" width="24" height="4.5" rx="2.25" fill="var(--ink)"/><rect x="6" y="24" width="28" height="4.5" rx="2.25" fill="var(--ink)"/><rect x="6" y="30" width="28" height="4.5" rx="2.25" fill="var(--ink)"/><rect x="12" y="18" width="7" height="4.5" rx="2.25" fill="var(--tool)" opacity=".85"/></g>
+      </svg>
       <span class="nav-label">Model Library</span>
     </a>
   </div>`;

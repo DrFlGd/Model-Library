@@ -1383,7 +1383,7 @@ async def import_follow_ups(pg):
     body = await pg.eval_on_selector_all('#sort-tree .sw-item[data-name="Body"] .ft', "els => els.map(e => e.dataset.type)")
     loose = await pg.eval_on_selector_all('#sort-tree .sw-left[data-name="notes.txt"] .ft', "els => els.map(e => e.dataset.type)")
     folder = await pg.locator('#sort-tree .sw-folder[data-name="Ann"] .sw-mark-folder').count()
-    colours = await pg.evaluate("() => ['stl', '3mf', 'zip'].map(t => getComputedStyle(document.querySelector(`.ft[data-type='${t}']`)).backgroundColor)")
+    colours = await pg.evaluate("() => ['stl', '3mf', 'zip'].map(t => getComputedStyle(document.querySelector(`.ft[data-type='${t}']`)).borderTopColor)")
     await pick_rows_tree(pg, "Torso")
     await pg.wait_for_selector("#sort-details .tree-file .ft")
     files = await pg.eval_on_selector_all("#sort-details .tree-file .ft", "els => els.map(e => e.dataset.type)")
@@ -2676,6 +2676,31 @@ async def main():
             check("the theme follows the setting and is kept", theme == "night" and saved == "night", (theme, saved))
             await pg.screenshot(path=str(out / "02-night.png"))
             await pg.select_option("#theme-select", "system")
+
+            # the skin (docs/PLAN.md, "Skins design"): Drafting Sheet unless chosen,
+            # changed at once (icons too) and kept
+            first = await pg.evaluate("() => document.documentElement.dataset.skin")
+            drawn = lambda: pg.evaluate("() => [...document.querySelectorAll('.nav-link[title=Home] svg g[data-sk]')].find((g) => getComputedStyle(g).display !== 'none')?.dataset.sk")
+            icon_before = await drawn()
+            await pg.select_option("#skin-select", "classic")
+            skin = await pg.evaluate("() => document.documentElement.dataset.skin")
+            icon_after = await drawn()
+            font = await pg.evaluate("() => getComputedStyle(document.body).fontFamily")
+            await pg.wait_for_timeout(500)
+            saved = json.loads((home / "config/prefs.json").read_text()).get("ml-ui", {}).get("skin")
+            await pg.screenshot(path=str(out / "02-classic.png"))
+            others = {}
+            for name in ("partsbin", "layerline"):
+                await pg.select_option("#skin-select", name)
+                others[name] = (await pg.evaluate("() => document.documentElement.dataset.skin"), await drawn(),
+                                (await pg.evaluate("() => getComputedStyle(document.body).fontFamily")).strip('"').split(",")[0].strip('"'))
+                await pg.screenshot(path=str(out / f"02-{name}.png"))
+            await pg.select_option("#skin-select", "drafting")
+            check("Parts Bin and Layer Line can be chosen too, each with its own icons and lettering",
+                  others == {"partsbin": ("partsbin", "partsbin", "Sofia Sans"), "layerline": ("layerline", "layerline", "Atkinson Hyperlegible")}, others)
+            check("the skin is Drafting Sheet unless chosen; choosing one changes the look and icons at once and is kept",
+                  first == "drafting" and icon_before == "drafting" and skin == "classic" and icon_after == "classic"
+                  and font.strip('"').startswith('Archivo') and saved == "classic", (first, icon_before, skin, icon_after, font, saved))
 
             # 6. a library made by a newer app opens read-only
             future = home / "Future"

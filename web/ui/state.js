@@ -55,19 +55,36 @@ const LAYOUT_KEY = "ml-ui";
 export function initState(store) {
   prefs = store.prefs;
   const saved = prefs.get(LAYOUT_KEY, {}) || {};
-  ui.set({ favs: prefs.get("ml-favs", []) || [], theme: saved.theme || "system", sort: saved.sort || "name", layout: saved.layout || "grid", open: saved.open || {}, partsView: saved.partsView || "folders", sortView: saved.sortView || "folders", filePanelWidth: Math.max(220, Math.min(480, Number(saved.filePanelWidth) || 300)), filePanelOpen: saved.filePanelOpen !== false, navCollapsed: !!saved.navCollapsed, inspector: saved.inspector || {}, inspectorTab: saved.inspectorTab || {}, inspectorWidth: Math.max(260, Math.min(520, Number(saved.inspectorWidth) || 340)), filePanelView: saved.filePanelView || "folders", contentsView: saved.contentsView || "grid", contentsSort: saved.contentsSort || "name", catPanel: ["open", "folded"].includes(saved.catPanel) ? saved.catPanel : null, catPanelWidth: Math.max(180, Math.min(420, Number(saved.catPanelWidth) || 230)), catShow: saved.catShow || {}, viewColour: /^#[0-9a-f]{6}$/i.test(saved.viewColour || "") ? saved.viewColour : null, fileColours: !!saved.fileColours });
+  ui.set({ favs: prefs.get("ml-favs", []) || [], skin: SKINS.some(([v]) => v === saved.skin) ? saved.skin : "drafting", theme: saved.theme || "system", sort: saved.sort || "name", layout: saved.layout || "grid", open: saved.open || {}, partsView: saved.partsView || "folders", sortView: saved.sortView || "folders", filePanelWidth: Math.max(220, Math.min(480, Number(saved.filePanelWidth) || 300)), filePanelOpen: saved.filePanelOpen !== false, navCollapsed: !!saved.navCollapsed, inspector: saved.inspector || {}, inspectorTab: saved.inspectorTab || {}, inspectorWidth: Math.max(260, Math.min(520, Number(saved.inspectorWidth) || 340)), filePanelView: saved.filePanelView || "folders", contentsView: saved.contentsView || "grid", contentsSort: saved.contentsSort || "name", catPanel: ["open", "folded"].includes(saved.catPanel) ? saved.catPanel : null, catPanelWidth: Math.max(180, Math.min(420, Number(saved.catPanelWidth) || 230)), catShow: saved.catShow || {}, viewColour: /^#[0-9a-f]{6}$/i.test(saved.viewColour || "") ? saved.viewColour : null, fileColours: !!saved.fileColours });
+  applySkin();
   applyTheme();
   matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", applyTheme);
 }
 
 function savePrefs() {
   const s = ui.get();
-  prefs?.set(LAYOUT_KEY, { theme: s.theme, sort: s.sort, layout: s.layout, open: s.open, partsView: s.partsView, sortView: s.sortView, filePanelWidth: s.filePanelWidth, filePanelOpen: s.filePanelOpen, navCollapsed: s.navCollapsed, inspector: s.inspector, inspectorTab: s.inspectorTab, inspectorWidth: s.inspectorWidth, filePanelView: s.filePanelView, contentsView: s.contentsView, contentsSort: s.contentsSort, catPanel: s.catPanel, catPanelWidth: s.catPanelWidth, catShow: s.catShow, viewColour: s.viewColour, fileColours: s.fileColours });
+  prefs?.set(LAYOUT_KEY, { skin: s.skin, theme: s.theme, sort: s.sort, layout: s.layout, open: s.open, partsView: s.partsView, sortView: s.sortView, filePanelWidth: s.filePanelWidth, filePanelOpen: s.filePanelOpen, navCollapsed: s.navCollapsed, inspector: s.inspector, inspectorTab: s.inspectorTab, inspectorWidth: s.inspectorWidth, filePanelView: s.filePanelView, contentsView: s.contentsView, contentsSort: s.contentsSort, catPanel: s.catPanel, catPanelWidth: s.catPanelWidth, catShow: s.catShow, viewColour: s.viewColour, fileColours: s.fileColours });
 }
 
 export function setPref(patch) {
   ui.set(patch);
   savePrefs();
+}
+
+/** The skins (docs/PLAN.md, "Skins design"): a skin is data-skin on the page's
+ *  root, read by styles.css and by the icons drawn for each skin. */
+export const SKINS = [
+  ["drafting", "Drafting Sheet"],
+  ["partsbin", "Parts Bin"],
+  ["layerline", "Layer Line"],
+  ["classic", "Classic (the look before skins)"],
+];
+export function applySkin() {
+  document.documentElement.dataset.skin = (SKINS.find(([v]) => v === ui.get().skin) || SKINS[0])[0];
+}
+export function setSkin(skin) {
+  setPref({ skin });
+  applySkin();
 }
 
 export const THEMES = [["system", "Follow the system"], ["light", "Light"], ["dark", "Dark"], ["night", "Night (dim, warm, for a dark workshop)"]];
