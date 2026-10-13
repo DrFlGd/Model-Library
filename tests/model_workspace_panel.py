@@ -132,17 +132,26 @@ async def panel_workspace_checks(pg, check, out=None):
           wide['width'] > restored['width'] and
           restored['width'] > 100 and restored['height'] > 100,
           (wide, restored))
-    await pg.click('#inspector-fold')
+
+    async def fold():
+        # when the 3D view would get too narrow the inspector folds by itself
+        if await pg.locator('#inspector-fold').is_visible():
+            await pg.click('#inspector-fold')
+
+    check('the inspector folds itself at 1024 so the 3D view keeps its room',
+          not await pg.locator('#workspace-details-panel').is_visible())
+    await fold()
     await pg.set_viewport_size({'width': 800, 'height': 600})
     await pg.click('#rail-details')
     check('Details remains reachable at 800 by 600',
           await pg.locator('#workspace-details-panel').is_visible())
-    await pg.click('#inspector-fold')
+    await fold()
     if out is not None:
         await pg.set_viewport_size({'width': 1280, 'height': 800})
-        await pg.click('#rail-details')
+        if not await pg.locator('#workspace-details-panel').is_visible():
+            await pg.click('#rail-details')
         await pg.screenshot(path=str(out / 'agent-a-docked-workspace.png'))
-        await pg.click('#inspector-fold')
+        await fold()
     await pg.set_viewport_size(original_viewport or {'width': 1280, 'height': 900})
 
 

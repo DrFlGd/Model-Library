@@ -181,7 +181,10 @@ export class Viewer {
     const size = bb.getSize(new THREE.Vector3());
     const center = bb.getCenter(new THREE.Vector3());
     const radius = Math.max(size.length() / 2, 10);
-    const dist = (radius / Math.sin(THREE.MathUtils.degToRad(this.camera.fov / 2))) * 1.15;
+    // fit the tighter of the view's height and width, so the whole model shows
+    const half = THREE.MathUtils.degToRad(this.camera.fov / 2);
+    const across = Math.atan(Math.tan(half) * (this.camera.aspect || 1));
+    const dist = (radius / Math.sin(Math.min(half, across))) * 1.15;
     const dirs = { iso: new THREE.Vector3(0.62, -0.95, 0.75), top: new THREE.Vector3(0, -0.0001, 1), front: new THREE.Vector3(0, -1, 0.08) };
     const dir = (dirs[name] || dirs.iso).normalize();
     this.controls.target.copy(center);

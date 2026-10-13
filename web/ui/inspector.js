@@ -15,21 +15,27 @@ const MIN = 260, MAX = 520;
  *  `tabs`: [{ id, label, icon, body }] (a tab without a body isn't shown).
  *  `open`: whether it starts open on this page. `want`: a tab to show now
  *  (when it changes, e.g. a model was selected in Unsorted). */
-export function Inspector({ page, tabs, open: startOpen = true, want = null, label = "Details" }) {
+export function Inspector({ page, tabs, open: startOpen = true, want = null, label = "Details", crowded = false }) {
   const st = useStore(ui, (s) => ({ open: s.inspector[page], tab: s.inspectorTab[page], width: s.inspectorWidth }));
   const list = tabs.filter((t) => t.body !== undefined && t.body !== false);
   // Below 900 px a pane covers the page, so it starts folded there and opening
-  // it isn't kept.
+  // it isn't kept. `crowded`: the page has no room for it beside what it shows
+  // (the model page's 3D view), so it folds the same way until there's room.
   const narrow = useNarrow();
-  const [narrowOpen, setNarrowOpen] = useState(false);
-  const isOpen = narrow ? narrowOpen : st.open == null ? startOpen : st.open === "open";
-  const tab = list.find((t) => t.id === st.tab) || list[0];
+  const local = narrow || crowded;
+  const [localOpen, setLocalOpen] = useState(false);
+  useLayoutEffect(() => setLocalOpen(false), [local]);
+  const isOpen = local ? localOpen : st.open == null ? startOpen : st.open === "open";
+  // a tab marked `empty` (nothing in it) isn't opened by itself: the page shows
+  // the first tab with something in it, unless you pick the empty one
+  const [picked, setPicked] = useState(null);
+  const tab = list.find((t) => t.id === picked) || list.find((t) => t.id === st.tab && !t.empty) || list.find((t) => !t.empty) || list[0];
   const width = Math.max(MIN, Math.min(MAX, st.width || 340));
   const set = (patch) => {
     const prefs = {};
     if ("tab" in patch) prefs.inspectorTab = { ...ui.get().inspectorTab, [page]: patch.tab };
     if ("open" in patch) {
-      if (narrow) setNarrowOpen(patch.open);
+      if (local) setLocalOpen(patch.open);
       else prefs.inspector = { ...ui.get().inspector, [page]: patch.open ? "open" : "folded" };
     }
     setPref(prefs);
@@ -60,7 +66,7 @@ export function Inspector({ page, tabs, open: startOpen = true, want = null, lab
     stopResize.current = stop;
     addEventListener("pointermove", move); addEventListener("pointerup", stop); addEventListener("pointercancel", stop);
   };
-  const pick = (t) => (isOpen && tab?.id === t.id ? set({ open: false }) : set({ open: true, tab: t.id }));
+  const pick = (t) => { setPicked(t.empty ? t.id : null); isOpen && tab?.id === t.id ? set({ open: false }) : set({ open: true, tab: t.id }); };
   return html`<div class=${`inspector-side${isOpen ? " open" : ""}`} id="inspector" data-page=${page} data-tab=${isOpen ? tab?.id : null}>
     ${isOpen && tab ? html`<section class="inspector-pane" style=${{ width: `${width}px` }} aria-label=${tab.label} id=${`pane-${tab.id}`}>
       <header class="pane-head"><strong>${tab.label}</strong>
@@ -82,6 +88,18 @@ function useNarrow() {
     return () => mq.removeEventListener("change", on);
   }, []);
   return n;
+}
+
+/** The width of the element `ref` points at, in CSS pixels (0 until it's laid out). */
+export function useWidth(ref) {
+  const [w, setW] = useState(0);
+  useLayoutEffect(() => {
+    if (!ref.current) return;
+    const ro = new ResizeObserver(([e]) => setW(Math.round(e.contentRect.width)));
+    ro.observe(ref.current);
+    return () => ro.disconnect();
+  }, []);
+  return w;
 }
 
 /** A rail: each tab's icon with its name written down the strip. */

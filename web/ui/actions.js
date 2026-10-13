@@ -84,8 +84,8 @@ export function ContextMenu() {
     const all = [...ref.current.querySelectorAll(".menu-item:not(:disabled)")];
     const i = all.indexOf(document.activeElement);
     const go = (n) => { e.preventDefault(); all[(n + all.length) % all.length]?.focus(); };
-    if (e.key === "ArrowDown") go(i + 1);
-    else if (e.key === "ArrowUp") go(i < 0 ? -1 : i - 1);
+    if (e.key === "ArrowDown" || (e.key === "ArrowRight" && document.activeElement?.classList.contains("menu-swatch"))) go(i + 1);
+    else if (e.key === "ArrowUp" || (e.key === "ArrowLeft" && document.activeElement?.classList.contains("menu-swatch"))) go(i < 0 ? -1 : i - 1);
     else if (e.key === "Home") go(0);
     else if (e.key === "End") go(-1);
     else if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); e.stopPropagation(); closeMenu(); }
@@ -94,6 +94,9 @@ export function ContextMenu() {
       style=${pos ? `left:${pos.x}px;top:${pos.y}px` : `left:${menu.x}px;top:${menu.y}px;visibility:hidden`}>
     ${menu.items.map((it, i) => it.sep ? html`<div class="menu-sep" role="separator" key=${`sep${i}`}></div>`
       : it.head ? html`<div class="menu-head" key=${`head${i}`}>${it.head}</div>`
+      : it.swatches ? html`<div class="menu-swatches" role="group" aria-label=${it.label} key=${`sw${i}`}>${it.swatches.map((w) => html`<button type="button" role="menuitemradio" key=${w.id}
+          data-action=${w.id} class="menu-item menu-swatch" aria-checked=${w.on ? "true" : "false"} title=${w.label} aria-label=${w.label}
+          onClick=${() => { closeMenu(); w.run(); }}><span class="swatch" style=${{ background: w.hex }}></span></button>`)}</div>`
       : html`<button type="button" role="menuitem" key=${it.id || i} data-action=${it.id} class=${`menu-item${it.danger ? " danger-text" : ""}`}
           disabled=${!!it.disabled} title=${typeof it.disabled === "string" ? it.disabled : it.title || null}
           onClick=${() => { closeMenu(); it.run(); }}>

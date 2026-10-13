@@ -308,7 +308,8 @@ export function Stage3D({ src, model, current, onInfo }) {
   const theme = useStore(ui, (s) => s.theme);
   // the colour (docs/PLAN.md, "Group 3 design"): the file's own when shown, else
   // the model's, else this computer's
-  const computer = useStore(ui, (s) => s.viewColour) || GRAY;
+  const computer = useStore(ui, (s) => viewColour(s));
+  const ownComputer = useStore(ui, (s) => s.viewColour);
   const fileColours = useStore(ui, (s) => s.fileColours);
   const saved = model?.details?.render_colour || model?.render_colour || null;
   const [own, setOwn] = useState(saved);
@@ -342,19 +343,28 @@ export function Stage3D({ src, model, current, onInfo }) {
   const info = state.info;
   const showingFile = !!info?.coloured && fileColours;
   const saveOwn = async (hex) => { const v = await setModelColour(model, hex); if (v) setOwn(hex); };
+  // two parts, each ticking its own setting: this computer's colour, and the
+  // model's own (docs/PLAN.md, "0.5.17")
   const colourMenu = (e) => {
     const writable = model && !ui.get().library?.read_only;
     openMenu(e.currentTarget, [
       ...(info?.coloured ? [{ id: "colour-file", label: "The file's colours", icon: fileColours ? "check" : null, run: () => setPref({ fileColours: !fileColours }) }, { sep: true }] : []),
-      ...colourItems(base, (hex) => (own && writable ? saveOwn(hex) : setViewColour(hex))),
-      ...(writable ? [{ sep: true }, own
-        ? { id: "colour-model-off", label: "Stop using a colour for this model", run: () => saveOwn(null) }
-        : { id: "colour-model", label: "Use this colour for this model", sub: "Saved with the model; its preview is drawn in it too", run: () => saveOwn(computer) }] : []),
+      { head: own ? "On this computer (this model has its own)" : "On this computer" },
+      { id: "colour-previews", label: "Same as the previews", icon: ownComputer ? null : "check", run: () => setViewColour(null) },
+      ...colourItems(ownComputer, setViewColour, "colour", "Colours on this computer"),
+      ...(writable ? [{ sep: true }, { head: "For this model (saved with it)" },
+        { id: "model-colour-none", label: "None: use this computer's", icon: own ? null : "check", run: () => own && saveOwn(null) },
+        ...colourItems(own, saveOwn, "model-colour", "Colours for this model")] : []),
     ]);
   };
+  // the less common view actions: the bar's ⋯ button and a right-click on the view
+  const viewItems = () => [
+    { id: "view-edges", label: "Show edges", icon: edges ? "check" : null, title: "Show the edges of the triangles", run: () => { setEdges(!edges); viewer.current?.setEdges(!edges); } },
+    ...(model ? [{ id: "view-cover", label: "Use this view as the cover", icon: "image", disabled: !info ? "Wait for the view" : ui.get().library?.read_only ? "This library is read-only" : false, run: cover }] : []),
+  ];
   const colourLabel = showingFile ? "The file's colours" : `${colourName(base)}${own ? " (this model)" : ""}`;
   return html`<div class="stage-3d">
-    <div class="stage-canvas"><canvas ref=${canvas} id="viewer-canvas"></canvas>
+    <div class="stage-canvas" onContextMenu=${(e) => openMenu(e, viewItems())}><canvas ref=${canvas} id="viewer-canvas"></canvas>
       ${state.busy ? html`<div class="stage-note">Loading…</div>` : null}
       ${state.error ? html`<div class="stage-note form-error" role="alert">${state.error}</div>` : null}
       ${!current ? html`<div class="stage-note muted">No 3D file this app can show (STL, OBJ or 3MF).</div>` : null}</div>
@@ -366,8 +376,7 @@ export function Stage3D({ src, model, current, onInfo }) {
         <button type="button" class="ghost colour-btn" id="viewer-colour" aria-haspopup="menu" data-colour=${showingFile ? "file" : base} data-source=${showingFile ? "file" : own ? "model" : "computer"}
           title=${`Colour: ${colourLabel}${info?.coloured ? " (this file has colours of its own)" : ""}`} onClick=${colourMenu}>
           <span class="swatch" style=${{ background: showingFile ? "conic-gradient(#c8352b, #f2b705, #3a9a4a, #2f6fd0, #c8352b)" : base }}></span>Colour ▾</button>
-        <button type="button" class="ghost" aria-pressed=${edges ? "true" : "false"} title="Show the edges of the triangles" onClick=${() => { setEdges(!edges); viewer.current?.setEdges(!edges); }}>Edges</button>
-        ${model ? html`<button type="button" class="ghost" id="view-cover" disabled=${!info || !!ui.get().library?.read_only} title="Save this view as the model's cover picture" onClick=${cover}>Use as cover</button>` : null}
+        <button type="button" class="ghost" id="viewer-more" aria-haspopup="menu" title="More (also a right-click on the view)" aria-label="More" onClick=${(e) => openMenu(e.currentTarget, viewItems())}>${Icon.more(16)}</button>
       </span>
     </div>
   </div>`;

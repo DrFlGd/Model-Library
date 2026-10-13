@@ -69,6 +69,21 @@ Jerred's second round of requirements (R1–R17, `docs/PLAN.md`, "Requirements r
 
 ## Unreleased
 
+Fixes from the review of 0.5.16 (all 11 items; docs/PLAN.md, "0.5.17").
+
+- **The 3D view keeps its room.** In a window around 1000 to 1300 px wide, the inspector on the right folds to its strip so the 3D view isn't squeezed. In a narrower window the files panel folds too. Both come back when the window grows.
+- **The whole model is in view** when the 3D view is taller than it is wide. Before, its sides were cut off.
+- **Colour ▾ has two parts.** "On this computer" and "For this model", each with a row of swatches, Other colour… and its own tick, so it's clear which colour you're changing. "None" takes a model's colour away.
+- **Other colour… opens the app's own colour dialog**, with sixteen swatches, any colour, and a box for a code such as #3a9a4a. It replaces the system picker, which could lose your choice.
+- **A model's 3D colour is in Edit details**, for one model or several, and in the Details panels.
+- **Settings:** **Preview colour** (Library › Previews) and **3D view colour** (Appearance › 3D view) are named apart. The 3D view colour starts as "Same as the previews". The Theme box is no longer stretched across the page.
+- **Previews can be drawn in a 3MF's own colours.** This is a new option in Library › Previews, off by default.
+- **Changing a Previews setting asks first** before drawing every stored preview again. The cards show the change straight away.
+- **Show edges and Use this view as the cover** moved into the ⋯ button under the 3D view and into a right-click on the view, so its bar fits on one line.
+- **A model page doesn't open on an empty Media tab.** It shows Details instead.
+
+## 0.5.16 (2026-10-13)
+
 Group 3 of the second round of requirements (R9, R11, R10; design in docs/PLAN.md, "Group 3 design").
 
 - **3D files are gray by default.** The viewer and the generated previews draw every 3D file in a neutral gray instead of the old yellow.

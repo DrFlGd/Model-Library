@@ -7,6 +7,7 @@ import { ui } from "./state.js";
 import { api, saveDetails, recorded } from "./library.js";
 import { Cover, PlaceLinks } from "./details.js";
 import { FieldInput } from "./dialogs.js";
+import { ColourSelect, remakePreview } from "./colours.js";
 
 export function detailsDraft(model) {
   const d = model.details || {};
@@ -19,6 +20,7 @@ export function detailsDraft(model) {
     tags: (model.tags || []).join(", "),
     notes: d.notes || "",
     cover: d.cover || "",
+    render_colour: d.render_colour || "",
   };
 }
 
@@ -160,6 +162,7 @@ export function WorkspaceDetails({ model, onModelChange }) {
       // navigation guard before the existing follow-IDs route replacement.
       ui.set({ workspaceDirty: false });
       onModelChange?.(full);
+      if ((form.render_colour || "") !== (baseline.form.render_colour || "")) remakePreview(full.id);
       recorded(`Saved ${result.name}'s details.`, result.journal);
     } catch (e) {
       setError(e.message || String(e));
@@ -191,6 +194,8 @@ export function WorkspaceDetails({ model, onModelChange }) {
       <${FieldInput} field=${field} value=${fields[field.key]} onChange=${(value) => updateField(field.key, value)} /></label>`)}
     ${images.length ? html`<label class="field-block"><span>Cover picture</span><select value=${form.cover} disabled=${readOnly} onChange=${change("cover")}>
       <option value="">Chosen for me</option>${images.map((f) => html`<option key=${f.rel} value=${f.rel}>${f.rel}</option>`)}</select></label>` : null}
+    <label class="field-block"><span>3D colour</span><${ColourSelect} id="workspace-edit-colour" value=${form.render_colour || null} disabled=${readOnly} none="None (as set on this computer)"
+      onChange=${(v) => { setError(""); setEditor((s) => ({ ...s, form: { ...s.form, render_colour: v || "" } })); setTimeout(save); }} /></label>
     <label class="field-block"><span>Notes</span><textarea id="workspace-edit-notes" rows="4" value=${form.notes} disabled=${readOnly} onInput=${change("notes")}></textarea></label>
     ${concurrent ? html`<div class="details-conflict" role="alert" id="details-concurrent">
       <strong>Model details changed elsewhere.</strong>

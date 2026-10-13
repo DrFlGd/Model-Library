@@ -13,6 +13,7 @@ import { ActionRow } from "./actions.js";
 import { EditBox } from "./layout.js";
 import { Icon } from "./icons.js";
 import { TypeTag } from "./filetypes.js";
+import { colourName } from "./colours.js";
 
 const KIND_LABEL = { model: ["3D file", "3D files"], slicer: ["slicer file", "slicer files"], image: ["picture", "pictures"], doc: ["document", "documents"], video: ["video", "videos"], archive: ["archive", "archives"], other: ["other", "other"] };
 const KIND_ICON = { model: "box", slicer: "stack", image: "image", doc: "file", video: "image", archive: "archive", other: "file" };
@@ -94,6 +95,7 @@ export function ModelDetails({ id, empty = null, ctx = { page: "browse" }, row =
       ${d.released ? html`<dt>Released</dt><dd>${d.released}</dd>` : null}
       ${source ? html`<dt>Source</dt><dd><a href=${source} target="_blank" rel="noopener">${source.replace(/^https?:\/\/(www\.)?/, "")}</a></dd>` : null}
       ${d.license ? html`<dt>Licence</dt><dd>${d.license}</dd>` : null}
+      ${d.render_colour ? html`<dt>3D colour</dt><dd id="details-colour"><span class="swatch" style=${{ background: d.render_colour }}></span>${colourName(d.render_colour)}</dd>` : null}
       ${fields.map((f) => html`<dt key=${f.key}>${f.label}</dt><dd data-field=${f.key}>${fieldText(f, m.fields[f.key])}</dd>`)}
       <dt>Added</dt><dd>${(m.added || "").slice(0, 10)}</dd>
       <dt>Folder</dt><dd class="preview-path">${m.rel}</dd>

@@ -12,13 +12,14 @@ import { RenameNode, EditSchema, DeleteSchema, DeleteSubcategory, MergeCategorie
 import { ExtractDialog } from "./extract.js";
 import { AddFilesDialog, SendFilesDialog, DeleteModelsDialog } from "./fileops.js";
 import { ArchiveDialog } from "./archive-actions.js";
+import { COLOURS, MORE_COLOURS, GRAY, ColourSelect, remakePreview } from "./colours.js";
 
 export const FIELD_TYPES = [["text", "Text"], ["number", "Number"], ["choice", "Choice"], ["yes-no", "Yes or no"], ["date", "Date"]];
 export const close = () => ui.set({ dialog: null });
 
 /** A dialog: Esc or Cancel closes it; `danger` makes the button red (it deletes).
  *  Esc and the first box work as soon as it shows (a layout effect, not after a paint). */
-export function Dialog({ title, id, onSubmit, busy, error, submitLabel, danger = false, children }) {
+export function Dialog({ title, id, onSubmit, busy, error, submitLabel, danger = false, cancelLabel = "Cancel", children }) {
   const form = useRef(null);
   useLayoutEffect(() => {
     const key = (e) => { if (e.key === "Escape") close(); };
@@ -35,7 +36,7 @@ export function Dialog({ title, id, onSubmit, busy, error, submitLabel, danger =
       <div class="dialog-foot">
         ${error ? html`<p class="form-error" role="alert">${error}</p>` : null}
         <div class="dialog-actions">
-          <button type="button" class="ghost" onClick=${close}>Cancel</button>
+          <button type="button" class="ghost" id=${id ? `${id}-cancel` : null} onClick=${close}>${cancelLabel}</button>
           <button type="submit" class=${danger ? "primary danger" : "primary"} disabled=${busy}>${submitLabel}</button>
         </div>
       </div>
@@ -138,6 +139,7 @@ function formOf(model) {
     tags: (model.tags || []).join(", "),
     notes: d.notes || "",
     cover: d.cover || "",
+    render_colour: d.render_colour || "",
   };
 }
 
@@ -159,6 +161,7 @@ function EditModel({ model, schema, select }) {
       const v = await saveDetails(model, patch);
       close();
       recorded(`Saved ${v.name}'s details.`, v.journal);
+      if (form.render_colour !== formOf(model).render_colour) remakePreview(v.id || model.id);
     } catch (e) {
       setError(e.message || String(e));
     } finally {
@@ -180,6 +183,8 @@ function EditModel({ model, schema, select }) {
     ${images.length ? html`<label class="field-block"><span>Cover picture</span>
       <select id="edit-cover" value=${form.cover} onChange=${set("cover")}><option value="">Chosen for me</option>
         ${images.map((f) => html`<option value=${f.rel} key=${f.rel}>${f.rel}</option>`)}</select></label>` : null}
+    <label class="field-block"><span>3D colour</span><${ColourSelect} id="edit-colour" value=${form.render_colour || null} none="None (as set on this computer)"
+      onChange=${(v) => setForm({ ...form, render_colour: v || "" })} /></label>
     <label class="field-block"><span>Notes</span><textarea id="edit-notes" rows="3" value=${form.notes} onInput=${set("notes")}></textarea></label>
   <//>`;
 }
@@ -220,6 +225,43 @@ function MoveModels({ models }) {
       <${CategoryPicker} overview=${overview} schema=${schema} values=${values} idPrefix="move" onChange=${(s, v) => { setSchema(s); setValues(v); }} /></div>
     ${change ? html`<div class="field-block"><span class="field-label">Goes to</span><code class="preview-path" id="move-preview">${where} / …</code></div>
       <${ChangePreview} change=${change} onPlan=${setPlan} />` : null}
+  <//>`;
+}
+
+/** Choose a colour (`pickColour` in colours.js opens it): the usual swatches,
+ *  then the system's colour picker or a code such as #3a9a4a. Resolves with the
+ *  colour, or null when it's closed without one. */
+function ColourDialog({ start, title, resolve }) {
+  const [hex, setHex] = useState(/^#[0-9a-f]{6}$/i.test(start || "") ? start.toLowerCase() : GRAY);
+  const [text, setText] = useState(hex);
+  const done = useRef(false);
+  useLayoutEffect(() => () => { if (!done.current) resolve(null); }, []);
+  const set = (v) => { setHex(v); setText(v); };
+  const typed = (v) => {
+    setText(v);
+    const t = v.trim().toLowerCase().replace(/^([0-9a-f]{6})$/, "#$1");
+    if (/^#[0-9a-f]{6}$/.test(t)) setHex(t);
+    else if (/^#[0-9a-f]{3}$/.test(t)) setHex("#" + [...t.slice(1)].map((c) => c + c).join(""));
+  };
+  const submit = () => { done.current = true; resolve(hex); close(); };
+  return html`<${Dialog} title=${title} id="colour-dialog" onSubmit=${submit} submitLabel="Use this colour">
+    <div class="colour-swatches" role="group" aria-label="Colours">
+      ${[...COLOURS, ...MORE_COLOURS].map(([name, h]) => html`<button type="button" key=${h} data-colour=${h} title=${name} aria-label=${name} aria-pressed=${hex === h ? "true" : "false"}
+        onClick=${() => set(h)} onDblClick=${() => { set(h); done.current = true; resolve(h); close(); }}><span class="swatch" style=${{ background: h }}></span></button>`)}
+    </div>
+    <div class="colour-mine">
+      <span class="colour-sample" id="colour-sample" style=${{ background: hex }} aria-hidden="true"></span>
+      <label class="field-row"><span>Any colour</span><input type="color" id="colour-any" value=${hex} onInput=${(e) => set(e.target.value.toLowerCase())} /></label>
+      <label class="field-row"><span>Code</span><input type="text" id="colour-code" maxlength="7" spellcheck="false" value=${text} onInput=${(e) => typed(e.target.value)} /></label>
+    </div>
+  <//>`;
+}
+
+/** Ask whether to do something now (not a warning: nothing is lost either way).
+ *  `{ title, text, button, cancel, run }`: `run()` starts after the dialog closes. */
+function AskDialog({ title, text, button, cancel = "Not now", run }) {
+  return html`<${Dialog} title=${title} id="ask-dialog" onSubmit=${() => { close(); run(); }} submitLabel=${button} cancelLabel=${cancel}>
+    ${[].concat(text).map((t, i) => html`<p key=${i} class=${i ? "muted" : null}>${t}</p>`)}
   <//>`;
 }
 
@@ -267,6 +309,8 @@ export function Dialogs() {
   if (dialog.type === "delete-subcategory") return html`<${DeleteSubcategory} schemaId=${dialog.schemaId} path=${dialog.path} />`;
   if (dialog.type === "merge-categories") return html`<${MergeCategories} schemaId=${dialog.schemaId} path=${dialog.path} />`;
   if (dialog.type === "edit-picked") return html`<${EditPicked} models=${dialog.models} />`;
+  if (dialog.type === "ask") return html`<${AskDialog} ...${dialog} />`;
+  if (dialog.type === "colour") return html`<${ColourDialog} key=${dialog.title} ...${dialog} />`;
   if (dialog.type === "confirm") return html`<${ConfirmDialog} ...${dialog} />`;
   if (dialog.type === "edit-model") return html`<${EditModel} model=${dialog.model} schema=${dialog.schema} select=${!!dialog.select} key=${dialog.model.id} />`;
   return null;

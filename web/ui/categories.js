@@ -17,6 +17,7 @@ import { writable } from "./actions.js";
 import { BUILTIN, CatIcon, iconOf } from "./caticons.js";
 import { isDesktop } from "./library.js";
 import { size } from "./details.js";
+import { ColourSelect, remakePreview } from "./colours.js";
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
@@ -396,7 +397,7 @@ export function EditPicked({ models }) {
   const overview = useStore(ui, (s) => s.overview);
   const schemaId = models.every((m) => m.schema && m.schema === models[0].schema) ? models[0].schema : null;
   const sc = overview?.schemas?.find((s) => s.id === schemaId);
-  const [form, setForm] = useState({ tags_add: "", tags_remove: "", authors: "", license: "" });
+  const [form, setForm] = useState({ tags_add: "", tags_remove: "", authors: "", license: "", render_colour: "" });
   const [fields, setFields] = useState({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -410,6 +411,7 @@ export function EditPicked({ models }) {
       const r = await api("models_update", { ids: models.map((m) => m.id), patch: { ...form, fields: f } });
       followIds(r.ids || {});
       await loadOverview();
+      if (form.render_colour) remakePreview(models.map((m) => (r.ids || {})[m.id] || m.id));
       if (r.errors.length) { setError(r.errors.map((e) => e.error).join(" ")); return; }
       close();
       recorded(`Saved ${r.saved} ${r.saved === 1 ? "model's" : "models'"} details.`, r.journal);
@@ -427,6 +429,8 @@ export function EditPicked({ models }) {
         <datalist id="bulk-tag-list">${tags.map((t) => html`<option value=${t} key=${t} />`)}</datalist></label>
       <label class="field-block"><span>Authors</span><input id="bulk-authors" type="text" placeholder="Replaces theirs; separate several with commas" value=${form.authors} onInput=${set("authors")} /></label>
       <label class="field-block"><span>Licence</span><input id="bulk-license" type="text" value=${form.license} onInput=${set("license")} /></label>
+      <label class="field-block"><span>3D colour</span><${ColourSelect} id="bulk-colour" value=${form.render_colour === "none" ? null : form.render_colour} keep="Leave as it is" none="None (as set on this computer)"
+        onChange=${(v) => setForm({ ...form, render_colour: v === null ? "none" : v })} /></label>
     </div>
     ${sc?.fields?.length ? html`<div class="form-two">${sc.fields.map((f) => html`<label class="field-block" key=${f.key}><span>${f.label}</span>
       <${FieldInput} field=${f} value=${fields[f.key]} onChange=${(v) => setFields({ ...fields, [f.key]: v })} /></label>`)}</div>`

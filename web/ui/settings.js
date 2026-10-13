@@ -4,42 +4,44 @@ import { html, useState } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui, THEMES, setTheme, setPref } from "./state.js";
 import { ctx } from "./context.js";
-import { isDesktop, openLibrary, renameLibrary, showLibraryFolder, setVariantFolders, setPreviews, undoable, toast } from "./library.js";
+import { api, isDesktop, openLibrary, renameLibrary, showLibraryFolder, setVariantFolders, setPreviews, remakePreviews, undoable, toast } from "./library.js";
 import { CommandBar } from "./layout.js";
-import { GRAY, COLOURS, pickColour, colourName } from "./colours.js";
+import { GRAY, ColourSelect, colourName } from "./colours.js";
 
-/** A colour choice: the usual colours, and Other… (the system colour picker). */
-function ColourSelect({ id, value, onChange, disabled }) {
-  const known = COLOURS.some(([, h]) => h === value);
-  return html`<span class="colour-select"><span class="swatch" style=${{ background: value }}></span>
-    <select id=${id} value=${known ? value : "other"} disabled=${disabled}
-      onChange=${async (e) => { const v = e.target.value === "other" ? await pickColour(value) : e.target.value; if (v) onChange(v); else e.target.value = known ? value : "other"; }}>
-      ${COLOURS.map(([name, hex]) => html`<option key=${hex} value=${hex}>${name}</option>`)}
-      <option value="other">${known ? "Other colour…" : `Other colour (${value})…`}</option>
-    </select></span>`;
-}
-
-/** How the library's previews are drawn: their colour, and 3MF pictures (R10, R11). */
+/** How the library's previews are drawn: their colour, 3MF pictures and 3MF
+ *  colours (R10, R11; docs/PLAN.md "0.5.17"). Saving changes the cards at once;
+ *  drawing the pictures kept in the model folders again is offered, not forced. */
 function Previews({ lib }) {
-  const colour = lib.preview_colour || GRAY;
-  const pictures = lib.use_3mf_pictures !== false;
+  const look = { colour: lib.preview_colour || null, pictures: lib.use_3mf_pictures !== false, file_colours: !!lib.preview_file_colours };
   const [busy, setBusy] = useState(false);
   const off = !!lib.read_only || busy;
-  const save = async (c, p, said) => {
+  const save = async (patch, said) => {
     setBusy(true);
     try {
-      const r = await setPreviews(c === GRAY ? null : c, p);
-      toast(`${said} Made ${r.made || 0} ${r.made === 1 ? "preview" : "previews"} again.`, 6000);
-    } catch (e) { toast(`Couldn't make the previews again: ${e.message || e}`, 6000); }
+      const next = { ...look, ...patch };
+      await setPreviews({ ...next, colour: next.colour === GRAY ? null : next.colour });
+      const { total } = await api("models_query", { scope: "all", limit: 1 });
+      toast(`${said} The cards show it as they come into view.`, 6000);
+      if (total) ui.set({ dialog: { type: "ask", title: "Draw the stored previews again?",
+        text: [`The library also keeps a preview picture in each model's folder, for looking through it without the app. Draw those again for ${total} ${total === 1 ? "model" : "models"} now?`,
+          "It runs in the background, with Stop in the status bar. Not now leaves them as they are until a model's preview is made again."],
+        button: "Draw them now", run: async () => {
+          try { const r = await remakePreviews(); toast(`Made ${r.made || 0} ${r.made === 1 ? "preview" : "previews"} again.`, 6000); }
+          catch (e) { toast(`Couldn't make the previews again: ${e.message || e}`, 6000); }
+        } } });
+    } catch (e) { toast(`Couldn't save that: ${e.message || e}`, 6000); }
     setBusy(false);
   };
   return html`<div class="field-block" id="settings-previews"><span class="field-label">Previews</span>
-    <small class="muted">The pictures on the cards are kept in the library, so these are the library's settings. Changing one makes every preview again (Stop is in the status bar). A model with a colour of its own keeps it.</small>
-    <label class="field-row"><span>Colour</span><${ColourSelect} id="preview-colour" value=${colour} disabled=${off}
-      onChange=${(c) => save(c, pictures, `Previews are drawn in ${colourName(c).toLowerCase()}.`)} /></label>
-    <label class="check-row"><input type="checkbox" id="use-3mf-pictures" checked=${pictures} disabled=${off}
-      onChange=${(e) => save(colour, e.target.checked, e.target.checked ? "3MF files' own pictures are used." : "3MF files are drawn like the others.")} />
+    <small class="muted">How the pictures on the cards are drawn. They're the library's settings, so they go wherever the library goes. A model with a colour of its own keeps it.</small>
+    <label class="field-row"><span>Preview colour</span><${ColourSelect} id="preview-colour" value=${look.colour || GRAY} disabled=${off}
+      onChange=${(c) => save({ colour: c }, `Previews are drawn in ${colourName(c).toLowerCase()}.`)} /></label>
+    <label class="check-row"><input type="checkbox" id="use-3mf-pictures" checked=${look.pictures} disabled=${off}
+      onChange=${(e) => save({ pictures: e.target.checked }, e.target.checked ? "3MF files' own pictures are used." : "3MF files are drawn like the others.")} />
       <span>Use the picture saved in a 3MF file (by the slicer) as its preview</span></label>
+    <label class="check-row"><input type="checkbox" id="preview-file-colours" checked=${look.file_colours} disabled=${off}
+      onChange=${(e) => save({ file_colours: e.target.checked }, e.target.checked ? "3MF files are drawn in their own colours." : "3MF files are drawn in the preview colour.")} />
+      <span>Draw a 3MF file in its own colours when it has some (when it has no picture, or pictures are off)</span></label>
   </div>`;
 }
 
@@ -126,12 +128,12 @@ export function Settings() {
     <section class="ls-section">
       <h2>Appearance</h2>
       <label class="field-block"><span>Theme</span>
-        <select id="theme-select" value=${s.theme} onChange=${(e) => setTheme(e.target.value)}>
+        <select id="theme-select" class="compact" value=${s.theme} onChange=${(e) => setTheme(e.target.value)}>
           ${THEMES.map(([v, label]) => html`<option value=${v} key=${v}>${label}</option>`)}
         </select></label>
-      <div class="field-block" id="settings-view-colour"><span class="field-label">3D colour</span>
-        <small class="muted">The colour 3D files are drawn in on this computer (the viewer's Colour ▾ menu changes it too). A model with a colour of its own is drawn in that.</small>
-        <label class="field-row"><span>Colour</span><${ColourSelect} id="view-colour" value=${s.viewColour || GRAY} onChange=${(c) => setPref({ viewColour: c === GRAY ? null : c })} /></label>
+      <div class="field-block" id="settings-view-colour"><span class="field-label">3D view</span>
+        <small class="muted">How 3D files are drawn on a model's page, on this computer. The Colour ▾ menu under the view changes these too. A model with a colour of its own is drawn in that.</small>
+        <label class="field-row"><span>3D view colour</span><${ColourSelect} id="view-colour" value=${s.viewColour} none="Same as the previews" onChange=${(c) => setPref({ viewColour: c })} /></label>
         <label class="check-row"><input type="checkbox" id="file-colours" checked=${!!s.fileColours} onChange=${(e) => setPref({ fileColours: e.target.checked })} />
           <span>Show a 3MF file's own colours when it has some</span></label></div>
     </section>
