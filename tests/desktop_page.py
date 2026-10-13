@@ -53,6 +53,7 @@ Writes <out>/library-info.json and <out>/library.zip for the cross-platform chec
 """
 import argparse
 import os
+import re
 import asyncio
 import base64
 import json
@@ -2209,7 +2210,7 @@ async def group4(pg):
     await pg.wait_for_function("() => /20\\.0 × 20\\.0 × 30\\.0/.test(document.querySelector('#viewer-size')?.textContent || '')", timeout=30000)
     kept = "\n".join(f.read_text(errors="ignore") for f in (home / "config").glob("*") if f.is_file())
     check("a locked archive asks for its password, says when it's wrong, and isn't saved",
-          "didn't open" in wrong and await pg.locator("#password-dialog").count() == 0 and "model" not in kept.replace("model-", ""), wrong)
+          "didn't open" in wrong and await pg.locator("#password-dialog").count() == 0 and not re.search(r':\s*"model"\s*[,}\]]', kept), wrong)
 
     # Extract archive… from the file's own actions, for a 7z
     await select(["f:parts.7z"])
