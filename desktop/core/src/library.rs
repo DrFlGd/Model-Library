@@ -226,7 +226,24 @@ impl Library {
             "id": meta["id"], "name": meta["name"], "format": meta["format"], "created": meta["created"],
             "read_only": self.read_only,
             "variant_folders": self.variant_folders(),
+            "preview_colour": meta.get("preview_colour").and_then(Value::as_str).and_then(crate::mesh::parse_colour).map(crate::mesh::colour_hex),
+            "use_3mf_pictures": meta.get("use_3mf_pictures").and_then(Value::as_bool).unwrap_or(true),
         })
+    }
+
+    /// How previews are drawn (docs/PLAN.md, "Group 3 design"): `colour` ("#rrggbb",
+    /// or None for the usual gray) and whether a 3MF's own picture is used.
+    pub fn set_previews(&self, colour: Option<&str>, pictures: bool) -> Result<()> {
+        let colour = match colour {
+            Some(c) => Some(
+                crate::mesh::parse_colour(c)
+                    .map(crate::mesh::colour_hex)
+                    .ok_or_else(|| anyhow::anyhow!("{c} isn't a colour (#rrggbb)."))?,
+            ),
+            None => None,
+        };
+        self.update_meta(json!({ "preview_colour": colour, "use_3mf_pictures": pictures }))?;
+        Ok(())
     }
 
     /// Folder names that mark a model's variants rather than its parts

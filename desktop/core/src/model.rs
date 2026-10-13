@@ -10,9 +10,10 @@ use std::path::Path;
 pub const SIDECAR: &str = "model.json";
 pub const FORMAT: u64 = 1;
 
-/// Details the editor sets (besides the schema's own "fields").
-pub const DETAILS: [&str; 8] = [
-    "name", "authors", "released", "source", "license", "tags", "notes", "cover",
+/// Details the editor sets (besides the schema's own "fields"); `render_colour`
+/// is the colour the model is drawn in (docs/PLAN.md, "Group 3 design").
+pub const DETAILS: [&str; 9] = [
+    "name", "authors", "released", "source", "license", "tags", "notes", "cover", "render_colour",
 ];
 
 /// What kind of file a path is, by its extension.
@@ -185,6 +186,10 @@ pub fn normalise(field: &str, v: &Value) -> Value {
             .map(|n| json!({ "name": n }))
             .collect::<Vec<_>>()),
         ("source", Value::String(s)) => json!({ "url": s.trim() }),
+        ("render_colour", Value::String(s)) => match crate::mesh::parse_colour(s) {
+            Some(c) => json!(crate::mesh::colour_hex(c)),
+            None => Value::Null,
+        },
         (_, Value::String(s)) => json!(s.trim()),
         _ => v.clone(),
     }

@@ -736,3 +736,21 @@ The inspector's width can be dragged and is kept (one width for all pages, `insp
 
 **What stays.** The menu on the left (its folded form is the icon rail of the mock-up), the category panel's tree, every page's contents, keys (E, M, S, N, Enter, Ctrl+A, Esc, [, ]), right-click menus and Undo. Not in this build: the mock-up's "type a command" in the search box (Ctrl+K), and a History tab (a model's own list of changes), which need new backend work; they go on the roadmap.
 
+
+### Group 3 design (0.5.16)
+
+Seeing models: R9, R11 and R10 (review 2's item 21, one picture per model in a subcategory tile, was already done in 0.5.12). The proposals in the round-2 write-up are taken as they stand: cards don't use a 3MF's colours (they use the 3MF's own picture when it has one), and a model can have its own colour, unset by default.
+
+**R9. Gray by default; a 3MF's own colours on request.** 3D files are drawn in a neutral mid-gray (`#a3a9ae`, readable on the light and the dark floor) in the viewer and in the previews the app draws, instead of yellow. The core reads a 3MF's colours, per triangle, and sends them with the mesh:
+- the core spec's colour groups and base materials (`colorgroup`/`color`, `basematerials`/`base displaycolor`), by the triangle's `pid`/`p1`, else its object's `pid`/`pindex`;
+- the slicers' per-object and per-part extruders, when the triangle has no colour of its own: PrusaSlicer's `Metadata/Slic3r_PE_model.config` (an object's extruder, and its volumes' extruders by triangle range) with the colours in `Metadata/Slic3r_PE.config` (`extruder_colour`, else `filament_colour`); Bambu Studio and OrcaSlicer's `Metadata/model_settings.config` (an object's extruder, and its parts' by component) with the colours in `Metadata/project_settings.config` (`filament_colour`). Extruders count from 1; an object with none uses the first.
+- Painted multi-material (`mmu_segmentation`, `paint_color`) isn't read yet.
+The mesh goes to the viewer as binary STL, as now; when the 3MF has colours it carries them the way STL files from Materialise Magics do (`COLOR=` in the header, 5 bits a channel in each triangle's attribute word), which the viewer's STL reader already understands. A colour 3MF says so in the viewer's bar.
+
+**R10. Other colours.** The viewer's bar gets a **Colour ▾** menu (with a swatch of the colour in use): **The file's colours** (ticked when on; only when the file has some), then Gray, White, Black, Red, Blue, Green, Orange, Yellow, **Other colour…** (the system colour picker), and for a model **Use for this model** / **Stop using a colour for this model**. What's chosen is kept on this computer (`viewColour`, `fileColours`) and used by every viewer; "The file's colours" starts off. A model's own colour is saved in its `model.json` as `render_colour` (`#rrggbb`) and wins over this computer's choice in the viewer and for the model's preview; the file's colours win over both when switched on. Settings, Appearance, has the same choices for the viewer.
+
+**Previews** are the library's (they're files in it), so their colour is too: Settings, Library, **Previews**: **Colour** (the same list) and **Use pictures saved in 3MF files** (R11, on by default), kept in `library.json` (`preview_colour`, `use_3mf_pictures`). Changing either makes every model's preview again as a job with Stop in the status bar (the existing Make new previews job). A file's preview in the parts grid follows the same settings (its cache key includes them).
+
+**R11. A 3MF's own picture.** When a model's main file is a 3MF with a picture inside (the package's thumbnail relationship, else `Metadata/thumbnail.png`, then Bambu and Orca's `Metadata/plate_1.png` and `Metadata/top_1.png`), that PNG becomes the model's preview instead of a drawing, and so does a 3MF's tile in the parts grid. Only PNGs are used; anything else is drawn as before.
+
+The viewer's bar also says where the colour comes from when it isn't this computer's ("the file's colours" or "this model's colour").

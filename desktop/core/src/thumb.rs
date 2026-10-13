@@ -13,7 +13,73 @@ const W: usize = 400;
 const H: usize = 300;
 /// Files bigger than this aren't drawn.
 pub const MAX_BYTES: u64 = 500 << 20;
-const COLOR: [f32; 3] = [242.0, 183.0, 5.0];
+
+/// How previews look (docs/PLAN.md, "Group 3 design"): the colour they're drawn
+/// in and whether a 3MF's own picture is used instead. The library's settings
+/// (`preview_colour`, `use_3mf_pictures` in library.json), and a model's own
+/// colour (`render_colour` in its model.json).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Look {
+    pub colour: mesh::Rgb,
+    pub pictures: bool,
+}
+
+impl Default for Look {
+    fn default() -> Self {
+        Look {
+            colour: mesh::GRAY,
+            pictures: true,
+        }
+    }
+}
+
+/// The look for something at `path` in a library: the library's settings from
+/// the `_library/library.json` above it, and the colour of the model folder it's
+/// in, if that has one.
+pub fn look_for(path: &Path) -> Look {
+    let mut look = Look::default();
+    let mut model_colour = None;
+    for dir in path.ancestors() {
+        if model_colour.is_none() {
+            model_colour = read_json(&dir.join("model.json"))
+                .and_then(|v| v["render_colour"].as_str().and_then(mesh::parse_colour));
+        }
+        let meta = dir.join("_library").join("library.json");
+        if meta.is_file() {
+            if let Some(v) = read_json(&meta) {
+                if let Some(c) = v["preview_colour"].as_str().and_then(mesh::parse_colour) {
+                    look.colour = c;
+                }
+                if let Some(b) = v["use_3mf_pictures"].as_bool() {
+                    look.pictures = b;
+                }
+            }
+            break;
+        }
+    }
+    if let Some(c) = model_colour {
+        look.colour = c;
+    }
+    look
+}
+
+fn read_json(p: &Path) -> Option<serde_json::Value> {
+    if !p.is_file() {
+        return None;
+    }
+    serde_json::from_slice(&std::fs::read(p).ok()?).ok()
+}
+
+/// The picture to use for a 3D file: the 3MF's own when there is one and the look
+/// allows it, else a drawing.
+fn picture(name: &str, bytes: &[u8], look: Look) -> Result<Vec<u8>> {
+    if look.pictures && name.to_ascii_lowercase().ends_with(".3mf") {
+        if let Some(png) = mesh::picture_3mf(bytes) {
+            return Ok(png);
+        }
+    }
+    render(&mesh::read(name, bytes)?, look.colour)
+}
 
 /// Variant folders that hold the model without supports or with them, by name.
 pub fn variant_of(segment: &str) -> Option<&'static str> {
@@ -113,6 +179,8 @@ pub fn file_preview(cache: &Path, path: &Path, entry: Option<&str>) -> Result<St
     h.update([0]);
     h.update(entry.unwrap_or("").as_bytes());
     h.update(format!("\0{}\0{modified}", meta.len()).as_bytes());
+    let look = look_for(path);
+    h.update(format!("\0{}\0{}", mesh::colour_hex(look.colour), look.pictures).as_bytes());
     let name = format!("{}.png", &hex::encode(h.finalize())[..32]);
     let out = cache.join(&name);
     if out.is_file() {
@@ -128,7 +196,7 @@ pub fn file_preview(cache: &Path, path: &Path, entry: Option<&str>) -> Result<St
         bail!("{name_in} can't be drawn");
     }
     let bytes = bytes_at(path, entry)?;
-    let png = render(&mesh::read(&name_in, &bytes)?)?;
+    let png = picture(&name_in, &bytes, look)?;
     crate::config::write_atomic(&out, &png)?;
     prune_cache(cache);
     Ok(name)
@@ -164,8 +232,7 @@ pub fn make(dir: &Path) -> Result<bool> {
         return Ok(false);
     };
     let bytes = file_bytes(dir, &rel, entry.as_deref())?;
-    let tris = mesh::read(entry.as_deref().unwrap_or(&rel), &bytes)?;
-    let png = render(&tris)?;
+    let png = picture(entry.as_deref().unwrap_or(&rel), &bytes, look_for(dir))?;
     let out: PathBuf = dir.join(THUMB);
     crate::config::write_atomic(&out, &png)?;
     Ok(true)
@@ -196,7 +263,8 @@ fn norm(a: [f32; 3]) -> [f32; 3] {
 
 /// Render triangles (Z up) as a PNG: orthographic three-quarter view, flat shaded,
 /// transparent background, drawn at twice the size and scaled down for smooth edges.
-pub fn render(tris: &[f32]) -> Result<Vec<u8>> {
+pub fn render(tris: &[f32], colour: mesh::Rgb) -> Result<Vec<u8>> {
+    let base = colour.map(|c| c as f32);
     if tris.len() < 9 {
         bail!("nothing to draw");
     }
@@ -245,9 +313,9 @@ pub fn render(tris: &[f32]) -> Result<Vec<u8>> {
             + 0.12 * dot(n, view).max(0.0))
         .min(1.15);
         let rgba = [
-            (COLOR[0] * shade).min(255.0) as u8,
-            (COLOR[1] * shade).min(255.0) as u8,
-            (COLOR[2] * shade).min(255.0) as u8,
+            (base[0] * shade).min(255.0) as u8,
+            (base[1] * shade).min(255.0) as u8,
+            (base[2] * shade).min(255.0) as u8,
             255,
         ];
         let s: Vec<[f32; 3]> = v
@@ -410,4 +478,46 @@ mod tests {
         assert!(!make(&d.join("Supported/..").join("nothing-here")).unwrap_or(false));
         let _ = std::fs::remove_dir_all(&d);
     }
+
+    #[test]
+    fn previews_follow_the_library_and_the_model() {
+        let d = std::env::temp_dir().join(format!("modlib-look-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let m = d.join("Cat/Model");
+        std::fs::create_dir_all(&m).unwrap();
+        std::fs::create_dir_all(d.join("_library")).unwrap();
+        assert_eq!(look_for(&m.join("a.stl")), Look::default());
+        std::fs::write(d.join("_library/library.json"), r##"{"preview_colour": "#112233", "use_3mf_pictures": false}"##).unwrap();
+        assert_eq!(look_for(&m.join("a.stl")), Look { colour: [0x11, 0x22, 0x33], pictures: false });
+        std::fs::write(m.join("model.json"), r##"{"render_colour": "#ff0000"}"##).unwrap();
+        assert_eq!(look_for(&m).colour, [255, 0, 0]);
+        // a 3MF's own picture becomes the preview, unless the library says not to
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        png.extend_from_slice(b"picture");
+        {
+            use std::io::Write;
+            let mut buf = std::io::Cursor::new(vec![]);
+            let mut w = zip::ZipWriter::new(&mut buf);
+            let o = zip::write::SimpleFileOptions::default();
+            let mut inner = zip::ZipArchive::new(std::io::Cursor::new(mesh::tests::three_mf(false))).unwrap();
+            for i in 0..inner.len() {
+                let mut f = inner.by_index(i).unwrap();
+                let mut b = vec![];
+                std::io::Read::read_to_end(&mut f, &mut b).unwrap();
+                w.start_file(f.name(), o).unwrap();
+                w.write_all(&b).unwrap();
+            }
+            w.start_file("Metadata/plate_1.png", o).unwrap();
+            w.write_all(&png).unwrap();
+            w.finish().unwrap();
+            std::fs::write(m.join("m.3mf"), buf.into_inner()).unwrap();
+        }
+        assert!(make(&m).unwrap());
+        assert_ne!(std::fs::read(m.join(THUMB)).unwrap(), png);
+        std::fs::write(d.join("_library/library.json"), "{}").unwrap();
+        assert!(make(&m).unwrap());
+        assert_eq!(std::fs::read(m.join(THUMB)).unwrap(), png);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
 }

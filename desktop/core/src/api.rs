@@ -1145,6 +1145,13 @@ impl App {
                 lib.update_meta(json!({ "name": name })).map_err(e2s)?;
                 j(lib.info())
             }
+            "library_previews" => {
+                // how previews are drawn; the page then makes them again (thumbs_make)
+                let lib = self.library()?;
+                lib.set_previews(args["colour"].as_str(), args["pictures"].as_bool() != Some(false))
+                    .map_err(e2s)?;
+                j(lib.info())
+            }
             "library_variants" => {
                 let lib = self.library()?;
                 let names: Option<Vec<String>> = args["names"].as_array().map(|a| {
@@ -1505,10 +1512,9 @@ impl App {
                 );
                 let stl = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
                     let bytes = thumb::bytes_at(&path, entry.as_deref())?;
-                    Ok(mesh::to_stl(&mesh::read(
-                        entry.as_deref().unwrap_or(&file),
-                        &bytes,
-                    )?))
+                    // with the 3MF's colours, when it has some (docs/PLAN.md, "Group 3 design")
+                    let m = mesh::read_mesh(entry.as_deref().unwrap_or(&file), &bytes)?;
+                    Ok(mesh::to_stl_coloured(&m.tris, m.colours.as_deref()))
                 })
                 .await
                 .map_err(|e| e.to_string())?

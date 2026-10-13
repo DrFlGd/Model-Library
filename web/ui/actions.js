@@ -97,7 +97,7 @@ export function ContextMenu() {
       : html`<button type="button" role="menuitem" key=${it.id || i} data-action=${it.id} class=${`menu-item${it.danger ? " danger-text" : ""}`}
           disabled=${!!it.disabled} title=${typeof it.disabled === "string" ? it.disabled : it.title || null}
           onClick=${() => { closeMenu(); it.run(); }}>
-          <span class="menu-icon">${it.icon && Icon[it.icon] ? Icon[it.icon](14, it.filled) : null}</span><span class="menu-label">${it.label}${it.sub ? html`<small class="menu-sub">${it.sub}</small>` : null}</span>${it.key ? html`<kbd>${it.key}</kbd>` : null}</button>`)}
+          <span class="menu-icon">${it.icon && Icon[it.icon] ? Icon[it.icon](14, it.filled) : null}</span><span class="menu-label">${it.swatch ? html`<span class="swatch" style=${{ background: it.swatch }}></span>` : null}${it.label}${it.sub ? html`<small class="menu-sub">${it.sub}</small>` : null}</span>${it.key ? html`<kbd>${it.key}</kbd>` : null}</button>`)}
   </div>`;
 }
 
