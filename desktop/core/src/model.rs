@@ -18,6 +18,9 @@ pub const DETAILS: [&str; 9] = [
 
 /// What kind of file a path is, by its extension.
 pub fn file_kind(name: &str) -> &'static str {
+    if crate::archive::is_part(name) {
+        return "archive";
+    }
     let ext = name
         .rsplit_once('.')
         .map(|(_, e)| e.to_ascii_lowercase())

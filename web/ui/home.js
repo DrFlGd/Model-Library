@@ -60,7 +60,7 @@ function RecentChanges({ lib, rev }) {
     ${broken && !lib.read_only ? html`<div class="warn-note" role="alert" id="change-broken">
       <p>${broken.label} didn't finish${broken.error ? `: ${broken.error}` : "."} ${broken.kind === "archive-op" ? "Verified outputs are preserved until the original contents can be recovered." : "Some folders may have moved and others not."}</p>
       ${broken.kind === "archive-op"
-        ? html`<div class="home-actions"><button type="button" class="primary" id="archive-recover" disabled=${busy || broken.undo !== true} title=${broken.undo !== true ? broken.undo || "Undo the newer change first." : "Verify originals before removing any ZIP outputs"} onClick=${() => act(undoChange, broken.id, "Archive operation safely undone.")}>Undo partial ZIP operation</button></div>`
+        ? html`<div class="home-actions"><button type="button" class="primary" id="archive-recover" disabled=${busy || broken.undo !== true} title=${broken.undo !== true ? broken.undo || "Undo the newer change first." : "Verify originals before removing any archive outputs"} onClick=${() => act(undoChange, broken.id, "Archive operation safely undone.")}>Undo partial archive operation</button></div>`
       : broken.category_import
         ? html`<div class="home-actions"><button type="button" class="primary" id="putback-change" disabled=${busy}
             onClick=${() => act(undoChange, broken.id, "Reviewed import recovered; original files restored.")}>Put imported models back</button></div>`

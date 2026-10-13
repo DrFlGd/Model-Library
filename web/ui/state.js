@@ -19,6 +19,7 @@ export const ui = createStore({
   picked: [],              // the selected models (ids); the details panel shows one, or what several share
   catalogRev: 0,           // bumps when models change (the browse view asks again)
   dialog: null,            // { type: "new-schema" | "edit-model" | "move-models", ... }
+  password: null,          // { file, wrong, resolve }: a locked archive's password asked over any dialog
   menu: null,              // a right-click or More menu: { x, y, items, from }
   dragging: false,         // files are being dragged over the window from outside
   open: {},                // sidebar tree rows unfolded: { "<schema>/<value>…": true }

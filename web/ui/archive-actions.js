@@ -1,14 +1,18 @@
-// Model-level ZIP review. Commit must match the exact reviewed hashes and destinations.
+// Compress to ZIP (a model, or its selected files) and Extract archive (a ZIP, 7z
+// or RAR), reviewed: the commit must match the exact reviewed hashes and destinations.
 import { html, useEffect, useState } from "../lib/html.js";
 import { ui } from "./state.js";
 import { api, followJob, loadOverview, recorded } from "./library.js";
 import { size } from "./details.js";
 import { Dialog, close } from "./dialogs.js";
 import { useCheck } from "./checking.js";
+import { isArchive } from "./filetypes.js";
 
 const errorOf = (e) => e?.message || String(e);
 export function ArchiveDialog({ request }) {
   const { id, action } = request;
+  const files = request.files || null;
+  const some = action === "compress" && !!files?.length;
   const [model, setModel] = useState(null);
   const [filename, setFilename] = useState("");
   const [verified, setVerified] = useState(null);
@@ -21,27 +25,29 @@ export function ArchiveDialog({ request }) {
     api("model_get", { id }).then((m) => {
       if (!live) return;
       setModel(m);
-      const zips = (m.files_list || []).filter((f) => /\.zip$/i.test(f.rel));
-      const chosen = request.file && zips.some((f) => f.rel === request.file) ? request.file : zips[0]?.rel || "";
-      setFilename(action === "extract" ? chosen : (m.name || "Model").replace(/[\\/:*?"<>|]/g, "-").replace(/[. ]+$/, "") + ".zip");
+      const found = (m.files_list || []).filter((f) => isArchive(f.rel));
+      const chosen = request.file && found.some((f) => f.rel === request.file) ? request.file : found[0]?.rel || "";
+      setFilename(action === "extract" ? chosen : (some && request.name ? request.name : `${m.name || "Model"}.zip`).replace(/[\\/:*?"<>|]/g, "-").replace(/[. ]+$/, ""));
     }, (e) => { if (live) setError(errorOf(e)); });
     return () => { live = false; };
   }, [id, action]);
-  const check = useCheck("archive_plan", { id, action, file: filename }, JSON.stringify([id, action, filename, !!model]),
+  const args = { id, action, file: filename, ...(some ? { files } : {}) };
+  const check = useCheck("archive_plan", args, JSON.stringify([args, !!model]),
     { delay: 350, enabled: !verified && !!model && !!filename && !busy });
-  const archives = (model?.files_list || []).filter((f) => /\.zip$/i.test(f.rel));
+  const archives = (model?.files_list || []).filter((f) => isArchive(f.rel));
   const plan = check.result;
   const submit = async () => {
     if (busy || (!plan && !verified) || readOnly) return;
     if (verified) {
       close();
-      recorded(cleaned ? "Verified ZIP operation and recovered original files." : "Verified ZIP operation; originals retained.", verified.journal, () => loadOverview());
+      recorded(action === "compress" ? (cleaned ? "Compressed to ZIP and took the originals out." : "Compressed to ZIP; the originals are kept.")
+        : (cleaned ? "Extracted the archive and took it out." : "Extracted the archive; it's kept."), verified.journal, () => loadOverview());
       return;
     }
     setBusy(true); setError("");
     try {
-      const { job } = await api("archive_execute", { id, action, file: filename, reviewed_plan: plan });
-      const done = await followJob(job, action === "compress" ? "Compressing ZIP" : "Extracting ZIP");
+      const { job } = await api("archive_execute", { ...args, reviewed_plan: plan });
+      const done = await followJob(job, action === "compress" ? "Compressing to ZIP" : "Extracting the archive");
       if (done.error) throw new Error(done.error + " If any outputs were published, Home → Recent changes contains the recovery journal.");
       const result = done.result;
       if (!result?.verified) throw new Error("Verification did not finish. Source files were kept.");
@@ -62,15 +68,15 @@ export function ArchiveDialog({ request }) {
     } catch (e) { setError(errorOf(e)); }
     finally { setBusy(false); }
   };
-  return html`<${Dialog} id="archive-dialog" title=${action === "compress" ? "Compress model to ZIP" : "Extract archive into model"} onSubmit=${submit} busy=${busy || (!verified && !plan) || readOnly} error=${error || check.error || (readOnly ? "The library is read-only." : "")} submitLabel=${verified ? "Finish" : action === "compress" ? "Compress to ZIP" : "Extract files"}>
-    <p class="muted">This changes files in the existing model. Its identity, category and model.json stay in place. Existing files are never overwritten.</p>
+  return html`<${Dialog} id="archive-dialog" title=${action === "compress" ? (some ? "Compress to ZIP" : "Compress model to ZIP") : "Extract archive into model"} onSubmit=${submit} busy=${busy || (!verified && !plan) || readOnly} error=${error || check.error || (readOnly ? "The library is read-only." : "")} submitLabel=${verified ? "Finish" : action === "compress" ? "Compress to ZIP" : "Extract files"}>
+    <p class="muted">${some ? `${files.length === 1 ? "The selected item goes" : `The ${files.length} selected items go`} into one ZIP in the model's top folder, keeping their folders.${request.entries ? " Files picked inside an archive are left out." : ""}` : "This changes files in the existing model."} Its identity, category and model.json stay in place. Existing files are never overwritten.</p>
     ${action === "compress" ? html`<label class="field-block"><span>ZIP file name (in the model's folder)</span><input id="archive-name" required value=${filename} disabled=${busy || !!verified} onInput=${(e) => setFilename(e.target.value)} /></label>` :
       html`<label class="field-block"><span>Archive to extract</span><select id="archive-select" value=${filename} disabled=${busy || !!verified} onChange=${(e) => setFilename(e.target.value)}>
-        ${!archives.length ? html`<option value="">No ZIP files</option>` : null}
+        ${!archives.length ? html`<option value="">No archives</option>` : null}
         ${archives.map((f) => html`<option key=${f.rel} value=${f.rel}>${f.rel}</option>`)}
       </select></label>`}
     ${check.running && !check.view ? html`<p role="status" class="muted">Checking files, destinations and hashes…</p>` : check.view}
-    ${plan ? html`<div class="archive-plan" aria-label="ZIP operation preview">
+    ${plan ? html`<div class="archive-plan" aria-label="What will be done">
       <p><strong>${plan.files_count} files</strong> · ${size(plan.bytes)} of content · approximately ${size(plan.required_bytes)} of staging space required.</p>
       <p class="muted">${action === "compress" ? "Output ZIP:" : "Source archive:"} <code>${plan.file}</code></p>
       <p class="muted">${plan.metadata}</p>
@@ -82,7 +88,7 @@ export function ArchiveDialog({ request }) {
     </div>` : null}
     ${verified ? html`<section class="archive-verified" role="status">
       <p><strong>Verification complete.</strong> All published content passed SHA-256 checks. ${cleaned ? "Original files have been moved into recoverable journal storage." : "Original files have been retained."}</p>
-      ${!cleaned ? html`<button type="button" class="ghost" id="archive-cleanup" disabled=${busy || readOnly} onClick=${cleanup}>${action === "compress" ? "Remove verified original files…" : "Remove verified source ZIP…"}</button>` : null}
+      ${!cleaned ? html`<button type="button" class="ghost" id="archive-cleanup" disabled=${busy || readOnly} onClick=${cleanup}>${action === "compress" ? "Remove verified original files…" : "Remove verified archive…"}</button>` : null}
       <p class="muted">Choose Finish to keep the verified result. Undo is available through Recent changes.</p>
     </section>` : null}
   <//>`;

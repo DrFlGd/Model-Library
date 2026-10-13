@@ -363,6 +363,7 @@ input:invalid { border-color: var(--danger); }
 
 /* dialogs and forms */
 .dialog-backdrop { position: fixed; inset: 0; z-index: 80; background: rgba(10, 14, 18, .45); display: grid; place-items: start center; padding: 8vh 16px 16px; overflow: auto; }
+.password-backdrop { z-index: 85; }
 .dialog:focus { outline: none; }
 .dialog { width: min(620px, 100%); background: var(--white); color: var(--ink); border: 1px solid var(--steel-2); border-radius: var(--radius-m); box-shadow: var(--shadow); padding: 18px 20px 16px; display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
 .dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

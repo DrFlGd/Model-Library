@@ -24,8 +24,19 @@ export function typeOfExt(ext) {
   return { ext: e, group: GROUP_OF.get(e) || "other", label: LABELS[e] || (e ? e.toUpperCase() : "FILE") };
 }
 
-/** A file's type, by its name. */
-export const fileType = (name) => typeOfExt((/\.([^./\\]+)$/.exec(name || "") || [])[1] || "");
+/** A file's type, by its name. A set's later files (name.7z.002, name.r00) are archives too. */
+export const fileType = (name) => /\.7z\.\d{3}$/i.test(name || "") ? typeOfExt("7z") : /\.r\d\d$/i.test(name || "") ? typeOfExt("rar")
+  : typeOfExt((/\.([^./\\]+)$/.exec(name || "") || [])[1] || "");
+
+/** Whether the app can look inside a file (docs/PLAN.md, "Group 4 design"): a ZIP,
+ *  7z or RAR, or the first file of a set (name.7z.001, name.part1.rar). */
+export function isArchive(name) {
+  const n = String(name || "").toLowerCase();
+  if (n.endsWith(".zip") || n.endsWith(".7z") || n.endsWith(".7z.001")) return true;
+  if (!n.endsWith(".rar")) return false;
+  const part = /\.part(\d+)\.rar$/.exec(n);
+  return !part || Number(part[1]) === 1;
+}
 
 /** The tag for one file (`name`) or one type (`ext`), with how many when more than one. */
 export function TypeTag({ name, ext, count }) {

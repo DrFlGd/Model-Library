@@ -10,6 +10,7 @@ import { CategoryPicker } from "./category.js";
 import { fileSel, pickedFiles, keyParts, clear, show } from "./filesel.js";
 import { sendFilesAction } from "./fileops.js";
 import { useCheck } from "./checking.js";
+import { isArchive } from "./filetypes.js";
 
 export function extractionReason(src, model = src?.model, keys = fileSel.get().picked) {
   if (writable() !== true) return writable();
@@ -45,7 +46,26 @@ export function extractionAction(src, model = src?.model) {
  *  (the command bar while files are selected, and every right-click menu on its files). */
 export function fileActions(src, model = src?.model) {
   if (!src || src.kind !== "model") return [];
-  return [extractionAction(src, model), sendFilesAction(model)];
+  return [extractionAction(src, model), sendFilesAction(model), compressAction(model), extractArchiveAction(model)].filter(Boolean);
+}
+
+/** Compress to ZIP… for the selected files and folders (docs/PLAN.md, "Group 4 design"):
+ *  the model's own Compress to ZIP… limited to them. */
+export function compressAction(model) {
+  const keys = fileSel.get().picked;
+  const { files, entries } = pickedFiles(keys);
+  const reason = writable() !== true ? writable() : !keys.length ? "Select files first." : !files.length ? "Files inside an archive can't go into another ZIP here. Make a model from them first." : false;
+  return { id: "compress-files", label: "Compress to ZIP…", icon: "folder", disabled: reason,
+    run: () => ui.set({ dialog: { type: "archive-model", id: model.id, action: "compress", files: files.filter(Boolean), name: `${extractionName(keys.filter((k) => keyParts(k).kind !== "entry"))}.zip`, entries: entries.length } }) };
+}
+
+/** Extract archive… when the one selected file is an archive. */
+function extractArchiveAction(model) {
+  const keys = fileSel.get().picked;
+  const p = keys.length === 1 ? keyParts(keys[0]) : null;
+  if (!p || p.kind !== "file" || !isArchive(p.file)) return null;
+  return { id: "extract-archive", label: "Extract archive…", icon: "folder", disabled: writable() !== true ? writable() : false,
+    run: () => ui.set({ dialog: { type: "archive-model", id: model.id, action: "extract", file: p.file } }) };
 }
 
 export function installExtractKeys() {
@@ -79,13 +99,14 @@ export function ExtractDialog({ model, keys }) {
   const [values, setValues] = useState([]);
   const [keep, setKeep] = useState(true);
   const [mode, setMode] = useState("move");
+  const [pack, setPack] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useLayoutEffect(() => {
     setName(extractionName(keys)); setSchema(model.schema || null); setValues([...(model.path || [])]);
   }, [model, keys]);
   const selection = pickedFiles(keys);
-  const args = { id: model.id, ...selection, name: name.trim(), schema, values };
+  const args = { id: model.id, ...selection, name: name.trim(), schema, values, pack };
   const signature = JSON.stringify(args);
   const check = useCheck("model_extract_plan", args, signature, { enabled: !!args.name });
   const plan = check.result;
@@ -123,9 +144,11 @@ export function ExtractDialog({ model, keys }) {
       ${!keep ? html`<fieldset disabled=${busy}><${CategoryPicker} overview=${overview} schema=${schema} values=${values} idPrefix="extract" onChange=${(s, v) => { setSchema(s); setValues(v); }} /></fieldset>` : null}
     </div>
     <label class="field-block"><span>Move or copy</span><select id="extract-mode" value=${mode} disabled=${busy} onChange=${(e) => setMode(e.target.value)}><option value="move">Move — files leave this model</option><option value="copy">Copy — keep files in both models</option></select></label>
-    ${selection.entries.length ? html`<p class="muted">Selected ZIP entries are unpacked into the new model. The ZIP stays unchanged.</p>` : null}
+    <label class="check-row"><input type="checkbox" id="extract-pack" checked=${pack} disabled=${busy} onChange=${(e) => setPack(e.target.checked)} /> Pack the files into one ZIP</label>
+    ${selection.entries.length ? html`<p class="muted">Files picked inside an archive are unpacked into the new model. The archive stays unchanged.</p>` : null}
+    ${pack ? html`<p class="muted">The ZIP is read back and checked before ${mode === "move" ? "the originals are removed" : "it's kept"}.</p>` : null}
     <div class="field-block"><span class="field-label">Preview</span>
-      ${plan ? html`<code class="preview-path" id="extract-destination">${plan.dest}/</code><ul class="extract-preview" id="extract-preview">${(plan.files || []).map((f) => html`<li key=${f.to}><code>${f.to}</code></li>`)}</ul>` : check.view || html`<p class="muted">${args.name ? "Checking the destination…" : "Enter a name to see the destination."}</p>`}
+      ${plan ? html`<code class="preview-path" id="extract-destination">${plan.dest}/${plan.pack ? html`<span id="extract-zip">${plan.pack}</span>` : ""}</code><ul class=${`extract-preview${plan.pack ? " in-zip" : ""}`} id="extract-preview">${(plan.files || []).map((f) => html`<li key=${f.to}><code>${f.to}</code></li>`)}</ul>` : check.view || html`<p class="muted">${args.name ? "Checking the destination…" : "Enter a name to see the destination."}</p>`}
     </div>
   <//>`;
 }

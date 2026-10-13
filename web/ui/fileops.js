@@ -102,7 +102,7 @@ export function SendFilesDialog({ model, keys }) {
   return html`<${Dialog} title="Send to another model" id="send-files-dialog" onSubmit=${submit}
     busy=${busy || readOnly || !plan?.files?.length || (conflict === "cancel" && !!plan?.conflicts?.length)}
     error=${error || check.error || (readOnly ? "The library is read-only." : "")} submitLabel=${mode === "move" ? "Move files" : "Copy files"}>
-    <p class="muted">From ${model.name}. ${selected.files.length} selected files/folders and ${selected.entries.length} ZIP entries; folders include their descendants. Destination model identity and details remain unchanged.</p>
+    <p class="muted">From ${model.name}. ${selected.files.length} selected files/folders and ${selected.entries.length} files inside archives; folders include their descendants. Destination model identity and details remain unchanged.</p>
     <label class="field-block"><span>Find a destination model</span><input id="send-search" type="search" placeholder="Search models" value=${q} disabled=${busy} onInput=${(e) => setQ(e.target.value)} /></label>
     <label class="field-block"><span>Destination</span><select id="send-target" value=${target} disabled=${busy} required onChange=${(e) => setTarget(e.target.value)}>
       <option value="">Choose another model…</option>${results.map((m) => html`<option key=${m.id} value=${m.id}>${m.name} · ${m.schema ? (m.path || []).join(" › ") || "Category" : "Unsorted"}</option>`)}
@@ -114,7 +114,7 @@ export function SendFilesDialog({ model, keys }) {
       <option value="move">Move — remove verified source files</option><option value="copy">Copy — keep source files</option>
     </select></label>
     <${ConflictChoice} id="send-conflict" value=${conflict} setValue=${setConflict} busy=${busy} />
-    ${selected.entries.length ? html`<p class="muted">ZIP entries can be copied but not moved. Choose Copy to unpack entries without changing the archive.</p>` : null}
+    ${selected.entries.length ? html`<p class="muted">Files inside an archive can be copied but not moved. Choose Copy to unpack them without changing the archive.</p>` : null}
     ${check.view}
     <${Preview} plan=${plan} />
   <//>`;

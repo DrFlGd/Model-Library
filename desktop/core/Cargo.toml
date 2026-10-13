@@ -21,6 +21,11 @@ notify = { version = "8", default-features = false }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+sevenz-rust2 = { version = "0.24", default-features = false, features = ["aes256", "bzip2", "ppmd"] }
 sha2 = "0.10"
 tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "time"] }
+unrar = "0.5"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+sevenz-rust2 = { version = "0.24", default-features = false, features = ["aes256", "bzip2", "ppmd", "compress", "util"] }

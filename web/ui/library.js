@@ -4,8 +4,71 @@ import { ui, addJob } from "./state.js";
 import { ctx } from "./context.js";
 
 export const isDesktop = () => ctx.platform?.kind === "desktop";
-export const api = (cmd, args) => ctx.platform.api(cmd, args);
-export const apiBytes = (cmd, args) => ctx.platform.apiBytes(cmd, args);
+export const api = (cmd, args) => withArchive(ctx.platform.api, cmd, args);
+export const apiBytes = (cmd, args) => withArchive(ctx.platform.apiBytes, cmd, args);
+
+// Looking inside a 7z or RAR (docs/PLAN.md, "Group 4 design"): a big one is
+// opened first, as a job with Stop; a locked one asks for its password. Then
+// the call is made again. Calls about the same archive wait for the same job
+// or the same question.
+const NOT_OPEN = /needs opening first/;
+const LOCKED = /locked with a password|password didn't open/;
+const NO_RETRY = new Set(["archive_open", "archive_password", "job", "job_cancel"]);
+const waiting = new Map();
+const archiveKey = (args) => `${args.sort || args.id || ""}|${args.file}`;
+const archiveName = (file) => String(file).split("/").pop();
+const errorText = (e) => String(e?.message ?? e);
+
+function once(kind, args, start) {
+  const key = `${kind}:${archiveKey(args)}`;
+  if (!waiting.has(key)) waiting.set(key, start().finally(() => waiting.delete(key)));
+  return waiting.get(key);
+}
+
+const where = (args) => ({ id: args.id, sort: args.sort, file: args.file });
+
+function openArchive(args) {
+  return once("open", args, async () => {
+    const { job } = await ctx.platform.api("archive_open", where(args));
+    const done = await followJob(job, `Opening "${archiveName(args.file)}"`);
+    if (done.error) throw new Error(done.error);
+  });
+}
+
+const declined = new Set();
+
+/** Ask for an archive's password (kept in memory until the app closes). Resolves
+ *  true when one was given. After Cancel it isn't asked again for a few seconds,
+ *  so the other files being shown from it don't each ask. */
+function askPassword(args, wrong) {
+  const key = archiveKey(args);
+  if (declined.has(key)) return Promise.resolve(false);
+  return once("password", args, () => new Promise((resolve) => ui.set({
+    password: { file: archiveName(args.file), wrong, resolve: async (password) => {
+      ui.set({ password: null });
+      if (password == null) {
+        declined.add(key);
+        setTimeout(() => declined.delete(key), 5000);
+        return resolve(false);
+      }
+      await ctx.platform.api("archive_password", { ...where(args), password });
+      resolve(true);
+    } },
+  })));
+}
+
+async function withArchive(call, cmd, args) {
+  for (let tries = 0; ; tries++) {
+    let error;
+    try { return await call(cmd, args); } catch (e) { error = e; }
+    if (!args?.file || NO_RETRY.has(cmd) || tries >= 5) throw error;
+    if (NOT_OPEN.test(errorText(error))) {
+      try { await openArchive(args); continue; } catch (e) { error = e; }
+    }
+    if (LOCKED.test(errorText(error)) && await askPassword(args, /didn't open/.test(errorText(error)))) continue;
+    throw error;
+  }
+}
 
 /** How far above the window's foot a message goes: clear of the status bar and
  *  of any bar at the foot of the page (the viewer's, Import's Move/Copy bar). */
@@ -245,7 +308,7 @@ export function openModelFile(model, rel) {
 /** Open a ZIP entry as a managed temporary copy. External edits do not alter the ZIP. */
 export async function openArchiveEntry(src, file, entry) {
   if (!isDesktop()) return;
-  if (!window.confirm("Open a temporary copy in another app? Changes you make there will not be saved back to the ZIP.")) return;
+  if (!window.confirm("Open a temporary copy in another app? Changes you make there will not be saved back to the archive.")) return;
   try {
     const args = src.kind === "sort" ? { sort: src.id } : { id: src.id };
     const { path } = await api("model_external_entry", { ...args, file, entry });
@@ -291,6 +354,7 @@ export async function followJob(id, label, onProgress) {
       onProgress?.(job);
       const p = job.progress || {};
       if (p.items) done.update(`${label}: ${Math.min(p.item + 1, p.items)} of ${p.items}`);
+      else if (p.text) done.update(`${label}: ${p.text}`);
       if (job.done) return job;
       await new Promise((r) => setTimeout(r, 300));
     }

@@ -123,6 +123,7 @@ fn arg<'a>(args: &'a Value, k: &str) -> Result<&'a str> {
 
 impl App {
     pub fn new(paths: AppPaths) -> Result<Arc<Self>> {
+        archive::set_cache(&paths.data_dir);
         Ok(Arc::new(Self {
             paths,
             library: RwLock::new(None),
@@ -1499,7 +1500,7 @@ impl App {
                 }
                 let plan = self.with_index(None, |ix, lib|
                     crate::archive_ops::reviewed_plan(lib, ix, &args)).await?.map_err(e2s)?;
-                j(self.spawn_job("Working with ZIP", move |app, jid, cancel| {
+                j(self.spawn_job("Working with an archive", move |app, jid, cancel| {
                     crate::archive_ops::execute(&lib, &plan, false, &cancel, &|i,n,name|
                         app.job_progress(&jid, json!({"item":i,"items":n,"name":name})))
                 }))
@@ -1507,6 +1508,21 @@ impl App {
             "model_zip" => {
                 let path = self.file_path(&args).await?;
                 j(json!(archive::list(&path).map_err(e2s)?))
+            }
+            "archive_open" => {
+                // a 7z or RAR is unpacked once into the data folder (docs/PLAN.md, "Group 4 design")
+                let path = self.file_path(&args).await?;
+                let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                j(self.spawn_job_with(&format!("Opening \"{name}\""), false, move |app, jid, cancel| {
+                    archive::open(&path, &cancel, &|done, total, _| app.job_progress(&jid, json!({ "text": format!("{} of {} MB", done >> 20, (total >> 20).max(1)) })))?;
+                    Ok(json!({ "opened": true }))
+                }))
+            }
+            "archive_password" => {
+                // kept in memory until the app closes, never written down
+                let path = self.file_path(&args).await?;
+                archive::set_password(&path, arg(&args, "password").map_err(e2s)?);
+                j(json!({ "ok": true }))
             }
             "model_mesh" => {
                 let path = self.file_path(&args).await?;
@@ -1538,7 +1554,7 @@ impl App {
                 let path = self.file_path(&args).await?;
                 let entry = arg(&args, "entry").map_err(e2s)?.to_string();
                 if !entry.to_ascii_lowercase().ends_with(".pdf") {
-                    return Err("Choose a PDF document in the ZIP.".into());
+                    return Err("Choose a PDF document in the archive.".into());
                 }
                 let bytes = tokio::task::spawn_blocking(move || archive::read(&path, &entry, 64 << 20))
                     .await.map_err(|e| e.to_string())?.map_err(e2s)?;
@@ -1565,7 +1581,7 @@ impl App {
                         }
                     }
                     let rel = crate::archive::safe_entry(&entry)?;
-                    let name = rel.file_name().ok_or_else(|| anyhow!("Choose a file in the ZIP."))?
+                    let name = rel.file_name().ok_or_else(|| anyhow!("Choose a file in the archive."))?
                         .to_string_lossy().to_string();
                     let meta = std::fs::metadata(&path)?;
                     let stamp = meta.modified().ok().and_then(|d| d.duration_since(SystemTime::UNIX_EPOCH).ok()).map(|d| d.as_nanos()).unwrap_or(0);

@@ -33,17 +33,17 @@ fn walk(root: &Path, rel: &str, out: &mut BTreeMap<String, Option<String>>) -> R
     Ok(())
 }
 
-fn archive_entry_hash(path:&Path,entry:&str)->Result<(String,u64)> {
+/// An archive entry's hash and size. `open_at_once`: see [`archive::with_entry`].
+fn archive_entry_hash(path:&Path,entry:&str,open_at_once:u64)->Result<(String,u64)> {
     use sha2::{Digest,Sha256};
-    use std::io::Read;
-    let mut z=zip::ZipArchive::new(std::fs::File::open(path)?)?;
-    let mut item=z.by_name(entry)?;
     crate::checking::file(Path::new(entry))?;
-    let mut digest=Sha256::new();
-    let mut buf=[0u8;65536];
-    let mut bytes=0u64;
-    loop {let n=item.read(&mut buf)?;if n==0{break;}crate::checking::read(n)?;digest.update(&buf[..n]);bytes+=n as u64;}
-    Ok((hex::encode(digest.finalize()),bytes))
+    archive::with_entry(path,entry,open_at_once,&AtomicBool::new(false),|item,_| {
+        let mut digest=Sha256::new();
+        let mut buf=[0u8;65536];
+        let mut bytes=0u64;
+        loop {let n=item.read(&mut buf)?;if n==0{break;}crate::checking::read(n)?;digest.update(&buf[..n]);bytes+=n as u64;}
+        Ok((hex::encode(digest.finalize()),bytes))
+    })
 }
 pub fn plan(lib: &Library, ix: &Index, args: &Value) -> Result<Value> {
     let m = ix.get(s(args,"id")).ok_or_else(|| anyhow!("Read the library again: that model is gone."))?;
@@ -95,12 +95,14 @@ pub fn plan(lib: &Library, ix: &Index, args: &Value) -> Result<Value> {
         let file = if entry.is_some() { from.strip_suffix(&format!("!{}",entry.as_ref().unwrap())).unwrap().to_string() } else { from.clone() };
         let source_file=checked(&root,&file)?;
         let (sha256,bytes)=if let Some(entry)=entry.as_deref() {
-            archive_entry_hash(&source_file,entry)?
+            archive_entry_hash(&source_file,entry,archive::open_at_once())?
         } else {(hash(&source_file)?,std::fs::metadata(&source_file)?.len())};
         files.push(json!({"from":from,"to":to,"file":file,"entry":entry,"sha256":sha256,"bytes":bytes}));
     }
     let bytes=files.iter().filter_map(|f|f["bytes"].as_u64()).sum::<u64>();
-    Ok(json!({"dest":lib.relative(&dest),"files":files,"count":files.len(),"bytes":bytes,"source":m.rel(),"source_id":m.id(),"name":name,"metadata":m.v,"schema":sid,"values":values}))
+    // Pack the files into one ZIP named after the new model (docs/PLAN.md, "Group 4 design").
+    let pack=(args["pack"]==true).then(|| format!("{}.zip",import::folder_name("{name}",name,"")));
+    Ok(json!({"dest":lib.relative(&dest),"files":files,"count":files.len(),"bytes":bytes,"source":m.rel(),"source_id":m.id(),"name":name,"metadata":m.v,"schema":sid,"values":values,"pack":pack}))
 }
 fn stop(cancel: &AtomicBool) -> Result<()> { if cancel.load(Ordering::Relaxed) { bail!("Stopped."); } Ok(()) }
 fn snapshot(root: &Path, keep: &Path, file: &str) -> Result<bool> {
@@ -125,7 +127,7 @@ pub fn execute(lib: &Library, plan: &Value, mode: &str, cancel: &AtomicBool, pro
     if current["id"].is_string() && current["id"]!=plan["source_id"] { bail!("The source model changed. Preview it again."); }
     for f in plan["files"].as_array().into_iter().flatten() {
         let source_file=checked(&src,s(f,"file"))?;
-        let actual=if let Some(entry)=f["entry"].as_str() {archive_entry_hash(&source_file,entry)?.0} else {hash(&source_file)?};
+        let actual=if let Some(entry)=f["entry"].as_str() {archive_entry_hash(&source_file,entry,u64::MAX)?.0} else {hash(&source_file)?};
         if actual!=s(f,"sha256") {bail!("A selected file changed since review. Preview the extraction again.");}
     }
     let id = relayout::new_id(lib)?;
@@ -152,13 +154,14 @@ pub fn execute(lib: &Library, plan: &Value, mode: &str, cancel: &AtomicBool, pro
             std::fs::create_dir_all(to.parent().unwrap())?;
             let from = checked(&src,s(f,"file"))?;
             if let Some(entry) = f["entry"].as_str() {
-                use std::io::{Read,Write};
-                let mut z = zip::ZipArchive::new(std::fs::File::open(from)?)?;
-                let mut e = z.by_name(entry)?;
-                let mut out = std::fs::File::create(to)?;
-                let mut buf = vec![0;1<<20];
-                loop { stop(cancel)?; let n=e.read(&mut buf)?; if n==0 {break;} out.write_all(&buf[..n])?; }
-                out.sync_all()?;
+                use std::io::Write;
+                archive::with_entry(&from,entry,u64::MAX,cancel,|e,_| {
+                    let mut out = std::fs::File::create(&to)?;
+                    let mut buf = vec![0;1<<20];
+                    loop { stop(cancel)?; let n=e.read(&mut buf)?; if n==0 {break;} out.write_all(&buf[..n])?; }
+                    out.sync_all()?;
+                    Ok(())
+                })?;
             } else {
                 import::transfer(&from,&to,false,true,&import::Progress{cancel,on_bytes:&|_|{}})?;
             }
@@ -167,6 +170,7 @@ pub fn execute(lib: &Library, plan: &Value, mode: &str, cancel: &AtomicBool, pro
         for f in files {
             if hash(&stage.join(s(f,"to")))?!=s(f,"sha256") {bail!("A staged file did not match the reviewed source manifest.");}
         }
+        if let Some(zip)=plan["pack"].as_str() { pack(&stage,files,zip,cancel)?; }
         // Copy portable descriptive metadata, including unfamiliar custom fields, not identity.
         let mut side = if j["sidecar_before"].is_object() { j["sidecar_before"].clone() } else { json!({}) };
         for k in ["authors","tags","source","released"] {
@@ -178,7 +182,9 @@ pub fn execute(lib: &Library, plan: &Value, mode: &str, cancel: &AtomicBool, pro
         side["schema"]=plan["schema"].clone(); side["path"]=plan["values"].clone();
         if let Some(cover)=side["cover"].as_str() { if !stage.join(cover).is_file() {side["cover"]=Value::Null;} }
         config::write_json(&stage.join(model::SIDECAR),&side)?;
-        j["new_sidecar_after"]=side.clone(); j["original_hashes"]=hashes(&stage)?; relayout::write(lib,&j)?;
+        j["new_sidecar_after"]=side.clone();
+        j["original_hashes"]=if plan["pack"].is_string() { files.iter().map(|f|(s(f,"to").to_string(),f["sha256"].clone())).collect::<serde_json::Map<_,_>>().into() } else { hashes(&stage)? };
+        relayout::write(lib,&j)?;
         std::fs::create_dir_all(dest.parent().unwrap())?;
         // Stage beside the destination, including when that category is on another drive.
         std::fs::rename(&stage,&dest)?;
@@ -218,6 +224,37 @@ pub fn execute(lib: &Library, plan: &Value, mode: &str, cancel: &AtomicBool, pro
         let _=std::fs::remove_dir_all(stage); relayout::write(lib,&j)?; return Err(error);
     }
     result
+}
+/// Put the staged files into one ZIP in the stage, read it back and check every
+/// entry against the reviewed hashes, then take the loose files out.
+fn pack(stage:&Path,files:&[Value],zip:&str,cancel:&AtomicBool)->Result<()> {
+    let at=stage.join(safe(zip)?);
+    if files.iter().any(|f|s(f,"to").eq_ignore_ascii_case(zip)) { bail!("A selected file has the ZIP's name. Rename one of them."); }
+    let mut w=zip::ZipWriter::new(std::fs::File::create(&at)?);
+    let opt=zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    for f in files {
+        stop(cancel)?;
+        w.start_file(s(f,"to"),opt.large_file(f["bytes"].as_u64().unwrap_or(0)>=u32::MAX as u64))?;
+        std::io::copy(&mut std::fs::File::open(stage.join(s(f,"to")))?,&mut w)?;
+    }
+    w.finish()?.sync_all()?;
+    let want:BTreeMap<&str,&str>=files.iter().map(|f|(s(f,"to"),s(f,"sha256"))).collect();
+    let mut seen=BTreeMap::new();
+    archive::each(&at,cancel,&mut |name,_,r| {
+        use sha2::{Digest,Sha256};
+        let mut h=Sha256::new(); let mut b=vec![0;1<<20];
+        loop { let n=r.read(&mut b)?; if n==0 {break;} h.update(&b[..n]); }
+        seen.insert(name.to_string(),hex::encode(h.finalize()));
+        Ok(())
+    })?;
+    if seen.len()!=want.len() || want.iter().any(|(k,v)|seen.get(*k).map(String::as_str)!=Some(*v)) { bail!("The ZIP didn't read back the same as the files. Nothing was changed."); }
+    for f in files {
+        let p=stage.join(s(f,"to"));
+        std::fs::remove_file(&p)?;
+        let mut d=p.parent();
+        while let Some(x)=d { if x==stage || std::fs::remove_dir(x).is_err() {break;} d=x.parent(); }
+    }
+    Ok(())
 }
 fn directories(root:&Path)->Result<Vec<String>> {
     fn visit(root:&Path,at:&Path,out:&mut Vec<String>)->Result<()> {
@@ -260,7 +297,18 @@ fn rollback(lib:&Library,j:&Value, strict:bool)->Result<()> {
         if strict { for f in files { if f["entry"].is_null() && checked(&src,s(f,"file"))?.exists() && hash(&checked(&src,s(f,"file"))?)? != j["original_hashes"][s(f,"to")].as_str().unwrap_or("") { bail!("A file is back at {}. Move it aside before undoing.",s(f,"file")); } } }
         for f in files { if f["entry"].is_null() {
             let old=checked(&src,s(f,"file"))?;
-            if !old.exists() { if !owns_dest { bail!("The extracted file is missing; cannot restore it."); } let new=checked(&dest,s(f,"to"))?; if hash(&new)? != j["original_hashes"][s(f,"to")].as_str().unwrap_or("") {bail!("An extracted file changed. Nothing was overwritten.");} import::transfer(&new,&old,false,true,&import::Progress{cancel:&AtomicBool::new(false),on_bytes:&|_|{}})?; }
+            if !old.exists() {
+                if !owns_dest { bail!("The extracted file is missing; cannot restore it."); }
+                let want=j["original_hashes"][s(f,"to")].as_str().unwrap_or("");
+                if let Some(zip)=j["pack"].as_str() {
+                    // packed into the new model's ZIP: take it back out, checked
+                    std::fs::create_dir_all(old.parent().unwrap())?;
+                    archive::with_entry(&checked(&dest,zip)?,s(f,"to"),u64::MAX,&AtomicBool::new(false),|r,_| { let mut out=std::fs::File::create(&old)?; std::io::copy(r,&mut out)?; out.sync_all()?; Ok(()) })?;
+                    if hash(&old)? != want { let _=std::fs::remove_file(&old); bail!("A file in the new model's ZIP changed. Nothing was overwritten."); }
+                } else {
+                    let new=checked(&dest,s(f,"to"))?; if hash(&new)? != want {bail!("An extracted file changed. Nothing was overwritten.");} import::transfer(&new,&old,false,true,&import::Progress{cancel:&AtomicBool::new(false),on_bytes:&|_|{}})?;
+                }
+            }
         }}
     }
     if j["source_touched"]==true {
@@ -303,6 +351,27 @@ mod tests {
         assert!(model::read_sidecar(&src)["cover"].is_null());
         relayout::undo(&lib,s(&r,"journal"),&AtomicBool::new(false),&|_,_,_|{}).unwrap();
         assert_eq!(hashes(&src).unwrap(),original); assert!(!dest.exists());
+    }
+    #[test]
+    fn packs_the_new_model_into_one_zip_and_undo_takes_them_back_out() {
+        let (lib,ix,id)=setup("extract-pack"); let src=lib.root().join("Unsorted/Kit");
+        let original=hashes(&src).unwrap();
+        let p=plan(&lib,&ix,&json!({"id":id,"files":["Arms/left.stl","Arms/right.stl"],"name":"Arm set","pack":true})).unwrap();
+        assert_eq!(p["pack"],"Arm set.zip");
+        let r=execute(&lib,&p,"move",&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        let dest=lib.resolve(s(&r,"rel")).unwrap();
+        let mut names:Vec<String>=std::fs::read_dir(&dest).unwrap().map(|e|e.unwrap().file_name().to_string_lossy().to_string()).filter(|n|n!="_thumbs").collect(); names.sort();
+        assert_eq!(names,["Arm set.zip",model::SIDECAR]);
+        let entries:Vec<String>=archive::list(&dest.join("Arm set.zip")).unwrap().iter().map(|e|s(e,"name").to_string()).collect();
+        assert_eq!(entries,["left.stl","right.stl"], "paths below the common folder, at the ZIP's root");
+        assert!(!src.join("Arms/left.stl").exists(), "a move removes the originals once the ZIP checks out");
+        relayout::undo(&lib,s(&r,"journal"),&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert_eq!(hashes(&src).unwrap(),original); assert!(!dest.exists());
+        // Copy leaves them
+        let ix=Index::build(&lib,None,true);
+        let p=plan(&lib,&ix,&json!({"id":id,"files":["Arms"],"name":"Arm set","pack":true})).unwrap();
+        execute(&lib,&p,"copy",&AtomicBool::new(false),&|_,_,_|{}).unwrap();
+        assert_eq!(hashes(&src).unwrap(),original);
     }
     #[test]
     fn cancelled_multi_file_stage_leaves_source_whole() {

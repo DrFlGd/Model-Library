@@ -19,7 +19,7 @@ import { ViewSwitch, SortMenu } from "./layout.js";
 import { size } from "./details.js";
 import { openMenu, typing } from "./actions.js";
 import { fileSel, pick, pickEvent, listClick, show, view, clear } from "./filesel.js";
-import { TypeTag } from "./filetypes.js";
+import { TypeTag, isArchive } from "./filetypes.js";
 import { PdfDocument } from "./document-viewer.js";
 import { GRAY, colourItems, colourName, viewColour, setViewColour, setModelColour } from "./colours.js";
 
@@ -163,12 +163,12 @@ async function setCover(id, args, said) {
 
 export const useAsCover = (id, file) => setCover(id, { file }, "Saved as the model's cover.");
 
-/** One file in a list: opens it (a ZIP unfolds into its entries). A file with no
+/** One file in a list: opens it (an archive unfolds into its entries). A file with no
  *  viewer here is greyed; double-click opens it in its own app. */
 function FileRow({ f, name, folder, src, open, current }) {
   const [zipOpen, setZipOpen] = useState(false);
   const t = target(f);
-  const zip = /\.zip$/i.test(f.rel);
+  const zip = isArchive(f.rel);
   const on = current?.file === f.rel && !current?.entry;
   const none = !t && !zip;
   return html`<li class="tree-file">
@@ -559,7 +559,7 @@ export function SelectionRows({ src, files, name, view = "folders", contextActio
   }
   const order = rows.filter((r) => !r.heading).map((r) => r.key);
   const unfold = async (row) => {
-    const isZip = !row.entry && /\.zip$/i.test(row.rel);
+    const isZip = !row.entry && isArchive(row.rel);
     const now = folded[row.key] ?? isZip;
     setFolded((s) => ({ ...s, [row.key]: !now }));
     if (isZip && !archives[row.rel]) {
@@ -623,7 +623,7 @@ export function SelectionRows({ src, files, name, view = "folders", contextActio
     ${view === "all" ? html`<${SortMenu} id="files-sort" options=${[["name", "Name"], ["kind", "Type"], ["size", "Largest first"]]} value=${sort} onChange=${setSort} />` : null}
     <ul class="tree" id=${view === "folders" ? "part-tree" : view === "all" ? "all-files" : "by-type"}>${rows.map((r) => r.heading ? html`<li key=${r.key} class="file-type-heading" data-kind=${r.kind}>${r.heading}</li>` : html`<li key=${r.key} class=${r.folder ? "tree-dir" : "tree-file"}>
       <div class="file-selection-row" style=${{ paddingLeft: `${r.level * 14}px` }}>
-        ${r.folder || (!r.entry && /\.zip$/i.test(r.rel)) ? html`<button class="ghost file-fold" type="button" aria-label=${`${(folded[r.key] ?? !r.folder) ? "Unfold" : "Fold"} ${r.name}`} aria-expanded=${!(folded[r.key] ?? !r.folder)} onClick=${() => unfold(r)}>${(folded[r.key] ?? !r.folder) ? "›" : "⌄"}</button>` : html`<span class="file-fold"></span>`}
+        ${r.folder || (!r.entry && isArchive(r.rel)) ? html`<button class="ghost file-fold" type="button" aria-label=${`${(folded[r.key] ?? !r.folder) ? "Unfold" : "Fold"} ${r.name}`} aria-expanded=${!(folded[r.key] ?? !r.folder)} onClick=${() => unfold(r)}>${(folded[r.key] ?? !r.folder) ? "›" : "⌄"}</button>` : html`<span class="file-fold"></span>`}
         <input type="checkbox" class="pick-tick file-tick" tabindex="-1" checked=${sel.picked.includes(r.key)} aria-label=${`Select ${r.name}`} onClick=${(e) => { e.stopPropagation(); pick(r.key, "toggle", order); }} />
         <button type="button" class=${`tree-btn${sel.picked.includes(r.key) ? " on" : ""}${sel.shown === r.key ? " shown" : ""}`} data-key=${r.key} data-file=${!r.folder && !r.entry ? r.rel : null} data-dir=${r.folder ? r.rel : null} data-entry=${r.entry || null} aria-pressed=${sel.picked.includes(r.key)}
           onClick=${(e) => listClick(r.key, e, order)} onContextMenu=${(e) => menu(e, r)} title=${r.rel || name}>

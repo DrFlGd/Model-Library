@@ -5,7 +5,7 @@ import { useStore } from "../lib/store.js";
 import { ui } from "./state.js";
 import { typing } from "./actions.js";
 import { size } from "./details.js";
-import { TypeTag, fileType } from "./filetypes.js";
+import { TypeTag, fileType, isArchive } from "./filetypes.js";
 import { isDesktop, openModelFile, openArchiveEntry } from "./library.js";
 import { MESH, Stage3D, Pictures, Documents, Videos } from "./parts.js";
 import { fileSel, keyParts, pick, view } from "./filesel.js";
@@ -15,7 +15,7 @@ export function WorkspaceStage({ src, model, files, contextActions }) {
   const shown = useStore(fileSel, (s) => s.shown) || "d:";
   const by = useStore(ui, (s) => s.contentsSort || "name");
   const p = keyParts(shown);
-  const archive = p.kind === "entry" || (p.kind === "file" && /\.zip$/i.test(p.file)) ? p.file : null;
+  const archive = p.kind === "entry" || (p.kind === "file" && isArchive(p.file)) ? p.file : null;
   const { entries, error } = useArchive(src, archive);
   const container = isFolderKey(shown) || (p.kind === "file" && !!archive);
   const name = p.entry || p.file;

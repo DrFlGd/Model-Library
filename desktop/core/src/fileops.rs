@@ -81,10 +81,10 @@ fn checked_external(name:&str)->Result<PathBuf> {
     }
     Ok(p)
 }
-fn data_of(source:&Path,entry:Option<&str>)->Result<Vec<u8>> {
+/// A file's bytes, or an archive entry's (bounded). `open_at_once`: see [`archive::with_entry`].
+fn data_of(source:&Path,entry:Option<&str>,open_at_once:u64)->Result<Vec<u8>> {
     if let Some(e)=entry {
-        // ZIP entry extraction is intentionally bounded (agent C owns archive capabilities).
-        archive::read(source,e,512*1024*1024)
+        archive::read_opening(source,e,512*1024*1024,open_at_once)
     } else {Ok(std::fs::read(source)?)}
 }
 fn sha_bytes(bytes:&[u8])->String {
@@ -163,7 +163,7 @@ pub fn plan(lib:&Library,ix:&Index,args:&Value)->Result<Value> {
         let src=if f["external"]==true {checked_external(s(&f,"from"))?} else {checked_file(&source_root,s(&f,"from"))?};
         // Zip entry reads are capped; plain files use a streaming hash.
         let (hash,size)=if let Some(entry)=f["entry"].as_str() {
-            let data=data_of(&src,Some(entry))?;
+            let data=data_of(&src,Some(entry),archive::open_at_once())?;
             (sha_bytes(&data),data.len() as u64)
         } else {(extract::hash(&src)?,std::fs::metadata(&src)?.len())};
         bytes=bytes.saturating_add(size);
@@ -251,7 +251,7 @@ pub fn execute(lib:&Library,plan:&Value,cancel:&AtomicBool,progress:&dyn Fn(usiz
         if conflicts_with_disk(&target,s(f,"to"))? || dest.exists() {bail!("Destination changed. Review the transfer again.");}
         let from=if f["external"]==true{checked_external(s(f,"from"))?}
             else {checked_file(source.as_ref().ok_or_else(||anyhow!("Missing source model."))?,s(f,"from"))?};
-        let actual=if let Some(entry)=f["entry"].as_str(){sha_bytes(&data_of(&from,Some(entry))?)}else{extract::hash(&from)?};
+        let actual=if let Some(entry)=f["entry"].as_str(){sha_bytes(&data_of(&from,Some(entry),u64::MAX)?)}else{extract::hash(&from)?};
         if actual!=s(f,"sha256"){bail!("A selected file changed. Review the transfer again.");}
     }
     let jid=relayout::new_id(lib)?;
@@ -283,7 +283,7 @@ pub fn execute(lib:&Library,plan:&Value,cancel:&AtomicBool,progress:&dyn Fn(usiz
                 else {checked_file(source.as_ref().unwrap(),s(f,"from"))?};
             let out=stage.join(i.to_string());
             if let Some(entry)=f["entry"].as_str() {
-                std::fs::write(&out,data_of(&from,Some(entry))?)?;
+                std::fs::write(&out,data_of(&from,Some(entry),u64::MAX)?)?;
             } else {copy_checked(&from,&out,s(f,"sha256"))?;}
             if extract::hash(&out)? != s(f,"sha256"){bail!("Staged files failed verification.");}
         }

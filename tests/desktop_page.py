@@ -46,9 +46,14 @@ Import follow-ups: file type tags on Import and in a model's files, making every
 folder at a level a model (and Undo), choosing a folder above a model as the
 model, and the menu for files dropped on the window (added to the category
 shown, undone; sorted on Import).
+Group 4: a 7z and a RAR unfold into their files (a big one opened once as a job,
+a locked one asking for its password), Extract archive… for a 7z, Compress to
+ZIP… for selected files, and Make a model… packed into one ZIP, with Undo.
 Writes <out>/library-info.json and <out>/library.zip for the cross-platform check.
 """
 import argparse
+import os
+import re
 import asyncio
 import base64
 import json
@@ -90,7 +95,9 @@ def check(name, ok, detail=""):
 
 def start_server():
     log = open(out / "serve.log", "w")
-    p = subprocess.Popen([a.cli, "serve", "--ui", a.ui, "--home", str(home), "--port", str(a.port)], stdout=log, stderr=log)
+    # a 7z or RAR over 300 bytes is opened as a job, as a big one is (docs/PLAN.md, "Group 4 design")
+    env = {**os.environ, "MODLIB_ARCHIVE_OPEN_AT_ONCE": "300"}
+    p = subprocess.Popen([a.cli, "serve", "--ui", a.ui, "--home", str(home), "--port", str(a.port)], stdout=log, stderr=log, env=env)
     for _ in range(100):
         try:
             urllib.request.urlopen(B, timeout=1)
@@ -2142,6 +2149,123 @@ async def wait_for(cond, timeout=30):
     return cond()
 
 
+async def group4(pg):
+    """Group 4 (docs/PLAN.md, "Group 4 design"): 7z and RAR open like ZIPs (a big
+    one is opened once as a job, a locked one asks for its password), Extract
+    archive… for each, Compress to ZIP… for selected files, and Make a model…
+    packed into one ZIP."""
+    import zipfile
+    fx = Path(__file__).with_name("fixtures")
+    kit = library / "Unsorted/Archive kit"
+    for n in ("parts.7z", "locked.7z", "version.rar"):
+        put(kit / n, (fx / n).read_bytes())
+    put(kit / "Arms/left.stl", cube(6))
+    put(kit / "Arms/right.stl", cube(7))
+    put(kit / "notes.txt", "keep")
+    put(kit / "model.json", json.dumps({"id": "archive-kit", "name": "Archive kit"}))
+    await api(pg, "library_scan", {"full": True})
+    await pg.goto(B + "#/model/archive-kit")
+    await pg.wait_for_selector('#model-page[data-model="archive-kit"]')
+
+    async def select(keys):
+        await pg.evaluate("""async keys => {
+            const {fileSel} = await import('/ui/filesel.js');
+            fileSel.set({picked: keys, anchor: keys[0] || null});
+        }""", keys)
+        await pg.wait_for_selector("header.cmdbar.selecting")
+
+    # R7. a 7z unfolds into its files; the first look opens it once, as a job
+    await pg.click('#file-panel [aria-label="Unfold parts.7z"]')
+    await pg.wait_for_selector('#file-panel [data-entry="Parts/block.stl"]')
+    jobs = []
+    await pg.click('#file-panel [data-entry="Parts/block.stl"]')
+    for _ in range(40):
+        t = await pg.inner_text(".statusbar")
+        if "Opening" in t:
+            jobs.append(t)
+        if await pg.evaluate("() => /20\\.0 × 20\\.0 × 30\\.0/.test(document.querySelector('#viewer-size')?.textContent || '')"):
+            break
+        await pg.wait_for_timeout(150)
+    size = await pg.inner_text("#viewer-size")
+    cached = [d for d in (home / "data/archive-cache").glob("*") if (d / "done").is_file()]
+    await pg.screenshot(path=str(out / "group4-7z.png"))
+    check("a 7z unfolds into its files and its STL shows in 3D, unpacked once into the data folder",
+          "20.0 × 20.0 × 30.0" in size and len(cached) == 1 and (cached[0] / "files/Parts/block.stl").is_file(), (size, jobs, cached))
+    await pg.click('#file-panel [aria-label="Unfold version.rar"]')
+    await pg.wait_for_selector('#file-panel [data-entry="VERSION"]')
+    check("a RAR unfolds into its files", await pg.locator('#file-panel [data-entry="VERSION"]').count() == 1)
+
+    # a locked archive asks for its password, says when it's wrong, and opens with the right one
+    await pg.click('#file-panel [aria-label="Unfold locked.7z"]')
+    await pg.wait_for_selector("#password-dialog")
+    await pg.fill("#archive-password", "nope")
+    await pg.press("#archive-password", "Enter")
+    await pg.wait_for_selector("#password-dialog .form-error")
+    wrong = await pg.inner_text("#password-dialog .form-error")
+    await pg.screenshot(path=str(out / "group4-password.png"))
+    await pg.fill("#archive-password", "model")
+    await pg.press("#archive-password", "Enter")
+    await pg.wait_for_selector('#file-panel [data-entry="secret.stl"]')
+    await pg.click('#file-panel [data-entry="secret.stl"]')
+    await pg.wait_for_function("() => /20\\.0 × 20\\.0 × 30\\.0/.test(document.querySelector('#viewer-size')?.textContent || '')", timeout=30000)
+    kept = "\n".join(f.read_text(errors="ignore") for f in (home / "config").glob("*") if f.is_file())
+    check("a locked archive asks for its password, says when it's wrong, and isn't saved",
+          "didn't open" in wrong and await pg.locator("#password-dialog").count() == 0 and not re.search(r':\s*"model"\s*[,}\]]', kept), wrong)
+
+    # Extract archive… from the file's own actions, for a 7z
+    await select(["f:parts.7z"])
+    await bar_action(pg, "extract-archive")
+    await pg.wait_for_selector("#archive-dialog .archive-plan")
+    chosen = await pg.input_value("#archive-select")
+    options = await pg.eval_on_selector_all("#archive-select option", "els => els.map(e => e.value)")
+    await pg.click("#archive-dialog button[type=submit]")
+    await pg.wait_for_selector("#archive-dialog .archive-verified", timeout=60000)
+    await pg.click("#archive-dialog button[type=submit]")
+    await pg.wait_for_selector("#archive-dialog", state="detached")
+    check("Extract archive… unpacks a 7z into the model, listing every archive in it",
+          chosen == "parts.7z" and sorted(options) == ["locked.7z", "parts.7z", "version.rar"]
+          and (kit / "Parts/block.stl").is_file() and (kit / "parts.7z").is_file(), (chosen, options))
+
+    # R8. Compress to ZIP… for the selected folder: originals stay until the separate step
+    await select(["d:Arms"])
+    await bar_action(pg, "compress-files")
+    await pg.wait_for_selector("#archive-dialog .archive-plan")
+    name = await pg.input_value("#archive-name")
+    title = await pg.inner_text("#archive-dialog h2")
+    await pg.click("#archive-dialog button[type=submit]")
+    await pg.wait_for_selector("#archive-dialog .archive-verified", timeout=60000)
+    await pg.click("#archive-dialog button[type=submit]")
+    await pg.wait_for_selector("#archive-dialog", state="detached")
+    with zipfile.ZipFile(kit / "Arms.zip") as z:
+        names = sorted(z.namelist())
+    check("Compress to ZIP… puts the selected files in one ZIP and keeps the originals",
+          title == "Compress to ZIP" and name == "Arms.zip" and names == ["Arms/left.stl", "Arms/right.stl"]
+          and (kit / "Arms/left.stl").is_file() and (kit / "notes.txt").is_file(), (title, name, names))
+
+    # R8. Make a model… packed into one ZIP, moved, and Undo
+    before = {str(p.relative_to(kit)): p.read_bytes() for p in kit.rglob("*") if p.is_file() and "_thumbs" not in p.parts}
+    await select(["f:Arms/left.stl", "f:Arms/right.stl"])
+    await pg.click("#bar-extract")
+    await pg.fill("#extract-name", "Arm pair")
+    await pg.check("#extract-pack")
+    await pg.wait_for_function("() => document.querySelector('#extract-zip')?.textContent === 'Arm pair.zip'")
+    await pg.screenshot(path=str(out / "group4-pack.png"))
+    destination = (await pg.inner_text("#extract-destination")).replace("Arm pair.zip", "").rstrip("/")
+    await pg.click("#extract-dialog button[type=submit]")
+    await pg.wait_for_selector("#extract-dialog", state="detached", timeout=60000)
+    await pg.wait_for_function("() => document.querySelector('#toast')?.textContent.startsWith('Made ')")
+    dest = library / destination
+    inside = sorted(x.name for x in dest.iterdir() if x.name != "_thumbs")
+    with zipfile.ZipFile(dest / "Arm pair.zip") as z:
+        packed = sorted(z.namelist())
+    check("Make a model… with Pack the files into one ZIP makes a model holding one ZIP, and the move takes the originals out",
+          inside == ["Arm pair.zip", "model.json"] and packed == ["left.stl", "right.stl"] and not (kit / "Arms/left.stl").exists(), (inside, packed))
+    await pg.locator('#toast button:text-is("Undo")').click()
+    await pg.wait_for_function("() => document.querySelector('#toast')?.textContent.includes('Undone')")
+    after = {str(p.relative_to(kit)): p.read_bytes() for p in kit.rglob("*") if p.is_file() and "_thumbs" not in p.parts}
+    check("Undo takes the files back out of the ZIP", after == before and not dest.exists(), sorted(set(before) ^ set(after)))
+
+
 async def group3(pg):
     """Group 3 (docs/PLAN.md, "Group 3 design"): gray by default, a 3MF's own colours
     on request, other colours (this computer, a model, the library's previews), and
@@ -2432,6 +2556,7 @@ async def main():
             await review2(pg)
             await review_checks(pg)
             await group3(pg)
+            await group4(pg)
 
             # 3. renaming the library
             await pg.click('.sidebar a[href="#/settings"]')
