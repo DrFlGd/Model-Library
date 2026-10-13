@@ -138,6 +138,7 @@ async def panel_workspace_checks(pg, check, out=None):
         if await pg.locator('#inspector-fold').is_visible():
             await pg.click('#inspector-fold')
 
+    await pg.wait_for_function("() => !document.querySelector('#inspector.open')")
     check('the inspector folds itself at 1024 so the 3D view keeps its room',
           not await pg.locator('#workspace-details-panel').is_visible())
     await fold()
@@ -153,12 +154,16 @@ async def panel_workspace_checks(pg, check, out=None):
         await pg.screenshot(path=str(out / 'agent-a-docked-workspace.png'))
         await fold()
     await pg.set_viewport_size(original_viewport or {'width': 1280, 'height': 900})
+    # with room again the inspector comes back as it was left; fold it for what follows
+    await pg.wait_for_timeout(300)
+    await fold()
 
 
 async def details_refresh_checks(pg, check, out=None):
     """Agent A-1: clean refresh, true drafts, concurrent edits and Undo."""
     await pg.wait_for_selector('#rail-details')
-    await pg.click('#rail-details')
+    if not await pg.locator('#workspace-edit-tags').is_visible():
+        await pg.click('#rail-details')
     await pg.wait_for_selector('#workspace-edit-tags')
     tags_before = await pg.input_value('#workspace-edit-tags')
     notes_before = await pg.locator('#workspace-edit-notes').input_value()
