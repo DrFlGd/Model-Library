@@ -5,7 +5,7 @@ import { html, useState, useEffect, useLayoutEffect, useRef } from "../lib/html.
 import { useStore } from "../lib/store.js";
 import { ui } from "./state.js";
 import { api, saveDetails, recorded } from "./library.js";
-import { Cover, PlaceLinks } from "./details.js";
+import { Cover, PlaceLinks, TagLinks } from "./details.js";
 import { FieldInput } from "./dialogs.js";
 import { ColourSelect, remakePreview } from "./colours.js";
 
@@ -172,6 +172,7 @@ export function WorkspaceDetails({ model, onModelChange }) {
     }
   };
   const images = (model.files_list || []).filter((f) => f.kind === "image");
+  const tagList = model.tags || []; // the saved tags, as links
   const field = (t) => ["INPUT", "SELECT", "TEXTAREA"].includes(t?.tagName);
   const leave = (e) => { if (field(e.target)) setTimeout(save); };
   const key = (e) => {
@@ -190,11 +191,12 @@ export function WorkspaceDetails({ model, onModelChange }) {
     <label class="field-block"><span>Licence</span><input type="text" value=${form.license} disabled=${readOnly} onInput=${change("license")} /></label>
     <label class="field-block"><span>Source</span><input type="url" placeholder="https://…" value=${form.source} disabled=${readOnly} onInput=${change("source")} /></label>
     <label class="field-block"><span>Tags</span><input id="workspace-edit-tags" type="text" placeholder="tag one, tag two" value=${form.tags} disabled=${readOnly} onInput=${change("tags")} /></label>
+    ${tagList.length ? html`<div class="tag-links-row"><${TagLinks} tags=${tagList} id="workspace-tag-links" /></div>` : null}
     ${(schema?.fields || []).map((field) => html`<label class="field-block" key=${field.key}><span>${field.label}</span>
       <${FieldInput} field=${field} value=${fields[field.key]} onChange=${(value) => updateField(field.key, value)} /></label>`)}
     ${images.length ? html`<label class="field-block"><span>Cover picture</span><select value=${form.cover} disabled=${readOnly} onChange=${change("cover")}>
       <option value="">Chosen for me</option>${images.map((f) => html`<option key=${f.rel} value=${f.rel}>${f.rel}</option>`)}</select></label>` : null}
-    <label class="field-block"><span>3D colour</span><${ColourSelect} id="workspace-edit-colour" value=${form.render_colour || null} disabled=${readOnly} none="None (as set on this computer)"
+    <label class="field-block"><span>3D colour</span><${ColourSelect} id="workspace-edit-colour" value=${form.render_colour || null} disabled=${readOnly} none="None (the library's preview colour)"
       onChange=${(v) => { setError(""); setEditor((s) => ({ ...s, form: { ...s.form, render_colour: v || "" } })); setTimeout(save); }} /></label>
     <label class="field-block"><span>Notes</span><textarea id="workspace-edit-notes" rows="4" value=${form.notes} disabled=${readOnly} onInput=${change("notes")}></textarea></label>
     ${concurrent ? html`<div class="details-conflict" role="alert" id="details-concurrent">

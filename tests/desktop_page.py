@@ -240,6 +240,11 @@ async def phase1(pg):
     scale = await pg.inner_text('#details-list dd[data-field="scale"]')
     check("details are saved to model.json", side.get("tags") == ["monster", "big"] and side.get("fields") == {"scale": "32mm"} and side.get("authors") == [{"name": "Jo Smith"}]
           and side.get("source") == {"url": "https://example.com/tyrant"} and side.get("id", "").startswith("m") and scale == "32mm", side)
+    links = await labels_of(pg, "#details-tag-links .tag-link")
+    await pg.click("#details-tag-links .tag-link:text-is('#monster')")
+    await pg.wait_for_function("() => location.hash === '#/browse/all' && document.querySelector('#browse-count')?.dataset.q === 'tag:monster'")
+    tagged = (await pg.input_value("#search"), await pg.inner_text("#browse-count"), await labels_of(pg, ".card .card-name"))
+    check("a model's tags are links: clicking one shows every model with it", links == ["#monster", "#big"] and tagged == ("tag:monster", "1 model", ["Hive Tyrant"]), (links, tagged))
     found = [await search(pg, "scale:32mm"), await search(pg, "tag:monster")]
     await search(pg, "")
 
@@ -1973,35 +1978,34 @@ async def group1(pg):
           (preview_row, preview_stage, preview_bar))
     await pg.screenshot(path=str(out / "40-unsorted-file-actions.png"))
 
-    # R2. Add subcategory under the category or subcategory shown
+    # R2. Add subcategory: from the category's menu (⋯ or a right-click), not a row in the tree
+    # (Jerred, 2026-10-13: the row was clicked by mistake)
     await api(pg, "schema_create", {"schema": {"name": "Workshop", "subcategories": [{"name": "Tools"}]}})
     await pg.evaluate("async () => { const {loadOverview} = await import('/ui/library.js'); await loadOverview(); }")
     await pg.locator('#schema-tree a.nav-link[aria-label="Workshop"]').click()
-    await pg.wait_for_selector("#nav-add-subcategory")
     tree = pg.locator("#category-tree")
-    rows = await labels_of(pg, "#category-tree .nav-label")
-    under_top = rows == ["Tools", "Add subcategory"]  # the category's own row is the panel's head
     await tree.locator('a.nav-link[aria-label="Tools"]').click()
     await pg.wait_for_function("() => location.hash.includes('Tools')")
     rows = await labels_of(pg, "#category-tree .nav-label")
-    under_sub = rows.count("Add subcategory") == 1 and rows.index("Add subcategory") == rows.index("Tools") + 1
-    await pg.click("#nav-add-subcategory")
-    await pg.fill("#nav-subcategory-name", "Clamps")
-    await pg.keyboard.press("Enter")
+    no_row = "Add subcategory" not in rows and await pg.locator("#nav-add-subcategory").count() == 0
+    await tree.locator('a.nav-link[aria-label="Tools"]').click(button="right")
+    await pg.wait_for_selector('#context-menu [data-action="add-subcategory"]')
+    await pg.keyboard.press("Escape")
+    await pg.click("#category-menu")
+    await pg.click('#context-menu [data-action="add-subcategory"]')
+    await pg.fill("#subcat-name", "Clamps")
+    await pg.click("#subcat-dialog button[type=submit]")
     await pg.wait_for_function("() => document.querySelector('#toast')?.textContent.includes('Added Clamps')")
     made = (library / "Workshop" / "Tools" / "Clamps").is_dir()
+    await pg.wait_for_function("() => [...document.querySelectorAll('#category-tree .nav-label')].some(e => e.textContent === 'Clamps')")
     rows = await labels_of(pg, "#category-tree .nav-label")
-    shown = rows.index("Clamps") == rows.index("Tools") + 1 and rows.index("Add subcategory") == rows.index("Clamps") + 1
+    shown = rows.index("Clamps") == rows.index("Tools") + 1
     await pg.screenshot(path=str(out / "41-add-subcategory.png"))
     await pg.locator('#toast button:text-is("Undo")').click()
     await pg.wait_for_function("() => ![...document.querySelectorAll('#category-tree .nav-label')].some(e => e.textContent === 'Clamps')")
     undone = not (library / "Workshop" / "Tools" / "Clamps").exists()
-    await pg.click("#nav-add-subcategory")
-    await pg.fill("#nav-subcategory-name", "Nothing")
-    await pg.keyboard.press("Escape")
-    cancelled = await pg.locator("#nav-subcategory-name").count() == 0 and not (library / "Workshop" / "Tools" / "Nothing").exists()
-    check("Add subcategory sits under the category or subcategory shown, adds in place with Undo, and Esc cancels",
-          under_top and under_sub and made and shown and undone and cancelled, (under_top, under_sub, made, shown, undone, cancelled, rows))
+    check("Add subcategory is in the category's menu and right-click menu (no row in the tree), adds under the one shown, with Undo",
+          no_row and made and shown and undone, (no_row, made, shown, undone, rows))
 
     # R14. the About page: versions, the changelog with this version open, the licences
     await pg.click('.sidebar a[href="#/about"]')
@@ -2386,28 +2390,38 @@ async def group3(pg):
     await pg.wait_for_timeout(500)  # preferences are saved after a short pause
     kept = json.loads((home / "config/prefs.json").read_text()).get("ml-ui", {}).get("fileColours")
     await pg.screenshot(path=str(out / "group3-file-colours.png"))
-    check("3D files are drawn gray, and a 3MF's own colours are shown on request; the menu has a part for this computer and one for the model",
-          first == ("#a3a9ae", "computer") and "colour-file" in offered and "colour-red" in offered and "model-colour-red" in offered
-          and "model-colour-none" in offered and any(h.startswith("On this computer") for h in heads) and any(h.startswith("For this model") for h in heads)
+    check("3D files are drawn in the library's colour (gray), and a 3MF's own colours are shown on request; the menu has one part, the model's colour",
+          first == ("#a3a9ae", "library") and "colour-file" in offered and "colour-red" in offered and "colour-library" in offered
+          and not any(a.startswith("model-colour") for a in offered) and heads == ["This model's colour (saved in the library)"]
           and shown == "file" and kept is True, (first, heads, offered, shown, kept))
     await btn.click()
     await pg.click('#context-menu [data-action="colour-file"]')
-    await pg.wait_for_function("() => document.querySelector('#viewer-colour')?.dataset.source === 'computer'")
+    await pg.wait_for_function("() => document.querySelector('#viewer-colour')?.dataset.source === 'library'")
 
-    # R10. this computer's colour, from the menu; Settings shows the same; "Same as the previews"
+    # Jerred, 2026-10-13: one colour, saved in the library and read back when it's opened (no colour for this computer)
+    sidecar = lambda: json.loads((cubes / "model.json").read_text()) if (cubes / "model.json").is_file() else {}
     await btn.click()
     await pg.click('#context-menu [data-action="colour-blue"]')
     await pg.wait_for_function("() => document.querySelector('#viewer-colour')?.dataset.colour === '#2f6fd0'")
+    in_library = await wait_for(lambda: sidecar().get("render_colour") == "#2f6fd0")
     await pg.wait_for_timeout(500)
-    mine = json.loads((home / "config/prefs.json").read_text()).get("ml-ui", {}).get("viewColour")
+    computer = json.loads((home / "config/prefs.json").read_text()).get("ml-ui", {}).get("viewColour")
+    await pg.reload()
+    await pg.wait_for_function("() => document.querySelector('#viewer-colour')?.dataset.source === 'model'", timeout=30000)
+    read_back = await btn.get_attribute("data-colour")
+    page = pg.url  # the model may have its id now (its first model.json)
+    cid = page.split("#/model/")[1]
     await pg.goto(B + "#/settings")
-    await pg.wait_for_selector("#view-colour")
-    in_settings = await pg.input_value("#view-colour")
-    await pg.select_option("#view-colour", "none")
-    await pg.wait_for_timeout(500)
-    back = json.loads((home / "config/prefs.json").read_text()).get("ml-ui", {}).get("viewColour")
-    check("this computer's 3D colour is chosen in the viewer or Settings, and by default it's the previews' colour",
-          mine == "#2f6fd0" and in_settings == "#2f6fd0" and back is None, (mine, in_settings, back))
+    await pg.wait_for_selector("#settings-view-colour")
+    no_box = await pg.locator("#view-colour").count() == 0
+    await pg.goto(page)
+    await pg.wait_for_selector("#viewer-size", timeout=30000)
+    await btn.click()
+    await pg.click('#context-menu [data-action="colour-library"]')
+    await pg.wait_for_function("() => document.querySelector('#viewer-colour')?.dataset.source === 'library'")
+    cleared = await wait_for(lambda: not sidecar().get("render_colour"))
+    check("a colour chosen under the 3D view is saved with the model in the library and read back; Same as the library takes it away",
+          in_library and computer is None and read_back == "#2f6fd0" and no_box and cleared, (sidecar().get("render_colour"), computer, read_back, no_box))
 
     # review 3, item 3. Other colour… is the app's own colour dialog: a code typed in
     await pg.goto(B + f"#/model/{cid}")
@@ -2427,16 +2441,16 @@ async def group3(pg):
     await pg.wait_for_selector("#colour-dialog", state="detached")
     still = await btn.get_attribute("data-colour")
     await btn.click()
-    await pg.click('#context-menu [data-action="colour-previews"]')
+    await pg.click('#context-menu [data-action="colour-library"]')
     await pg.wait_for_function("() => document.querySelector('#viewer-colour')?.dataset.colour === '#a3a9ae'")
     check("Other colour… opens the app's colour dialog, takes a typed code, and Esc changes nothing",
           swatches == 16 and sample == "rgb(58, 154, 74)" and still == "#3a9a4a", (swatches, sample, still))
 
-    # R10. a model's own colour from the menu's model part: saved in its model.json, its preview drawn in it, Undo
+    # R10. a model's own colour from the menu: saved in its model.json, its preview drawn in it, Undo
+    await wait_for(lambda: not sidecar().get("render_colour"))
     await btn.click()
-    await pg.click('#context-menu [data-action="model-colour-red"]')
+    await pg.click('#context-menu [data-action="colour-red"]')
     said = await toast_text(pg, "drawn in red")
-    sidecar = lambda: json.loads((cubes / "model.json").read_text()) if (cubes / "model.json").is_file() else {}
     saved = await wait_for(lambda: sidecar().get("render_colour") == "#c8352b")
     await pg.wait_for_function("() => document.querySelector('#viewer-colour')?.dataset.source === 'model'")
     redrawn = await wait_for(lambda: reddish(tint(cube_png)))
@@ -2445,7 +2459,7 @@ async def group3(pg):
     check("a model can have a colour of its own: kept in its model.json, with its preview drawn in it",
           saved and redrawn and on_page == "#c8352b" and "red" in said, (sidecar().get("render_colour"), tint(cube_png), on_page, said))
     await btn.click()
-    await pg.click('#context-menu [data-action="model-colour-blue"]')
+    await pg.click('#context-menu [data-action="colour-blue"]')
     await toast_text(pg, "drawn in blue")
     await wait_for(lambda: sidecar().get("render_colour") == "#2f6fd0")
     await pg.click(".toast button:has-text('Undo')")
@@ -2456,8 +2470,8 @@ async def group3(pg):
     await pg.goto(B + f"#/model/{cid}")
     await pg.wait_for_selector("#viewer-size", timeout=30000)
     await btn.click()
-    await pg.click('#context-menu [data-action="model-colour-none"]')
-    await pg.wait_for_function("() => document.querySelector('#viewer-colour')?.dataset.source === 'computer'")
+    await pg.click('#context-menu [data-action="colour-library"]')
+    await pg.wait_for_function("() => document.querySelector('#viewer-colour')?.dataset.source === 'library'")
     cleared = await wait_for(lambda: not sidecar().get("render_colour"))
     regray = await wait_for(lambda: grayish(tint(cube_png)))
     check("Undo puts the model's colour back, and None takes it away", undone and cleared and regray, (sidecar().get("render_colour"), tint(cube_png)))
@@ -2503,7 +2517,7 @@ async def group3(pg):
     await pg.wait_for_selector("#ask-dialog", state="detached")
     untouched = grayish(tint(cube_png))
     stored = json.loads((library / "_library/library.json").read_text()).get("preview_colour")
-    view_follows = await pg.evaluate("async () => (await import('./ui/colours.js')).viewColour()")
+    view_follows = await pg.evaluate("async () => (await import('./ui/colours.js')).libraryColour()")
     await pg.click("#preview-file-colours")
     await pg.wait_for_selector("#ask-dialog")
     await pg.click("#ask-dialog button[type=submit]")

@@ -69,6 +69,13 @@ Jerred's second round of requirements (R1–R17, `docs/PLAN.md`, "Requirements r
 
 ## Unreleased
 
+- Clicking a tag shows every model with it: a model's tags are links under its Tags box (in the details panel and on its page), and wherever tags are listed.
+- One colour for a model's 3D view, saved with it in the library and read back wherever the library is opened. The Colour ▾ menu under the view sets it (or Same as the library's previews); there's no separate colour for this computer any more, in the menu or in Settings.
+- The Add subcategory row under the subcategory shown in the menu is gone (it was easy to click by mistake). Add subcategory is in the category's ⋯ menu and its right-click menu, and the new one's parent unfolds to show it.
+- Drafting Sheet: the "·" between figures (such as "2 files · 7 B") has a space on both sides again.
+
+## 0.5.19 (2026-10-13)
+
 Skins (R16; docs/PLAN.md, "Skins design"), step 1:
 
 - Settings › Appearance has a **Skin** box. **Drafting Sheet** is the new look and the default: square corners, fine rules, drafting-blue accent, Overpass lettering with Overpass Mono for sizes, counts, dates and file tags, a faint grid behind pictures and the 3D view, corner ticks on cards, section headings ruled off, and the status bar as a drawing's title block. Light, dark and Night all work with it.

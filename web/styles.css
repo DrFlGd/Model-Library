@@ -162,6 +162,12 @@ input:invalid { border-color: var(--danger); }
   border: 1px solid var(--steel-2); font-size: 14px; font-weight: 600; text-decoration: none; color: var(--ink);
 }
 .chip:hover { border-color: var(--ink); }
+/* tags as links: each shows every model with it */
+.tag-links { display: inline-flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.tag-link { padding: 1px 7px; font-size: 12px; font-weight: 600; color: var(--tool); cursor: pointer; }
+.tag-link:hover { border-color: var(--tool); }
+.tag-links-row { margin: -2px 0 4px; }
+.tag-links-row.edit-row > .tag-links { padding-left: 8px; }
 
 /* ======================================================================
    The app: sidebar, main view, status bar
@@ -197,9 +203,6 @@ input:invalid { border-color: var(--danger); }
 .nav-head { font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--graphite); margin: 16px 8px 4px 30px; }
 .nav-note { font-size: 12.5px; margin: 0 8px 0 30px; }
 .nav-foot { margin-top: auto; padding-top: 18px; }
-.nav-add-sub { width: 100%; border: 0; background: transparent; font: inherit; font-size: 13px; color: var(--graphite); cursor: pointer; text-align: left; }
-.nav-add-sub:hover { color: var(--ink); }
-.nav-add-input { flex: 1; min-width: 0; margin: 2px 0; padding: 4px 8px; font-size: 13px; }
 .nav-foot li { padding-left: 0; }
 /* the category's subcategories beside the menu (R5) */
 .category-panel { position: relative; flex: none; background: var(--panel); border-right: 1px solid var(--steel-2); overflow: auto; padding: 10px 8px 14px; display: flex; flex-direction: column; gap: 6px; }
@@ -1261,6 +1264,11 @@ svg g[data-sk] { display: none; }
 :root:not([data-skin]) svg g[data-sk="classic"], :root[data-skin="classic"] svg g[data-sk="classic"],
 :root[data-skin="drafting"] svg g[data-sk="drafting"], :root[data-skin="partsbin"] svg g[data-sk="partsbin"],
 :root[data-skin="layerline"] svg g[data-sk="layerline"] { display: inline; }
+
+/* Overpass draws "·" at the left of its box, so "a · b" reads "a ·b": take that
+   one character from a system font (later faces win for the characters they cover). */
+@font-face { font-family: "Overpass"; src: local("Segoe UI"), local("Arial"), local("Helvetica"), local("DejaVu Sans"); unicode-range: U+00B7; }
+@font-face { font-family: "Overpass Mono"; src: local("Segoe UI"), local("Arial"), local("Helvetica"), local("DejaVu Sans"); unicode-range: U+00B7; }
 
 /* Drafting Sheet: a sheet from a technical drawing. */
 :root[data-skin="drafting"] {
