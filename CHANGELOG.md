@@ -69,6 +69,20 @@ Jerred's second round of requirements (R1–R17, `docs/PLAN.md`, "Requirements r
 
 ## Unreleased
 
+- Fixes from the review of 0.5.19 (Drafting Sheet):
+  - A tag in a place's summary narrows that place, like the chips above the cards.
+  - Folding uses the same chevron everywhere (menu, Import, a model's archives).
+  - Media heads the model folder's own files "In the model's folder", lined up with "In archives".
+  - On a model's page, Edit details… opens its Details tab with Name ready to type; the dialog stays for the library pages and several models.
+  - The Files panel no longer repeats the count from the title bar, and shows Select all alone until a search or variant narrows the list.
+  - The filter chips keep to one row, with the rest under "+N more ▾".
+  - Cards on Unsorted no longer say Unsorted, and on a category page they show only the part below it.
+  - The grid is only behind pictures and the 3D view, not behind text pages.
+  - Beside a model in a window under 1150 px the menu folds to its icons (☰ unfolds it).
+  - A top bar squeezed by the menu and category panel keeps Sort and ⋯ (Sort drops its words first).
+
+## 0.5.20 (2026-10-14)
+
 - Clicking a tag shows every model with it: a model's tags are links under its Tags box (in the details panel and on its page), and wherever tags are listed.
 - One colour for a model's 3D view, saved with it in the library and read back wherever the library is opened. The Colour ▾ menu under the view sets it (or Same as the library's previews); there's no separate colour for this computer any more, in the menu or in Settings.
 - The Add subcategory row under the subcategory shown in the menu is gone (it was easy to click by mistake). Add subcategory is in the category's ⋯ menu and its right-click menu, and the new one's parent unfolds to show it.

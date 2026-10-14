@@ -137,8 +137,8 @@ export function Contents({ src, model, files, shown, archive, entries, error, co
   };
   return html`<div class="contents-view" id="contents-view" tabIndex="0" onKeyDown=${key}>
     <div class="file-scope-tools" role="group" aria-label="Folder selection scope">
-      <button type="button" class="ghost" id="select-this-level" disabled=${!order.length} onClick=${() => fileSel.set({ picked: order, anchor: order[0] || null })} title="Select what this folder shows">Select shown (${rows.length})</button>
-      <button type="button" class="ghost" id="select-folder-contents" disabled=${!scopeKey || !rows.length} title="Select every file in this folder, including those in folders inside it" onClick=${() => fileSel.set({ picked: [scopeKey], anchor: scopeKey })}>Select all (${below})</button>
+      <button type="button" class="ghost" id="select-folder-contents" disabled=${!rows.length} title="Select every file in this folder, including those in folders inside it"
+        onClick=${() => fileSel.set(scopeKey ? { picked: [scopeKey], anchor: scopeKey } : { picked: order, anchor: order[0] || null })}>Select all (${below})</button>
     </div>
     <div class="contents-tools"><${SortMenu} id="contents-sort" options=${[["name", "Name"], ["type", "Type"], ["size", "Largest first"], ["newest", "Newest"]]} value=${prefs[0]} onChange=${(contentsSort) => setPref({ contentsSort })} /><${ViewSwitch} id="contents-views" views=${[["grid", "Grid", "grid"], ["list", "List", "list"]]} value=${prefs[1]} onChange=${(contentsView) => setPref({ contentsView })} /></div>
     ${error ? html`<p class="form-error" role="alert">${error}</p>` : archive && !entries ? html`<p class="muted">Reading the archive…</p>` : !rows.length ? html`<p class="muted">Nothing in this folder.</p>` : null}

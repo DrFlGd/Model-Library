@@ -122,7 +122,15 @@ function Tick({ m, on, items }) {
     onClick=${(e) => { e.stopPropagation(); choose({ ctrlKey: true }, m, items); }} onDblClick=${(e) => e.stopPropagation()} />`;
 }
 
-function Card({ m, selected, fav, items, onMenu }) {
+/** Where a card's model is filed, below the place shown (`trim`: how many
+ *  subcategories the page's place already says); none on Unsorted itself. */
+function placeLine(m, trim, unsorted) {
+  if (!m.schema) return unsorted ? null : "Unsorted";
+  const rest = (m.path || []).slice(trim);
+  return rest.length ? rest.join(" › ") : null;
+}
+
+function Card({ m, selected, fav, items, onMenu, where }) {
   return html`<div class="card" role="option" tabindex="0" data-model=${m.id} aria-selected=${selected ? "true" : "false"}
     onClick=${(e) => choose(e, m, items)} onDblClick=${() => openModel(m)} onContextMenu=${(e) => onMenu(e, m)}>
     <${Cover} model=${m} />
@@ -131,22 +139,57 @@ function Card({ m, selected, fav, items, onMenu }) {
     <span class="card-name" title=${m.name}>${m.name}</span>
     <span class="card-meta">
       ${m.authors?.length ? html`<span class="card-author" title=${m.authors.join(", ")}>${m.authors.join(", ")}</span>` : null}
-      ${m.path?.length || !m.schema ? html`<span class="card-location" title=${m.path?.join(" › ") || "Unsorted"}>${m.path?.join(" › ") || "Unsorted"}</span>` : null}
+      ${where ? html`<span class="card-location" title=${m.path?.join(" › ") || where}>${where}</span>` : null}
     </span>
   </div>`;
 }
 
-function Row({ m, selected, fav, items, onMenu }) {
+function Row({ m, selected, fav, items, onMenu, where }) {
   return html`<div class="row" role="option" tabindex="0" data-model=${m.id} aria-selected=${selected ? "true" : "false"}
     onClick=${(e) => choose(e, m, items)} onDblClick=${() => openModel(m)} onContextMenu=${(e) => onMenu(e, m)}>
     <${Tick} m=${m} on=${selected} items=${items} />
     <${Cover} model=${m} cls="thumb-sm" />
     <span class="row-name">${m.name}${fav ? html` <span class="badge-star" title="Starred">${Icon.star(12, true)}</span>` : null}</span>
     <span class="row-author">${m.authors.join(", ")}</span>
-    <span class="row-cat">${m.path.join(" › ") || (m.schema ? "" : "Unsorted")}</span>
+    <span class="row-cat" title=${m.path?.join(" › ") || null}>${where || ""}</span>
     <span class="row-added">${(m.added || "").slice(0, 10)}</span>
     <span class="row-size">${size(m.files?.bytes || 0)}</span>
   </div>`;
+}
+
+/** The filter chips, kept to one row: those that don't fit go in a "+N more" menu. */
+function FilterChips({ chips, isOn, toggle }) {
+  const box = useRef(null);
+  const [fit, setFit] = useState(chips.length);
+  const [width, setWidth] = useState(0);
+  const sig = chips.map(([k, f]) => k + f.value).join("|");
+  useLayoutEffect(() => {
+    const ro = new ResizeObserver(([e]) => setWidth(Math.round(e.contentRect.width)));
+    ro.observe(box.current);
+    return () => ro.disconnect();
+  }, []);
+  // lay them all out on one line, then keep those that fit beside the More button
+  useLayoutEffect(() => setFit(chips.length), [sig, width]);
+  useLayoutEffect(() => {
+    if (fit !== chips.length || !box.current) return;
+    const el = box.current;
+    const kids = [...el.querySelectorAll(":scope > .chip-btn")];
+    const right = el.getBoundingClientRect().right - parseFloat(getComputedStyle(el).paddingRight || 0);
+    if (!kids.length || kids[kids.length - 1].getBoundingClientRect().right <= right + 0.5) return;
+    const more = 104; // room for "+NN more ▾"
+    const n = kids.findIndex((c) => c.getBoundingClientRect().right > right - more);
+    setFit(Math.max(1, n < 0 ? kids.length - 1 : n));
+  }, [fit, sig, width]);
+  const chip = ([k, f]) => {
+    const on = isOn(k, f.value);
+    return html`<button type="button" class=${`chip-btn${on ? " on" : ""}`} key=${k + f.value} aria-pressed=${on ? "true" : "false"} data-filter=${filterOf(k, f.value)}
+      onClick=${() => toggle(k, f.value)} title=${on ? "Show them all again" : `Only ${k === "author" ? "by" : "tagged"} ${f.value}`}>${k === "tag" ? "#" : ""}${f.value} ${on ? html`<span aria-hidden="true">×</span>` : html`<span class="muted">${f.count}</span>`}</button>`;
+  };
+  const rest = chips.slice(fit);
+  return html`<div class="filters" aria-label="Narrow down" ref=${box}>${chips.slice(0, fit).map(chip)}
+    ${rest.length ? html`<button type="button" class="chip-btn chip-more" id="filters-more" aria-haspopup="menu" title="More authors and tags to narrow down by"
+      onClick=${(e) => openMenu(e.currentTarget, rest.map(([k, f]) => ({ id: `filter-${k}-${f.value}`, label: `${k === "tag" ? "#" : "by "}${f.value}${f.count != null ? ` (${f.count})` : ""}`,
+        icon: isOn(k, f.value) ? "check" : null, run: () => toggle(k, f.value) })))}>+${rest.length} more ▾</button>` : null}</div>`;
 }
 
 /** The list's column headers: Name, Added and Size sort when clicked, as on Import. */
@@ -258,10 +301,11 @@ export function Browser() {
   const facets = result?.facets || {};
   const active = filtersIn(s.q);
   const isOn = (k, v) => active.some(([a, b]) => a === k && b === v);
+  // the filters on first, then the authors and tags most used here
   const chips = [
     ...active.map(([k, v]) => [k, { value: v, count: null }]),
-    ...(facets.authors || []).slice(0, 6).filter((f) => !isOn("author", f.value)).map((f) => ["author", f]),
-    ...(facets.tags || []).slice(0, 8).filter((f) => !isOn("tag", f.value)).map((f) => ["tag", f]),
+    ...[...(facets.authors || []).slice(0, 12).filter((f) => !isOn("author", f.value)).map((f) => ["author", f]),
+      ...(facets.tags || []).slice(0, 16).filter((f) => !isOn("tag", f.value)).map((f) => ["tag", f])].sort((a, b) => b[1].count - a[1].count),
   ];
   const View = s.layout === "list" ? Row : Card;
   const name = placeName(scope, s.overview);
@@ -277,7 +321,8 @@ export function Browser() {
   const wider = s.q && scope !== "all" ? html`<a href=${routeHash("browse:all")} id="search-everywhere">Search all models</a>` : null;
   const head = titleOf(scope, s.overview);
   const details = picked.length > 1 ? html`<${SelectedPanel} models=${picked} />`
-    : html`<${ModelDetails} id=${picked[0]?.id || null} row=${false} empty=${html`<${PlaceSummary} name=${name} result=${direct ? (fresh && whole?.scope === scope ? whole : null) : fresh} here=${direct && fresh ? fresh.total : null} />`} />`;
+    : html`<${ModelDetails} id=${picked[0]?.id || null} row=${false} empty=${html`<${PlaceSummary} name=${name} result=${direct ? (fresh && whole?.scope === scope ? whole : null) : fresh} here=${direct && fresh ? fresh.total : null}
+        onTag=${(v) => toggleFilter("tag", v)} tagsOn=${active.filter(([k]) => k === "tag").map(([, v]) => v)} />`} />`;
   const selection = filesPicking || (picked.length ? { count: `${picked.length} ${picked.length === 1 ? "model" : "models"} selected`, onClear: () => ui.set({ picked: [] }),
     items: menuItems(MODEL_ACTIONS, picked, CTX), buttons: 3 } : null);
   return html`<${CommandBar} id="browse-head" up=${head.up} title=${head.title} count=${count} more=${categoryMenu(scope)} selection=${selection}
@@ -289,11 +334,7 @@ export function Browser() {
         <${SortMenu} id="sort" options=${SORTS} value=${s.sort} onChange=${(v) => setPref({ sort: v })} />`} />
   <div class="browser">
     <div class="browse-main">
-      ${chips.length ? html`<div class="filters" aria-label="Narrow down">${chips.map(([k, f]) => {
-        const on = isOn(k, f.value);
-        return html`<button type="button" class=${`chip-btn${on ? " on" : ""}`} key=${k + f.value} aria-pressed=${on ? "true" : "false"} data-filter=${filterOf(k, f.value)}
-          onClick=${() => toggleFilter(k, f.value)} title=${on ? "Show them all again" : `Only ${k === "author" ? "by" : "tagged"} ${f.value}`}>${k === "tag" ? "#" : ""}${f.value} ${on ? html`<span aria-hidden="true">×</span>` : html`<span class="muted">${f.count}</span>`}</button>`;
-      })}</div>` : null}
+      ${chips.length ? html`<${FilterChips} chips=${chips} isOn=${isOn} toggle=${toggleFilter} />` : null}
       <div class="browse-scroll">
         <${SearchNote} q=${s.q} found=${fresh ? `${fresh.total} found in ${name}${subs.length ? " and its subcategories" : ""}` : ""} wider=${wider} onClear=${() => { setText(""); ui.set({ q: "" }); }} />
         ${result?.error ? html`<p class="warn-note" role="alert">${result.error}</p>` : null}
@@ -303,7 +344,8 @@ export function Browser() {
         ${result && !items.length && !result.error && !direct ? html`<div class="empty" id="no-results">${emptyNote}</div>` : null}
         ${s.layout === "list" && items.length ? html`<${ListHead} sort=${s.sort} />` : null}
         <div class=${`results ${s.layout === "list" ? "list-view" : "grid-view"}${picked.length > 1 ? " picking" : ""}`} role="listbox" aria-multiselectable="true" aria-label="Models">
-          ${items.map((m) => html`<${View} key=${m.id} m=${m} items=${items} selected=${s.picked.includes(m.id)} fav=${s.favs.includes(m.id)} onMenu=${onMenu} />`)}
+          ${items.map((m) => html`<${View} key=${m.id} m=${m} items=${items} selected=${s.picked.includes(m.id)} fav=${s.favs.includes(m.id)} onMenu=${onMenu}
+            where=${placeLine(m, place && m.schema === place.schema.id ? place.path.length : 0, scope === "unsorted")} />`)}
         </div>
         ${result && result.total > items.length ? html`<button type="button" class="ghost more-btn" onClick=${() => setLimit(limit + PAGE)}>Show more (${result.total - items.length} left)</button>` : null}
       </div>

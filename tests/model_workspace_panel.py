@@ -1,5 +1,15 @@
 """Package A acceptance checks; call on an open model with several files."""
 
+
+async def open_details_dialog(pg):
+    """The Edit details dialog for the open model: on its own page Edit details…
+    opens the Details tab, so a second editor comes from a library page's action."""
+    await pg.evaluate("""async () => {
+      const {editDetails} = await import('./ui/actions.js');
+      await editDetails([{id: document.querySelector('#model-page').dataset.model}]);
+    }""")
+
+
 async def panel_workspace_checks(pg, check, out=None):
     await pg.wait_for_selector('#file-panel-close')
     original_viewport = pg.viewport_size
@@ -55,8 +65,11 @@ async def panel_workspace_checks(pg, check, out=None):
     await search.fill('')
 
     # Agent B: filtered selection must be explicit; whole-model extraction is allowed.
+    first = await pg.get_attribute('#part-tree [data-file]', 'data-file')
+    await search.fill(first.rsplit('/', 1)[-1])  # Select shown is there while the search narrows the files
     await pg.click("#select-visible-files")
     check("Select visible files chooses only filtered files", await pg.locator("#bar-extract").is_enabled())
+    await search.fill('')
     await pg.click("#select-whole-model")
     check("Select entire model enables extraction without excluding complete selections", await pg.locator("#bar-extract").is_enabled())
     await pg.click("#bar-clear")
@@ -178,7 +191,7 @@ async def details_refresh_checks(pg, check, out=None):
 
     # Dialog edit should refresh the untouched ribbon, including when its
     # component remains mounted inside the open panel.
-    await pg.click('#mp-edit')
+    await open_details_dialog(pg)
     await pg.wait_for_selector('#details-dialog')
     await pg.fill('#edit-tags', 'Agent A dialog change')
     await pg.click('#details-dialog button[type=submit]')
@@ -267,7 +280,7 @@ async def details_refresh_checks(pg, check, out=None):
     await pg.click('#details-load-latest')
 
     # Undo from a separate editor while this ribbon has *real* local changes.
-    await pg.click('#mp-edit')
+    await open_details_dialog(pg)
     await pg.wait_for_selector('#details-dialog')
     await pg.fill('#edit-tags', 'Agent A Undo while dirty')
     await pg.click('#details-dialog button[type=submit]')

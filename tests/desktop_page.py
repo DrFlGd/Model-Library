@@ -1107,6 +1107,16 @@ async def ui_pass(pg):
     await pg.click("#mp-more")
     mp_row = [await pg.inner_text("#mp-edit")] + await labels_of(pg, "#context-menu .menu-label")
     await pg.keyboard.press("Escape")
+    await pg.click("#mp-edit")
+    await pg.wait_for_selector("#pane-details #workspace-edit-name")
+    try:  # the box is focused once the tab has drawn
+        await pg.wait_for_function("() => document.activeElement?.id === 'workspace-edit-name'", timeout=5000)
+    except Exception:
+        pass
+    focused = await pg.evaluate("() => document.activeElement?.id")
+    no_dialog = await pg.locator("#details-dialog").count() == 0
+    await pg.keyboard.press("Escape")
+    check("the model page's Edit details… opens its Details tab with Name ready to type, not a dialog", focused == "workspace-edit-name" and no_dialog, (focused, no_dialog))
     check("files with no viewer show details and open in their own app; the model page has the same row", "settings.ini" in fallback and "Open externally" in fallback
           and "Open externally" in file_menu and "Show in folder" in file_menu and "Make a model…" in file_menu
           and mp_row[:4] == ["Edit details…", "Move to category…", "Add files…", "Show in folder"], (fallback, file_menu, mp_row))
@@ -1741,17 +1751,24 @@ async def review1(pg):
     }""")
     check("messages sit above the bar at the foot of the viewer", clear)
 
-    # the same Select buttons in the file panel and the viewing area
-    panel = [await pg.inner_text("#select-visible-files"), await pg.inner_text("#select-whole-model")]
+    # the same Select buttons in the file panel and the viewing area: Select all,
+    # and Select shown only while a search or variant narrows the list
+    alone = [await pg.locator("#select-visible-files").count(), await pg.inner_text("#select-whole-model")]
+    await pg.fill("#file-panel .parts-filter", "no-such-file")
+    await pg.wait_for_selector("#select-visible-files")
+    narrowed = await pg.inner_text("#select-visible-files")
+    await pg.fill("#file-panel .parts-filter", "")
+    await pg.wait_for_selector("#select-visible-files", state="detached")
     await pg.evaluate("""async () => {
         const {fileSel} = await import('/ui/filesel.js');
         fileSel.set({shown: 'd:', picked: [], anchor: null});
     }""")
     await pg.wait_for_selector("#select-folder-contents")
-    stage = [await pg.inner_text("#select-this-level"), await pg.inner_text("#select-folder-contents")]
-    check("the file panel and the viewing area say Select shown and Select all, with counts",
-          panel[0].startswith("Select shown (") and panel[1].startswith("Select all (") and stage[0] == "Select shown (2)"
-          and stage[1] == panel[1], (panel, stage))
+    stage = [await pg.locator("#select-this-level").count(), await pg.inner_text("#select-folder-contents")]
+    head = await pg.inner_text(".file-panel-head")
+    check("Select all alone until a search narrows the files, then Select shown too; the Files panel doesn't repeat the count",
+          alone[0] == 0 and alone[1].startswith("Select all (") and narrowed == "Select shown (0)"
+          and stage == [0, alone[1]] and head.strip() == "Files", (alone, narrowed, stage, head))
 
     # leaving a Details box saves it, with Undo
     await open_tab(pg, "details")
@@ -2598,6 +2615,65 @@ async def group3(pg):
     shutil.rmtree(boxed)
     await api(pg, "library_scan", {"full": False})
 
+async def review5(pg):
+    """Fixes from the review of 0.5.19 (docs/PLAN.md, "0.5.21")."""
+    await pg.evaluate("async () => { const {setPref} = await import('/ui/state.js'); setPref({layout: 'grid'}); }")
+    # Unsorted cards don't say Unsorted; a category's cards say only what's below it
+    await pg.goto(B + "#/browse/unsorted")
+    await pg.wait_for_selector(".results .card")
+    unsorted = await labels_of(pg, ".results .card-location")
+    await pg.goto(B + "#/browse/schema/wargames")
+    await pg.wait_for_selector("#browse-count")
+    if await pg.locator("#cat-show").count():
+        await pg.click('#cat-show [data-view="models"]')
+    await pg.wait_for_selector(".results .card")
+    below = await labels_of(pg, ".results .card-location")
+    check("cards leave out the place the page already names", unsorted == [] and below and not any(p.startswith("Wargames") for p in below), (unsorted, below))
+    # a tag in the place's summary narrows the place, like the chips
+    await pg.keyboard.press("Escape")
+    await open_tab(pg, "details")
+    await pg.wait_for_selector("#place-summary .tag-link")
+    tag = (await pg.inner_text("#place-summary .tag-link >> nth=0"))[1:]
+    await pg.click("#place-summary .tag-link >> nth=0")
+    want = f'tag:"{tag}"' if " " in tag else f"tag:{tag}"
+    await pg.wait_for_function("(q) => document.querySelector('#browse-count')?.dataset.q === q", arg=want)
+    narrowed = (pg.url.split("#")[1], await pg.input_value("#search"), await pg.get_attribute("#place-summary .tag-link >> nth=0", "aria-pressed"))
+    check("a tag in a place's summary narrows that place", narrowed == ("/browse/schema/wargames", want, "true"), narrowed)
+    await search(pg, "")
+    # the chips keep to one row, the rest in "+N more"
+    size = pg.viewport_size
+    await pg.set_viewport_size({"width": 1000, "height": 800})
+    await pg.goto(B + "#/browse/all")
+    await pg.wait_for_selector(".filters .chip-btn")
+    await pg.wait_for_timeout(300)
+    tops = await pg.eval_on_selector_all(".filters > *", "els => [...new Set(els.map((e) => Math.round(e.getBoundingClientRect().top)))]")
+    rest = []
+    if await pg.locator("#filters-more").count():
+        more = await pg.inner_text("#filters-more")
+        await pg.click("#filters-more")
+        rest = await labels_of(pg, "#context-menu .menu-label")
+        await pg.keyboard.press("Escape")
+        rest = [more, len(rest)]
+    check("the filter chips keep to one row, the rest in a More menu", len(tops) == 1 and (not rest or rest[0] == f"+{rest[1]} more ▾"), (tops, rest))
+    # beside a model the menu folds to its icons below 1150 px; ☰ unfolds it
+    await pg.locator(".results .card").first.dblclick()
+    await pg.wait_for_selector("#model-page")
+    await pg.wait_for_selector(".sidebar.collapsed")
+    await pg.click(".nav-burger")
+    await pg.wait_for_selector(".sidebar:not(.collapsed)")
+    kept = await pg.evaluate("async () => { const {ui} = await import('/ui/state.js'); return ui.get().navCollapsed; }")
+    await pg.click(".nav-burger")
+    await pg.wait_for_selector(".sidebar.collapsed")
+    await pg.set_viewport_size(size)
+    await pg.wait_for_selector(".sidebar:not(.collapsed)")
+    check("beside a model in a window under 1150 px the menu folds to icons, and the menu button unfolds it", kept is False)
+    # Drafting Sheet's grid is behind pictures, not text pages
+    await pg.goto(B + "#/settings")
+    await pg.wait_for_selector("#library-name")
+    grid = await pg.evaluate("() => [document.documentElement.dataset.skin, getComputedStyle(document.querySelector('.pages')).backgroundImage]")
+    check("text pages have the plain sheet, not the grid", grid == ["drafting", "none"], grid)
+
+
 async def main():
     server = start_server()
     try:
@@ -2656,6 +2732,7 @@ async def main():
             await review_checks(pg)
             await group3(pg)
             await group4(pg)
+            await review5(pg)
 
             # 3. renaming the library
             await pg.click('.sidebar a[href="#/settings"]')
