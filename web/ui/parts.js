@@ -21,7 +21,7 @@ import { openMenu, typing } from "./actions.js";
 import { fileSel, pick, pickEvent, listClick, show, view, clear } from "./filesel.js";
 import { TypeTag, isArchive, setPart, fileType } from "./filetypes.js";
 import { PdfDocument } from "./document-viewer.js";
-import { GRAY, colourItems, colourName, viewColour, setViewColour, setModelColour } from "./colours.js";
+import { GRAY, colourItems, colourName, libraryColour, setModelColour } from "./colours.js";
 
 export const MESH = /\.(stl|obj|3mf)$/i;
 const MD = /\.(md|markdown|txt)$/i;
@@ -309,15 +309,14 @@ export function Stage3D({ src, model, current, onInfo }) {
   const [state, setState] = useState({ busy: false, error: "", info: null });
   const [edges, setEdges] = useState(false);
   const theme = useStore(ui, (s) => s.theme);
-  // the colour (docs/PLAN.md, "Group 3 design"): the file's own when shown, else
-  // the model's, else this computer's
-  const computer = useStore(ui, (s) => viewColour(s));
-  const ownComputer = useStore(ui, (s) => s.viewColour);
+  // the colour (docs/PLAN.md, "0.5.20"): the file's own when shown, else the
+  // model's (saved in the library), else the library's preview colour
+  const fallback = useStore(ui, (s) => libraryColour(s));
   const fileColours = useStore(ui, (s) => s.fileColours);
   const saved = model?.details?.render_colour || model?.render_colour || null;
   const [own, setOwn] = useState(saved);
   useLayoutEffect(() => setOwn(saved), [model?.id, saved]);
-  const base = own || computer;
+  const base = own || fallback;
   useEffect(() => { viewer.current?.setColour(base, fileColours); }, [base, fileColours, state.ready]);
   useEffect(() => {
     let live = true;
@@ -353,18 +352,15 @@ export function Stage3D({ src, model, current, onInfo }) {
   const info = state.info;
   const showingFile = !!info?.coloured && fileColours;
   const saveOwn = async (hex) => { const v = await setModelColour(model, hex); if (v) setOwn(hex); };
-  // two parts, each ticking its own setting: this computer's colour, and the
-  // model's own (docs/PLAN.md, "0.5.17")
+  // one colour, the model's, saved with it in the library (docs/PLAN.md, "0.5.20")
   const colourMenu = (e) => {
     const writable = model && !ui.get().library?.read_only;
     openMenu(e.currentTarget, [
       ...(info?.coloured ? [{ id: "colour-file", label: "The file's colours", icon: fileColours ? "check" : null, run: () => setPref({ fileColours: !fileColours }) }, { sep: true }] : []),
-      { head: own ? "On this computer (this model has its own)" : "On this computer" },
-      { id: "colour-previews", label: "Same as the previews", icon: ownComputer ? null : "check", run: () => setViewColour(null) },
-      ...colourItems(ownComputer, setViewColour, "colour", "Colours on this computer"),
-      ...(writable ? [{ sep: true }, { head: "For this model (saved with it)" },
-        { id: "model-colour-none", label: "None: use this computer's", icon: own ? null : "check", run: () => own && saveOwn(null) },
-        ...colourItems(own, saveOwn, "model-colour", "Colours for this model")] : []),
+      ...(writable ? [{ head: "This model's colour (saved in the library)" },
+        { id: "colour-library", label: `Same as the library's previews (${colourName(fallback)})`, icon: own ? null : "check", run: () => own && saveOwn(null) },
+        ...colourItems(own, saveOwn, "colour", "Colours for this model")]
+        : [{ head: model ? "The library is read-only: its colour can't be changed here" : "Drawn in the library's preview colour" }]),
     ]);
   };
   // the less common view actions: the bar's ⋯ button and a right-click on the view
@@ -372,7 +368,7 @@ export function Stage3D({ src, model, current, onInfo }) {
     { id: "view-edges", label: "Show edges", icon: edges ? "check" : null, title: "Show the edges of the triangles", run: () => { setEdges(!edges); viewer.current?.setEdges(!edges); } },
     ...(model ? [{ id: "view-cover", label: "Use this view as the cover", icon: "image", disabled: !info ? "Wait for the view" : ui.get().library?.read_only ? "This library is read-only" : false, run: cover }] : []),
   ];
-  const colourLabel = showingFile ? "The file's colours" : `${colourName(base)}${own ? " (this model)" : ""}`;
+  const colourLabel = showingFile ? "The file's colours" : `${colourName(base)}${own ? " (this model)" : " (the library's)"}`;
   return html`<div class="stage-3d">
     <div class="stage-canvas" onContextMenu=${(e) => openMenu(e, viewItems())}><canvas ref=${canvas} id="viewer-canvas"></canvas>
       ${state.busy ? html`<div class="stage-note" id="viewer-loading">${opening ? html`${opening.label}… ${opening.cancel ? html`<button type="button" class="ghost" id="viewer-stop" onClick=${opening.cancel}>Stop</button>` : null}` : "Loading…"}</div>` : null}
@@ -383,7 +379,7 @@ export function Stage3D({ src, model, current, onInfo }) {
       ${info ? html`<span class="muted" id="viewer-size">${info.x.toFixed(1)} × ${info.y.toFixed(1)} × ${info.z.toFixed(1)} mm · ${info.triangles.toLocaleString()} triangles${showingFile ? " · the file's colours" : own ? " · this model's colour" : info.coloured ? " · has colours (Colour ▾)" : ""}</span>` : null}
       <span class="stage-tools">
         ${["iso", "top", "front"].map((v) => html`<button type="button" class="ghost" key=${v} title=${{ iso: "Look from above at an angle", top: "Look from the top", front: "Look from the front" }[v]} onClick=${() => viewer.current?.view(v)}>${v === "iso" ? "3/4" : v[0].toUpperCase() + v.slice(1)}</button>`)}
-        <button type="button" class="ghost colour-btn" id="viewer-colour" aria-haspopup="menu" data-colour=${showingFile ? "file" : base} data-source=${showingFile ? "file" : own ? "model" : "computer"}
+        <button type="button" class="ghost colour-btn" id="viewer-colour" aria-haspopup="menu" data-colour=${showingFile ? "file" : base} data-source=${showingFile ? "file" : own ? "model" : "library"}
           title=${`Colour: ${colourLabel}${info?.coloured ? " (this file has colours of its own)" : ""}`} onClick=${colourMenu}>
           <span class="swatch" style=${{ background: showingFile ? "conic-gradient(#c8352b, #f2b705, #3a9a4a, #2f6fd0, #c8352b)" : base }}></span>Colour ▾</button>
         <button type="button" class="ghost" id="viewer-more" aria-haspopup="menu" title="More (also a right-click on the view)" aria-label="More" onClick=${(e) => openMenu(e.currentTarget, viewItems())}>${Icon.more(16)}</button>

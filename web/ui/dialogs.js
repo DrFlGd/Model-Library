@@ -183,7 +183,7 @@ function EditModel({ model, schema, select }) {
     ${images.length ? html`<label class="field-block"><span>Cover picture</span>
       <select id="edit-cover" value=${form.cover} onChange=${set("cover")}><option value="">Chosen for me</option>
         ${images.map((f) => html`<option value=${f.rel} key=${f.rel}>${f.rel}</option>`)}</select></label>` : null}
-    <label class="field-block"><span>3D colour</span><${ColourSelect} id="edit-colour" value=${form.render_colour || null} none="None (as set on this computer)"
+    <label class="field-block"><span>3D colour</span><${ColourSelect} id="edit-colour" value=${form.render_colour || null} none="None (the library's preview colour)"
       onChange=${(v) => setForm({ ...form, render_colour: v || "" })} /></label>
     <label class="field-block"><span>Notes</span><textarea id="edit-notes" rows="3" value=${form.notes} onInput=${set("notes")}></textarea></label>
   <//>`;

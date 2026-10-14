@@ -1,8 +1,9 @@
 // The colours 3D files are drawn in (docs/PLAN.md, "Group 3 design", R9 and R10):
-// gray unless you choose another, on this computer (`viewColour`) or for one model
-// (`render_colour` in its model.json); a 3MF's own colours when `fileColours` is on.
+// the library's preview colour (gray unless chosen in Settings) or a model's own
+// (`render_colour` in its model.json, so it's read back wherever the library is
+// opened); a 3MF's own colours when `fileColours` is on.
 import { html } from "../lib/html.js";
-import { ui, setPref } from "./state.js";
+import { ui } from "./state.js";
 import { api, followIds, loadOverview, recorded, toast } from "./library.js";
 
 export const GRAY = "#a3a9ae";
@@ -38,10 +39,9 @@ export function colourItems(current, choose, idPrefix = "colour", label = "Colou
   ];
 }
 
-/** This computer's colour for 3D files ("#rrggbb"): its own choice, else the
- *  library's preview colour. `setViewColour(null)`: the same as the previews. */
-export const viewColour = (s = ui.get()) => s.viewColour || s.library?.preview_colour || GRAY;
-export const setViewColour = (hex) => setPref({ viewColour: hex || null });
+/** The colour 3D files are drawn in when their model has none ("#rrggbb"): the
+ *  library's preview colour. */
+export const libraryColour = (s = ui.get()) => s.library?.preview_colour || GRAY;
 
 /** Save a model's own colour (null: none), with Undo, and draw its preview again. */
 export async function setModelColour(model, hex) {

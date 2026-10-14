@@ -126,7 +126,7 @@ function VariantFolders({ lib }) {
 }
 
 export function Settings() {
-  const s = useStore(ui, (st) => ({ library: st.library, recent: st.recent, skin: st.skin, theme: st.theme, viewColour: st.viewColour, fileColours: st.fileColours }));
+  const s = useStore(ui, (st) => ({ library: st.library, recent: st.recent, skin: st.skin, theme: st.theme, fileColours: st.fileColours }));
   const lib = s.library;
   const others = (s.recent || []).filter((p) => p !== lib?.path);
   return html`<${CommandBar} id="settings-head" title="Settings" /><div class="pages"><div class="library-settings">
@@ -161,8 +161,7 @@ export function Settings() {
           ${THEMES.map(([v, label]) => html`<option value=${v} key=${v}>${label}</option>`)}
         </select></label>
       <div class="field-block" id="settings-view-colour"><span class="field-label">3D view</span>
-        <small class="muted">How 3D files are drawn on a model's page, on this computer. The Colour ▾ menu under the view changes these too. A model with a colour of its own is drawn in that.</small>
-        <label class="field-row"><span>3D view colour</span><${ColourSelect} id="view-colour" value=${s.viewColour} none="Same as the previews" onChange=${(c) => setPref({ viewColour: c })} /></label>
+        <small class="muted">3D files are drawn in their model's colour, else in the library's preview colour (Library › Previews above). A model's colour is chosen under the view, with Colour ▾, and saved in the library.</small>
         <label class="check-row"><input type="checkbox" id="file-colours" checked=${!!s.fileColours} onChange=${(e) => setPref({ fileColours: e.target.checked })} />
           <span>Show a 3MF file's own colours when it has some</span></label></div>
     </section>

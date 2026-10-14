@@ -7,7 +7,7 @@
 // on every category page and on the sidebar.
 import { html, useState, useEffect } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
-import { ui } from "./state.js";
+import { ui, setPref } from "./state.js";
 import { routeHash, schemaScope, ctx } from "./context.js";
 import { Icon } from "./icons.js";
 import { api, planChange, runChange, undoChange, loadOverview, toast, undoable, recorded, followIds } from "./library.js";
@@ -139,13 +139,14 @@ export function RenameNode({ schemaId, path }) {
   <//>`;
 }
 
-/** Add a subcategory to a category or inside one of its subcategories (its folder is made too). */
 /** Add a subcategory `name` under `path` of category `schemaId` (its folder is
- *  made now), with Undo in the message; the dialog and the menu's add row share it. */
+ *  made now), with Undo in the message, and unfold its parent in the menu. */
 export async function addSubcategory(schemaId, path, name) {
   const sc = ui.get().overview?.schemas?.find((s) => s.id === schemaId);
   const r = await api("subcategory_add", { schema: schemaId, path, name });
   await loadOverview();
+  const parent = [schemaId, ...path].join("/");
+  if (!ui.get().open[parent]) setPref({ open: { ...ui.get().open, [parent]: true } });
   const made = Array.isArray(r?.path) && r.path.length ? r.path : [...path, name.trim()];
   undoable(`Added ${made[made.length - 1]} to ${placeName(sc, path)}.`, async () => {
     await api("subcategory_remove", { schema: schemaId, path: made });
@@ -429,7 +430,7 @@ export function EditPicked({ models }) {
         <datalist id="bulk-tag-list">${tags.map((t) => html`<option value=${t} key=${t} />`)}</datalist></label>
       <label class="field-block"><span>Authors</span><input id="bulk-authors" type="text" placeholder="Replaces theirs; separate several with commas" value=${form.authors} onInput=${set("authors")} /></label>
       <label class="field-block"><span>Licence</span><input id="bulk-license" type="text" value=${form.license} onInput=${set("license")} /></label>
-      <label class="field-block"><span>3D colour</span><${ColourSelect} id="bulk-colour" value=${form.render_colour === "none" ? null : form.render_colour} keep="Leave as it is" none="None (as set on this computer)"
+      <label class="field-block"><span>3D colour</span><${ColourSelect} id="bulk-colour" value=${form.render_colour === "none" ? null : form.render_colour} keep="Leave as it is" none="None (the library's preview colour)"
         onChange=${(v) => setForm({ ...form, render_colour: v === null ? "none" : v })} /></label>
     </div>
     ${sc?.fields?.length ? html`<div class="form-two">${sc.fields.map((f) => html`<label class="field-block" key=${f.key}><span>${f.label}</span>

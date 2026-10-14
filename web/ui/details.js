@@ -46,6 +46,19 @@ export function PlaceLinks({ m, overview }) {
     html` › <a href=${routeHash(`browse:${schemaScope(schema.id, m.path.slice(0, i + 1))}`)}>${v}</a>`)}`;
 }
 
+/** Show every model with this tag: All models, searched for it. */
+export function showTagged(tag) {
+  ui.set({ q: `tag:${/\s/.test(tag) ? `"${tag}"` : tag}`, picked: [] });
+  location.hash = routeHash("browse:all");
+}
+
+/** Tags as links, each showing every model with it (under a model's Tags box,
+ *  and wherever tags are listed). */
+export function TagLinks({ tags, id = null }) {
+  return html`<span class="tag-links" id=${id}>${tags.map((t) => html`<a key=${t} class="chip tag-link" href=${routeHash("browse:all")} title=${`Show every model tagged ${t}`}
+    onClick=${(e) => { e.preventDefault(); showTagged(t); }}>#${t}</a>`)}</span>`;
+}
+
 const placeText = (overview, m) => {
   const schema = overview?.schemas?.find((x) => x.id === m.schema);
   return schema ? [schema.name, ...(m.path || [])].join(" › ") : "Unsorted";
@@ -88,6 +101,7 @@ export function ModelDetails({ id, empty = null, ctx = { page: "browse" }, row =
       <${EditBox} id="details-name" cls="panel-name" label="Name" value=${m.name} off=${s.readOnly} onSave=${save("name")} />
       <${EditBox} id="details-authors" label="Authors" caption="Authors" placeholder="Authors, separated by commas" value=${m.authors.join(", ")} off=${s.readOnly} onSave=${save("authors")} />
       <${EditBox} id="details-tags" label="Tags" caption="Tags" placeholder="Tags, separated by commas" value=${(m.tags || []).join(", ")} off=${s.readOnly} onSave=${save("tags")} />
+      ${m.tags?.length ? html`<div class="edit-row tag-links-row"><span></span><${TagLinks} tags=${m.tags} id="details-tag-links" /></div>` : null}
     </div>
     <p class="insp-sub panel-place" id="details-place">${Icon.layers(13)} <${PlaceLinks} m=${m} overview=${s.overview} /></p>
     ${row ? html`<${ActionRow} targets=${[m]} ctx=${ctx} idPrefix="details" />` : null}
@@ -125,7 +139,7 @@ export function SelectedPanel({ models, ctx = { page: "browse" } }) {
     <p class="insp-sub">${size(bytes)} in all.</p>
     <dl class="insp-dl" id="picked-shared">
       <dt>Authors</dt><dd>${authors.length ? authors.join(", ") : html`<span class="muted">${models.some((m) => m.authors?.length) ? "Different" : "None"}</span>`}</dd>
-      <dt>Tags</dt><dd>${tags.length ? tags.map((t) => `#${t}`).join(" ") : html`<span class="muted">${models.some((m) => m.tags?.length) ? "Different" : "None"}</span>`}</dd>
+      <dt>Tags</dt><dd>${tags.length ? html`<${TagLinks} tags=${tags} />` : html`<span class="muted">${models.some((m) => m.tags?.length) ? "Different" : "None"}</span>`}</dd>
       <dt>Category</dt><dd>${places.length === 1 ? places[0] : html`<span class="muted">${plural(places.length, "place", "different places")}</span>`}</dd>
     </dl>
     <ul class="insp-files">${models.map((m) => html`<li key=${m.id}><span>${m.name}</span><span class="muted">${placeText(overview, m)}</span></li>`)}</ul>
@@ -146,7 +160,7 @@ export function PlaceSummary({ name, result, here = null }) {
       ? (result.total === 1 ? "It's in a subcategory." : `All ${result.total} are in its subcategories.`)
       : `${here} filed here, ${result.total - here} in its subcategories.`}</p>` : null}
     ${authors.length ? html`<div class="insp-section"><h3>Authors</h3><ul class="insp-files">${authors.slice(0, 8).map((a) => html`<li key=${a.value}><span>${a.value}</span><span class="muted">${a.count}</span></li>`)}</ul></div>` : null}
-    ${tags.length ? html`<div class="insp-section"><h3>Tags</h3><div class="insp-chips">${tags.slice(0, 12).map((t) => html`<span class="chip" key=${t.value}>#${t.value}</span>`)}</div></div>` : null}
+    ${tags.length ? html`<div class="insp-section"><h3>Tags</h3><div class="insp-chips"><${TagLinks} tags=${tags.slice(0, 12).map((t) => t.value)} /></div></div>` : null}
     <p class="muted insp-later">Select a model to see its details and files. Ctrl+A selects everything shown.</p>
   </div>`;
 }

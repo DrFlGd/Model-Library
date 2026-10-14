@@ -2,17 +2,16 @@
 // and settings. The category being browsed shows its subcategory tree in a
 // panel beside the menu, which folds to a strip (docs/PLAN.md, "Group 2 design",
 // R5); in narrow windows the menu is a drawer and the tree unfolds in it instead.
-// Right-click a category for the same Category menu as its page. The category or
-// subcategory being shown has an "Add subcategory" row under it ("Group 1 design").
-import { html, useState, useRef, useLayoutEffect, useEffect } from "../lib/html.js";
+// Right-click a category for the same Category menu as its page, which also adds
+// a subcategory (no row for it in the tree: it was too easy to click by mistake).
+import { html, useState, useRef, useEffect } from "../lib/html.js";
 import { useStore } from "../lib/store.js";
 import { ui, setPref } from "./state.js";
 import { routeHash, schemaScope } from "./context.js";
 import { Icon } from "./icons.js";
 import { CatIcon, iconOf } from "./caticons.js";
 import { openMenu } from "./actions.js";
-import { categoryItems, addSubcategory } from "./categories.js";
-import { toast } from "./library.js";
+import { categoryItems } from "./categories.js";
 import { NavHead, ThemeButton } from "./chrome.js";
 
 const NARROW = "(max-width: 900px)";
@@ -46,37 +45,8 @@ function NavLink({ route, label, icon, count, current, depth = 0, toggle = null,
       ${count != null ? html`<span class="nav-count">${count}</span>` : null}</a></li>`;
 }
 
-/** "+ Add subcategory" under the category or subcategory shown: a row that
- *  becomes a name box; Enter adds it (with Undo), Esc or nothing typed cancels. */
-function AddRow({ schemaId, path, depth, openKey }) {
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
-  const input = useRef(null);
-  useLayoutEffect(() => { if (editing) input.current?.focus(); }, [editing]);
-  const stop = () => { setEditing(false); setName(""); };
-  const submit = async () => {
-    if (!name.trim()) return stop();
-    setBusy(true);
-    try {
-      await addSubcategory(schemaId, path, name);
-      setPref({ open: { ...ui.get().open, [openKey]: true } });
-      stop();
-    } catch (e) { toast(e.message || String(e), 6000); }
-    finally { setBusy(false); }
-  };
-  return html`<li class="nav-row nav-add-row" style=${`--depth: ${depth}`}>
-    ${editing ? html`<input ref=${input} id="nav-subcategory-name" class="nav-add-input" type="text" maxlength="80" placeholder="Subcategory name"
-        aria-label="New subcategory name" value=${name} disabled=${busy} onInput=${(e) => setName(e.target.value)}
-        onKeyDown=${(e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); stop(); } }}
-        onBlur=${() => { if (!busy && !name.trim()) stop(); }} />`
-      : html`<button type="button" class="nav-link nav-add-sub" id="nav-add-subcategory" title="Add a subcategory here" onClick=${() => setEditing(true)}>
-        <span class="nav-icon">${Icon.plus(13)}</span><span class="nav-label">Add subcategory</span></button>`}
-  </li>`;
-}
-
 /** A schema's category values, nested, each unfolding to the next level. */
-function TreeRows({ schema, nodes, values, depth, current, open, canAdd }) {
+function TreeRows({ schema, nodes, values, depth, current, open }) {
   return nodes.map((n) => {
     const path = [...values, n.value];
     const key = [schema.id, ...path].join("/");
@@ -87,8 +57,7 @@ function TreeRows({ schema, nodes, values, depth, current, open, canAdd }) {
     const icon = iconOf(schema, path);
     return html`<${NavLink} key=${key} route=${route} label=${n.value} count=${n.count} depth=${depth} current=${current} toggle=${toggle}
         icon=${icon || Object.keys(schema.icons || {}).some(Boolean) ? html`<${CatIcon} icon=${icon} fallback="blank" />` : null} menu=${() => categoryItems(schema.id, path)} />
-      ${unfolded ? html`<${TreeRows} schema=${schema} nodes=${n.children} values=${path} depth=${depth + 1} current=${current} open=${open} canAdd=${canAdd} />` : null}
-      ${canAdd && current === route ? html`<${AddRow} key=${`${key}+`} schemaId=${schema.id} path=${path} depth=${depth + 1} openKey=${key} />` : null}`;
+      ${unfolded ? html`<${TreeRows} schema=${schema} nodes=${n.children} values=${path} depth=${depth + 1} current=${current} open=${open} />` : null}`;
   });
 }
 
@@ -107,7 +76,7 @@ function useOpenTo(schemaId, path) {
 }
 
 /** The category's tree beside the menu: resizable, folds to a strip with its name. */
-function CategoryPanel({ schema, path, route, open, canAdd }) {
+function CategoryPanel({ schema, path, route, open }) {
   const prefs = useStore(ui, (s) => [s.catPanel, s.catPanelWidth]);
   const medium = useMedia("(max-width: 1250px)");
   const folded = prefs[0] === "folded" || (prefs[0] == null && medium);
@@ -150,10 +119,9 @@ function CategoryPanel({ schema, path, route, open, canAdd }) {
       <button type="button" class="ghost panel-fold" id="category-panel-close" title="Hide subcategories ([)" aria-label="Hide subcategories ([)" onClick=${() => setPref({ catPanel: "folded" })}>${Icon.chevronsLeft(14)}</button>
     </header>
     <ul class="nav-list cat-panel-tree" id="category-tree">
-      <${TreeRows} schema=${schema} nodes=${schema.tree} values=${[]} depth=${0} current=${route} open=${open} canAdd=${canAdd} />
-      ${canAdd && route === top ? html`<${AddRow} key="top+" schemaId=${schema.id} path=${[]} depth=${0} openKey=${schema.id} />` : null}
+      <${TreeRows} schema=${schema} nodes=${schema.tree} values=${[]} depth=${0} current=${route} open=${open} />
     </ul>
-    ${!schema.tree.length && !canAdd ? html`<p class="muted nav-note">No subcategories.</p>` : null}
+    ${!schema.tree.length ? html`<p class="muted nav-note">No subcategories.</p>` : null}
     <div class="cat-panel-resize" role="separator" aria-label="Subcategory panel width" aria-orientation="vertical" aria-valuemin="180" aria-valuemax="420" aria-valuenow=${width} tabIndex="0"
       onPointerDown=${resize} onKeyDown=${(e) => { if (["ArrowLeft", "ArrowRight"].includes(e.key)) { e.preventDefault(); setPref({ catPanelWidth: Math.max(180, Math.min(420, width + (e.key === "ArrowLeft" ? -20 : 20))) }); } }}></div>
   </aside>`;
@@ -163,7 +131,6 @@ export function Sidebar() {
   const s = useStore(ui, (st) => ({ route: st.route, navOpen: st.navOpen, overview: st.overview, open: st.open, library: st.library, navCollapsed: st.navCollapsed, modelPlace: st.modelPlace }));
   const narrow = useNarrow();
   const ov = s.overview;
-  const canAdd = !!s.library && !s.library.read_only;
   // a category's page, or the page of a model filed in one
   const shown = routeCategory(s.route) || (s.route.startsWith("model:") && s.modelPlace ? { id: s.modelPlace.schema, path: s.modelPlace.path } : null);
   const panelSchema = !narrow && shown ? ov?.schemas?.find((sc) => sc.id === shown.id) : null;
@@ -192,8 +159,7 @@ export function Sidebar() {
           onClick=${() => setPref({ open: { ...s.open, [key]: !unfolded } })}>${Icon.chevron(14)}</button>` : null;
         return html`<${NavLink} key=${key} route=${route} label=${sc.name} icon=${icon} count=${sc.count} current=${s.route} toggle=${toggle}
             menu=${() => categoryItems(sc.id, [])} />
-          ${unfolded ? html`<${TreeRows} schema=${sc} nodes=${sc.tree} values=${[]} depth=${1} current=${s.route} open=${s.open} canAdd=${canAdd} />` : null}
-          ${canAdd && s.route === route ? html`<${AddRow} key=${`${key}+`} schemaId=${sc.id} path=${[]} depth=${1} openKey=${key} />` : null}`;
+          ${unfolded ? html`<${TreeRows} schema=${sc} nodes=${sc.tree} values=${[]} depth=${1} current=${s.route} open=${s.open} />` : null}`;
       })}</ul>` : html`<p class="muted nav-note">None yet.</p>`}
       ${s.library && !s.library.read_only ? html`<button type="button" class="ghost nav-add" id="new-schema" onClick=${() => ui.set({ dialog: { type: "new-schema" }, navOpen: false })}>${Icon.plus(14)} New category…</button>` : null}
       <ul class="nav-list nav-foot">
@@ -203,5 +169,5 @@ export function Sidebar() {
         <${ThemeButton} />
       </ul>
     </nav>
-    ${panelSchema ? html`<${CategoryPanel} key=${panelSchema.id} schema=${panelSchema} path=${shown.path} route=${s.route} open=${s.open} canAdd=${canAdd} />` : null}`;
+    ${panelSchema ? html`<${CategoryPanel} key=${panelSchema.id} schema=${panelSchema} path=${shown.path} route=${s.route} open=${s.open} />` : null}`;
 }
