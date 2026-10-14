@@ -1,0 +1,20 @@
+    Updating crates.io index
+     Locking 496 packages to highest compatible versions
+      Adding base64 v0.22.1 (available: v0.23.1)
+      Adding brotli-decompressor v6.0.1 (available: v6.1.0)
+      Adding generic-array v0.14.7 (available: v0.14.9)
+      Adding sha2 v0.10.9 (available: v0.11.1)
+      Adding toml v0.8.2 (available: v0.8.23)
+      Adding toml_datetime v0.6.3 (available: v0.6.11)
+      Adding toml_edit v0.20.2 (available: v0.20.7)
+      Adding zip v2.4.2 (available: v9.0.3)
+ Downloading crates ...
+  Downloaded equivalent v1.0.3
+  Downloaded tokio v1.53.3
+   Compiling equivalent v1.0.3
+   Compiling tokio v1.53.3
+   Compiling indexmap v2.14.2
+   Compiling serde_json v1.0.154
+   Compiling zip v2.4.2
+   Compiling modlib-core v0.5.21 (D:\a\Model-Library\Model-Library\desktop\core)
+    Finished `release` profile [optimized] target(s) in 1m 26s
