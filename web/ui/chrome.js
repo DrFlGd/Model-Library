@@ -6,17 +6,42 @@ import { Icon } from "./icons.js";
 
 const themeName = (t) => (t === "system" ? "System" : THEMES.find(([v]) => v === t)?.[1].replace(/ \(.*\)$/, "") || t);
 
+export function useMedia(query) {
+  const [on, setOn] = useState(() => matchMedia(query).matches);
+  useEffect(() => {
+    const q = matchMedia(query);
+    const changed = () => setOn(q.matches);
+    q.addEventListener("change", changed);
+    return () => q.removeEventListener("change", changed);
+  }, [query]);
+  return on;
+}
+
+// Beside a model in a window under 1150 px the menu folds to its icons to give
+// the 3D view room; ☰ unfolds it there until it's folded again (docs/PLAN.md, "0.5.21").
+const MEDIUM = "(min-width: 901px) and (max-width: 1149px)";
+const navSel = (s) => ({ open: s.navOpen, collapsed: s.navCollapsed, peek: s.navPeek, model: s.route.startsWith("model:") });
+/** Whether the desktop menu shows only its icons. */
+export function useNavFolded() {
+  const n = useStore(ui, navSel);
+  const auto = useMedia(MEDIUM) && n.model;
+  return { folded: n.collapsed || (auto && !n.peek), auto };
+}
+
 /** The menu's head: its fold button (the drawer's close button in a narrow
  *  window) and the app's mark, a link to Home. */
 export function NavHead() {
-  const nav = useStore(ui, (s) => ({ open: s.navOpen, collapsed: s.navCollapsed }));
+  const nav = useStore(ui, (s) => ({ open: s.navOpen }));
+  const { folded, auto } = useNavFolded();
   const toggleNav = () => {
     if (matchMedia("(max-width: 900px)").matches)
       ui.set({ navOpen: !ui.get().navOpen, mobilePanel: null });
-    else setPref({ navCollapsed: !ui.get().navCollapsed });
+    else if (folded) { if (ui.get().navCollapsed) setPref({ navCollapsed: false }); if (auto) ui.set({ navPeek: true }); }
+    else if (auto) ui.set({ navPeek: false });
+    else setPref({ navCollapsed: true });
   };
   return html`<div class="nav-head-row">
-    <button type="button" class="ghost topicon nav-burger" aria-label=${matchMedia("(max-width: 900px)").matches ? "Close the menu" : nav.collapsed ? "Expand navigation" : "Collapse navigation"} aria-expanded=${nav.open ? "true" : "false"} title="Expand or collapse navigation" onClick=${toggleNav}>${Icon.menu(18)}</button>
+    <button type="button" class="ghost topicon nav-burger" aria-label=${matchMedia("(max-width: 900px)").matches ? "Close the menu" : folded ? "Expand navigation" : "Collapse navigation"} aria-expanded=${nav.open ? "true" : "false"} title="Expand or collapse navigation" onClick=${toggleNav}>${Icon.menu(18)}</button>
     <a class="brand" href="#/" title="Home">
       <svg class="brand-mark icon" viewBox="0 0 40 40" aria-hidden="true">
         <g data-sk="classic" transform="scale(1.6667)"><path d="M3 8.5l9-4.5 9 4.5-9 4.5z"/><path d="M3 12.5l9 4.5 9-4.5"/><path d="M3 16.5l9 4.5 9-4.5" class="accent"/></g>

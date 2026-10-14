@@ -41,6 +41,24 @@ export function Inspector({ page, tabs, open: startOpen = true, want = null, lab
     setPref(prefs);
   };
   const toggle = () => set({ open: !isOpen });
+  // a page asks for a tab with ui.inspectorAsk (the model page's Edit details…),
+  // which opens it even where opening isn't kept, then focuses a box in it
+  const ask = useStore(ui, (s) => s.inspectorAsk);
+  const focus = useRef(null);
+  useLayoutEffect(() => {
+    if (!ask || ask.page !== page || !list.some((t) => t.id === ask.tab)) return;
+    setPicked(null);
+    set({ open: true, tab: ask.tab });
+    focus.current = ask;
+    ui.set({ inspectorAsk: null });
+  }, [ask]);
+  useEffect(() => {
+    const el = focus.current?.focus && document.getElementById(focus.current.focus);
+    if (!el) return;
+    el.focus();
+    if (focus.current.select) el.select?.();
+    focus.current = null;
+  });
   const last = useRef(want);
   useEffect(() => {
     if (want && want !== last.current && list.some((t) => t.id === want)) set({ tab: want });

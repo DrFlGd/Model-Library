@@ -52,11 +52,14 @@ export function showTagged(tag) {
   location.hash = routeHash("browse:all");
 }
 
-/** Tags as links, each showing every model with it (under a model's Tags box,
- *  and wherever tags are listed). */
-export function TagLinks({ tags, id = null }) {
-  return html`<span class="tag-links" id=${id}>${tags.map((t) => html`<a key=${t} class="chip tag-link" href=${routeHash("browse:all")} title=${`Show every model tagged ${t}`}
-    onClick=${(e) => { e.preventDefault(); showTagged(t); }}>#${t}</a>`)}</span>`;
+/** Tags as links. A model's own tags show every model with the tag; `onPick`
+ *  instead does something else with it (a place's summary narrows the place). */
+export function TagLinks({ tags, id = null, onPick = null, on = [] }) {
+  return html`<span class="tag-links" id=${id}>${tags.map((t) => onPick
+    ? html`<button type="button" key=${t} class="chip tag-link" aria-pressed=${on.includes(t) ? "true" : "false"} title=${on.includes(t) ? "Show them all again" : `Only tagged ${t}`}
+        onClick=${() => onPick(t)}>#${t}</button>`
+    : html`<a key=${t} class="chip tag-link" href=${routeHash("browse:all")} title=${`Show every model tagged ${t}`}
+        onClick=${(e) => { e.preventDefault(); showTagged(t); }}>#${t}</a>`)}</span>`;
 }
 
 const placeText = (overview, m) => {
@@ -149,7 +152,7 @@ export function SelectedPanel({ models, ctx = { page: "browse" } }) {
 
 /** Nothing selected: what the place shown holds (`result`: the search's answer). */
 /** What a place holds. `here`: how many of them are filed at this level, when its subcategories are shown as tiles. */
-export function PlaceSummary({ name, result, here = null }) {
+export function PlaceSummary({ name, result, here = null, onTag = null, tagsOn = [] }) {
   if (!result) return null;
   const authors = result.facets?.authors || [];
   const tags = result.facets?.tags || [];
@@ -160,7 +163,7 @@ export function PlaceSummary({ name, result, here = null }) {
       ? (result.total === 1 ? "It's in a subcategory." : `All ${result.total} are in its subcategories.`)
       : `${here} filed here, ${result.total - here} in its subcategories.`}</p>` : null}
     ${authors.length ? html`<div class="insp-section"><h3>Authors</h3><ul class="insp-files">${authors.slice(0, 8).map((a) => html`<li key=${a.value}><span>${a.value}</span><span class="muted">${a.count}</span></li>`)}</ul></div>` : null}
-    ${tags.length ? html`<div class="insp-section"><h3>Tags</h3><div class="insp-chips"><${TagLinks} tags=${tags.slice(0, 12).map((t) => t.value)} /></div></div>` : null}
+    ${tags.length ? html`<div class="insp-section"><h3>Tags</h3><div class="insp-chips"><${TagLinks} tags=${tags.slice(0, 12).map((t) => t.value)} onPick=${onTag} on=${tagsOn} /></div></div>` : null}
     <p class="muted insp-later">Select a model to see its details and files. Ctrl+A selects everything shown.</p>
   </div>`;
 }

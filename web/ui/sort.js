@@ -241,7 +241,7 @@ function FolderRow({ r, s, sel, pick, menu }) {
   return html`<li class=${`sw-row sw-folder${on ? " picked" : ""}${s.focus === r.key ? " focused" : ""}`} data-key=${r.key} data-name=${f.name}
       style=${`--depth:${r.depth}`} aria-selected=${on || covered ? "true" : "false"} onClick=${(e) => pick(r.key, how(e))} onContextMenu=${(e) => menu(e, r.key)}>
     <${Tick} k=${r.key} on=${on} covered=${covered} label=${f.name} pick=${pick} />
-    <button type="button" class="sw-fold" aria-expanded=${r.open ? "true" : "false"} aria-label=${`${r.open ? "Fold" : "Unfold"} ${f.name}`} onClick=${toggle}>${r.open ? "▾" : "▸"}</button>
+    <button type="button" class="sw-fold fold-btn" aria-expanded=${r.open ? "true" : "false"} aria-label=${`${r.open ? "Fold" : "Unfold"} ${f.name}`} onClick=${toggle}>${Icon.chevron(14)}</button>
     <span class="sw-icon sw-mark-folder" title="Folder">${Icon.folder(14)}</span>
     <span class="sw-name">${f.name}</span>
     <span class="sw-meta muted">${r.count ? plural(r.count, "model", "models") : ""}${r.count && r.left ? " · " : ""}${r.left ? plural(r.left, "loose file", "loose files") : ""}</span>

@@ -15,13 +15,16 @@ import { WorkspaceStage } from "./stage.js";
 import { fileSel, reset, clear, show } from "./filesel.js";
 import { TypeTag, fileType, isArchive } from "./filetypes.js";
 import { useFileSelection, fileActions, installExtractKeys } from "./extract.js";
-import { MODEL_ACTIONS, menuItems, usePageKeys, runKey, letter, editDetails, writable, typing, openMenu } from "./actions.js";
+import { MODEL_ACTIONS, menuItems, usePageKeys, runKey, letter, writable, typing, openMenu } from "./actions.js";
 import { CommandBar } from "./layout.js";
 import { size } from "./details.js";
 import { Inspector, useWidth } from "./inspector.js";
 import { Icon } from "./icons.js";
 
 const CTX = { page: "model" };
+// Edit details… on a model's own page opens its Details tab with Name focused
+// (docs/PLAN.md, "0.5.21"); the dialog stays for library pages and several models.
+const openDetails = (select = false) => ui.set({ inspectorAsk: { page: "model", tab: "details", focus: "workspace-edit-name", select } });
 
 const MEDIA = new Set(["image", "doc", "video"]);
 const MEDIA_GROUPS = new Set(["image", "doc", "video"]);
@@ -107,8 +110,9 @@ export function ModelPage({ id }) {
   usePageKeys((e) => {
     if (!m) return;
     const l = letter(e);
-    if (e.key === "F2") { e.preventDefault(); const ok = writable(); if (ok === true) editDetails([m], true); else toast(ok); }
-    else if (l === "e" || l === "m" || l === "s") { e.preventDefault(); runKey(MODEL_ACTIONS, l.toUpperCase(), [m], CTX); }
+    if (e.key === "F2") { e.preventDefault(); const ok = writable(); if (ok === true) openDetails(true); else toast(ok); }
+    else if (l === "e") { e.preventDefault(); const ok = writable(); if (ok === true) openDetails(); else toast(ok); }
+    else if (l === "m" || l === "s") { e.preventDefault(); runKey(MODEL_ACTIONS, l.toUpperCase(), [m], CTX); }
   });
   const src = m ? { kind: "model", id: m.id, rel: m.rel, model: m } : null;
   const picking = useFileSelection(src, m);
@@ -117,14 +121,13 @@ export function ModelPage({ id }) {
   if (!m) return html`<${CommandBar} id="mp-head" back=${{ id: "mp-back", run: back }} title="" /><div class="pages"></div>`;
   const starred = s.favs.includes(m.id);
   const star = MODEL_ACTIONS.find((a) => a.id === "star");
-  const edit = MODEL_ACTIONS.find((a) => a.id === "edit");
   const ok = writable();
   const bytes = (m.files_list || []).reduce((n, f) => n + (f.size || 0), 0);
   return html`<${CommandBar} id="mp-head" back=${{ id: "mp-back", run: back }} up=${placeCrumbs(m, s.overview)}
       title=${html`<h1 id="mp-name" title=${m.name}>${m.name}</h1><button type="button" class="ghost bar-star" id="mp-star" aria-pressed=${starred ? "true" : "false"}
         disabled=${ok !== true} title=${ok !== true ? ok : starred ? "Remove star (S)" : "Star (S)"} aria-label=${starred ? "Remove star" : "Star"} onClick=${() => star.run([m], CTX)}>${Icon.star(16, starred)}</button>`}
       count=${html`<span class="page-count" id="mp-count">${m.authors.length ? `by ${m.authors.join(", ")} · ` : ""}${m.files_list?.length || 0} ${m.files_list?.length === 1 ? "file" : "files"} · ${size(bytes)}</span>`}
-      primary=${html`<button type="button" class="primary compact" id="mp-edit" disabled=${ok !== true} title=${ok !== true ? ok : "Edit details (E)"} onClick=${() => edit.run([m], CTX)}>${Icon.edit(15)} Edit details…</button>`}
+      primary=${html`<button type="button" class="primary compact" id="mp-edit" disabled=${ok !== true} title=${ok !== true ? ok : "Edit details (E)"} onClick=${() => openDetails()}>${Icon.edit(15)} Edit details…</button>`}
       more=${{ id: "mp-more", items: () => menuItems(MODEL_ACTIONS, [m], CTX).filter((it) => it.id !== "edit" && it.id !== "star") }}
       selection=${picking} />
     <div class="model-page" id="model-page" data-model=${m.id}>
@@ -197,7 +200,7 @@ function ModelWorkspace({ model, names, narrow, onModelChange }) {
     <${Inspector} page="model" open=${false} crowded=${!narrow && !paneFits} tabs=${[
       { id: "details", label: "Details", icon: "info", body: html`<div id="workspace-details-panel"><${WorkspaceDetails} model=${model} onModelChange=${onModelChange} /></div>` },
       { id: "media", label: "Media", icon: "image", empty: !media.length && !inArchives.length, body: media.length || inArchives.length
-        ? html`<div class="media-list" id="media-list">${media.length ? html`<${SelectionRows} src=${src} files=${media} name=${model.name} view="all" contextActions=${contextActions} />` : null}<${ArchiveMedia} src=${src} model=${model} items=${inArchives} /></div>`
+        ? html`<div class="media-list" id="media-list">${media.length ? html`${inArchives.length ? html`<p class="field-label media-head" id="media-own-head">In the model's folder</p>` : null}<${SelectionRows} src=${src} files=${media} name=${model.name} view="all" contextActions=${contextActions} />` : null}<${ArchiveMedia} src=${src} model=${model} items=${inArchives} /></div>`
         : html`<p class="muted" id="media-list">No pictures, documents, readmes or videos in this model.</p>` },
     ]} />
   </div>`;

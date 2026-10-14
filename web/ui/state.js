@@ -28,9 +28,11 @@ export const ui = createStore({
   theme: "system",
   navOpen: false,          // sidebar drawer on small screens
   navCollapsed: false,     // the desktop navigation ribbon
+  navPeek: false,          // the menu unfolded beside a model in a medium window (not kept)
   mobilePanel: null,       // at most one narrow Files/Details drawer
   inspector: {},           // per page: the inspector "open" or "folded" (none: the page's default)
   inspectorTab: {},        // per page: the inspector's tab
+  inspectorAsk: null,      // { page, tab, focus, select }: open that tab now and focus a box in it
   inspectorWidth: 340,
   fileColours: false, // show a 3MF's own colours
   workspaceDirty: false,   // uncommitted workspace Details draft

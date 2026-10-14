@@ -12,19 +12,9 @@ import { Icon } from "./icons.js";
 import { CatIcon, iconOf } from "./caticons.js";
 import { openMenu } from "./actions.js";
 import { categoryItems } from "./categories.js";
-import { NavHead, ThemeButton } from "./chrome.js";
+import { NavHead, ThemeButton, useMedia, useNavFolded } from "./chrome.js";
 
 const NARROW = "(max-width: 900px)";
-function useMedia(query) {
-  const [on, setOn] = useState(() => matchMedia(query).matches);
-  useEffect(() => {
-    const q = matchMedia(query);
-    const changed = () => setOn(q.matches);
-    q.addEventListener("change", changed);
-    return () => q.removeEventListener("change", changed);
-  }, [query]);
-  return on;
-}
 const useNarrow = () => useMedia(NARROW);
 
 /** The category a route shows: { id, path } or null. */
@@ -51,7 +41,7 @@ function TreeRows({ schema, nodes, values, depth, current, open }) {
     const path = [...values, n.value];
     const key = [schema.id, ...path].join("/");
     const unfolded = !!open[key];
-    const toggle = n.children.length ? html`<button type="button" class="nav-toggle" aria-expanded=${unfolded ? "true" : "false"} aria-label=${`${unfolded ? "Fold" : "Unfold"} ${n.value}`}
+    const toggle = n.children.length ? html`<button type="button" class="nav-toggle fold-btn" aria-expanded=${unfolded ? "true" : "false"} aria-label=${`${unfolded ? "Fold" : "Unfold"} ${n.value}`}
       onClick=${() => setPref({ open: { ...open, [key]: !unfolded } })}>${Icon.chevron(14)}</button>` : null;
     const route = `browse:${schemaScope(schema.id, path)}`;
     const icon = iconOf(schema, path);
@@ -130,12 +120,13 @@ function CategoryPanel({ schema, path, route, open }) {
 export function Sidebar() {
   const s = useStore(ui, (st) => ({ route: st.route, navOpen: st.navOpen, overview: st.overview, open: st.open, library: st.library, navCollapsed: st.navCollapsed, modelPlace: st.modelPlace }));
   const narrow = useNarrow();
+  const { folded } = useNavFolded();
   const ov = s.overview;
   // a category's page, or the page of a model filed in one
   const shown = routeCategory(s.route) || (s.route.startsWith("model:") && s.modelPlace ? { id: s.modelPlace.schema, path: s.modelPlace.path } : null);
   const panelSchema = !narrow && shown ? ov?.schemas?.find((sc) => sc.id === shown.id) : null;
   return html`${s.navOpen ? html`<div class="nav-backdrop" onClick=${() => ui.set({ navOpen: false })}></div>` : null}
-    <nav class=${`sidebar${s.navOpen ? " open" : ""}${s.navCollapsed ? " collapsed" : ""}`} aria-label="Library">
+    <nav class=${`sidebar${s.navOpen ? " open" : ""}${folded ? " collapsed" : ""}`} aria-label="Library">
       <${NavHead} />
       <ul class="nav-list">
         <${NavLink} route="home" label="Home" icon="home" current=${s.route} />
@@ -155,7 +146,7 @@ export function Sidebar() {
             on=${shown?.id === sc.id} menu=${() => categoryItems(sc.id, [])} />`;
         }
         const unfolded = s.open[key] !== false; // schemas start unfolded
-        const toggle = sc.tree.length ? html`<button type="button" class="nav-toggle" aria-expanded=${unfolded ? "true" : "false"} aria-label=${`${unfolded ? "Fold" : "Unfold"} ${sc.name}`}
+        const toggle = sc.tree.length ? html`<button type="button" class="nav-toggle fold-btn" aria-expanded=${unfolded ? "true" : "false"} aria-label=${`${unfolded ? "Fold" : "Unfold"} ${sc.name}`}
           onClick=${() => setPref({ open: { ...s.open, [key]: !unfolded } })}>${Icon.chevron(14)}</button>` : null;
         return html`<${NavLink} key=${key} route=${route} label=${sc.name} icon=${icon} count=${sc.count} current=${s.route} toggle=${toggle}
             menu=${() => categoryItems(sc.id, [])} />

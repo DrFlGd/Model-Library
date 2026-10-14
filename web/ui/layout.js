@@ -99,8 +99,8 @@ export function ViewSwitch({ views, value, onChange, label = "View", id }) {
 export function SortMenu({ options, value, onChange, id }) {
   const cur = options.find(([k]) => k === value) || options[0];
   const items = () => options.map(([k, l]) => ({ id: `sort-${k}`, label: l, icon: k === cur[0] ? "check" : null, run: () => onChange(k) }));
-  return html`<button type="button" class="ghost sort-btn" id=${id} data-sort=${cur[0]} aria-haspopup="menu" title="Sort"
-    onClick=${(e) => openMenu(e.currentTarget, items())}>${Icon.sort(14)} Sort: ${cur[1]} ▾</button>`;
+  return html`<button type="button" class="ghost sort-btn" id=${id} data-sort=${cur[0]} aria-haspopup="menu" title=${`Sort: ${cur[1]}`}
+    onClick=${(e) => openMenu(e.currentTarget, items())}>${Icon.sort(14)}<span class="sort-label"> Sort: ${cur[1]} ▾</span></button>`;
 }
 
 /** Above the results while a search is on, so a place that shows little or
