@@ -1109,6 +1109,10 @@ async def ui_pass(pg):
     await pg.keyboard.press("Escape")
     await pg.click("#mp-edit")
     await pg.wait_for_selector("#pane-details #workspace-edit-name")
+    try:  # the box is focused once the tab has drawn
+        await pg.wait_for_function("() => document.activeElement?.id === 'workspace-edit-name'", timeout=5000)
+    except Exception:
+        pass
     focused = await pg.evaluate("() => document.activeElement?.id")
     no_dialog = await pg.locator("#details-dialog").count() == 0
     await pg.keyboard.press("Escape")
