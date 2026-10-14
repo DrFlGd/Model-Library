@@ -55,9 +55,12 @@ export function Inspector({ page, tabs, open: startOpen = true, want = null, lab
   useEffect(() => {
     const el = focus.current?.focus && document.getElementById(focus.current.focus);
     if (!el) return;
-    el.focus();
-    if (focus.current.select) el.select?.();
+    const select = focus.current.select;
     focus.current = null;
+    const put = () => { el.focus(); if (select) el.select?.(); };
+    put();
+    // and again on the next frame, if the click that asked took focus back
+    requestAnimationFrame(() => { if (el.isConnected && document.activeElement !== el && !typing({ target: document.activeElement })) put(); });
   });
   const last = useRef(want);
   useEffect(() => {
