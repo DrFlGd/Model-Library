@@ -186,7 +186,8 @@ Because every action already goes through one command table, the Docker build is
 | 4 | Editing: schema editor, category rename and merge, bulk metadata, journaled re-layout with preview and undo | Renaming a faction moves its folders and can be undone |
 | 5 | Large collections: adopt-in-place for tidy trees, duplicate report across the library, file watcher | A whole NAS share of models is in the library |
 | UI pass (0.5.x) | Consistent actions, undo for every change, one page layout (see "UI pass design") | The same action has the same name, place, keys and undo on every page |
-| 6 | Docker: server platform, auth, image (on hold until the UI pass is done) | The same library browses from a browser on another machine |
+| Round 2 (0.5.9–) | Jerred's requirements R1–R17 in seven groups (see "Requirements round 2"); groups 1–4 and skins done by 0.5.21 | Groups 5–7 built |
+| 6 | Docker: server platform, auth, image (on hold until the owner says the UI is ready) | The same library browses from a browser on another machine |
 | Later | Metadata fetch from Printables, MMF and Thingiverse pages; collections; print status and notes; slicer integration; plugin ideas from Grid Workshop's "Future" list | |
 
 Following Grid Workshop's convention, each phase gets written into a plan doc in the repo before code, with a notes section afterwards.
@@ -807,7 +808,7 @@ Jerred chose all 13 items of the fourth UI review (https://claude.ai/artifact/YK
 
 Not in this round: a preview chosen from a variant folder inside an archive, and videos inside archives.
 
-### Skins design (R16; 0.5.19 and 0.5.20)
+### Skins design (R16; 0.5.19)
 
 Jerred picked **Drafting Sheet** from the style study (https://claude.ai/artifact/4JaZ78oGCgyStmr8YTsaDX) as the app's look, and wants **Parts Bin** and **Layer Line** as skins to choose from too, each with its own colours, fonts, shapes and icons, in light and dark.
 
@@ -825,7 +826,7 @@ Jerred picked **Drafting Sheet** from the style study (https://claude.ai/artifac
 - Section headings are small mono capitals followed by a rule. Cards and panels carry corner ticks in the accent. File-type tags are outlined in their colour instead of filled. The selected item is pale blue with a blue outline. Counts in the menu read [12].
 - Icons: thin lines (1.4), square ends.
 
-**Parts Bin and Layer Line (0.5.20).**
+**Parts Bin and Layer Line (also 0.5.19).**
 - **Parts Bin:** workshop drawer cabinet. Machine-tool green accent, Sofia Sans (Extra Condensed capitals for titles), label-tape headings (light text on black tape), a faint pegboard ground, cards and panels with a heavier bottom edge like drawer fronts, the status bar as tape. Icons: heavy lines (2.2), square ends.
 - **Layer Line:** print bed and filament. Silk-magenta accent, M PLUS Rounded 1c headings and Atkinson Hyperlegible text, pill-shaped buttons, tags and menu rows, a faint layer-line texture on pictures, the menu and the 3D view. Each category gets a spool colour (its icon and count in the menu, its tiles), from a set of eight in order. Icons: medium lines (1.7), round ends. Its heading font has Japanese letters too and is 3.6 MB, so the build keeps one weight (ExtraBold, used for every heading) and, with fontTools, cuts it to Latin letters and the app's symbols (about 170 KB); without fontTools it's bundled whole.
 
@@ -852,3 +853,15 @@ Review 5 (R17) looked at Drafting Sheet only, in light and dark at 1400 and 1000
 9. **The grid is only behind pictures and the 3D view**, not behind text pages (`.pages`).
 10. **Beside a model in a window under 1150 px, the menu folds to its icons.** ☰ unfolds it there for the rest of the session (`navPeek`, not kept) and folds it again; the kept fold setting (`navCollapsed`) isn't changed by it.
 11. **A squeezed top bar keeps its buttons.** With the menu and the category panel open at 1000 px, Sort and ⋯ were cut off. The bar is a size container: under 680 px Sort shows only its icon (its name is in the tooltip), and under 600 px the count goes and the search box can shrink to 90 px.
+
+## After 0.5.21
+
+Where round 2 stands (2026-10-25): groups 1–4, the Inspector rails layout and skins are built and released; each group's UI review has been fixed. Left, in the agreed order:
+
+- **Group 5:** R15 several libraries open at once, each a section in the menu; then R6 each selected item into its own model, in this library or another.
+- **Group 6:** R13 Open with shortcuts edited in Settings, and Reduce mesh… running MeshMill's command line (GPL, run as its own program).
+- **Group 7:** R12 details from a pasted Printables, MyMiniFactory, Thingiverse, Thangs or MakerWorld link, then an in-app browser.
+
+Ideas suggested on 14 October, waiting for Jerred to choose and order them (each gets a design here before code): print tracking (printed date, printer, settings, photo, rating, a To print list); collections (one model in many lists without moving files); "fits my printer" (size measured at import, a bed-size filter); a library health check (missing or changed files, model.json not matching its folder, empty models); saved searches and richer filters (file type, size, date added, has a presupported variant); installer code signing and update in place.
+
+Smaller gaps still open: previews can't pick a variant inside an archive; videos inside archives don't play; no 3D view for G-code; and from the Inspector rails notes, Ctrl+K commands and a History tab on a model. Phase 6 (Docker with sign-in) stays on hold until Jerred says the UI is ready.
