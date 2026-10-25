@@ -1,0 +1,188 @@
+    Updating crates.io index
+     Locking 496 packages to highest compatible versions
+      Adding base64 v0.22.1 (available: v0.23.1)
+      Adding generic-array v0.14.7 (available: v0.14.9)
+      Adding sha2 v0.10.9 (available: v0.11.1)
+      Adding toml v0.8.2 (available: v0.8.23)
+      Adding toml_datetime v0.6.3 (available: v0.6.11)
+      Adding toml_edit v0.20.2 (available: v0.20.7)
+      Adding zip v2.6.1 (available: v9.1.0)
+ Downloading crates ...
+  Downloaded adler2 v2.0.1
+  Downloaded winapi-util v0.1.11
+  Downloaded pulldown-cmark-escape v0.11.0
+  Downloaded inout v0.2.5
+  Downloaded hex v0.4.3
+  Downloaded sha2 v0.11.1
+  Downloaded shlex v2.0.1
+  Downloaded windows-link v0.2.1
+  Downloaded version_check v0.9.5
+  Downloaded block-buffer v0.10.4
+  Downloaded equivalent v1.0.3
+  Downloaded cpufeatures v0.2.17
+  Downloaded cfg-if v1.0.5
+  Downloaded block-padding v0.4.2
+  Downloaded tokio-macros v2.7.2
+  Downloaded block-buffer v0.12.1
+  Downloaded crypto-common v0.2.2
+  Downloaded cpufeatures v0.3.1
+  Downloaded crypto-common v0.1.7
+  Downloaded same-file v1.0.6
+  Downloaded cpubits v0.1.1
+  Downloaded generic-array v0.14.7
+  Downloaded walkdir v2.5.0
+  Downloaded cipher v0.5.2
+  Downloaded digest v0.10.7
+  Downloaded cbc v0.2.1
+  Downloaded zmij v1.0.23
+  Downloaded find-msvc-tools v0.1.15
+  Downloaded notify-types v2.1.0
+  Downloaded simd-adler32 v0.3.10
+  Downloaded pin-project-lite v0.2.17
+  Downloaded digest v0.11.3
+  Downloaded unicase v2.10.0
+  Downloaded foldhash v0.2.0
+  Downloaded sha2 v0.10.9
+  Downloaded itoa v1.0.18
+  Downloaded quote v1.0.47
+  Downloaded unrar v0.5.8
+  Downloaded ppmd-rust v1.5.2
+  Downloaded bzip2 v0.6.1
+  Downloaded anyhow v1.0.104
+  Downloaded hybrid-array v0.4.15
+  Downloaded crc32fast v1.5.3
+  Downloaded notify v8.2.1
+  Downloaded serde_core v1.0.229
+  Downloaded zopfli v0.8.4
+  Downloaded unicode-ident v1.0.27
+  Downloaded proc-macro2 v1.0.107
+  Downloaded log v0.4.34
+  Downloaded libbz2-rs-sys v0.2.5
+  Downloaded serde_derive v1.0.229
+  Downloaded const-oid v0.10.2
+  Downloaded getrandom v0.4.3
+  Downloaded flate2 v1.1.10
+  Downloaded bitflags v2.13.2
+  Downloaded base64 v0.22.1
+  Downloaded miniz_oxide v0.9.1
+  Downloaded widestring v1.2.1
+  Downloaded zip v2.6.1
+  Downloaded bumpalo v3.20.3
+  Downloaded indexmap v2.14.2
+  Downloaded aes v0.9.3
+  Downloaded serde v1.0.229
+  Downloaded typenum v1.20.1
+  Downloaded memchr v2.8.3
+  Downloaded cc v1.10.0
+  Downloaded pulldown-cmark v0.13.5
+  Downloaded regex v1.13.1
+  Downloaded serde_json v1.0.154
+  Downloaded hashbrown v0.17.1
+  Downloaded aho-corasick v1.1.5
+  Downloaded lzma-rust2 v0.23.0
+  Downloaded zlib-rs v0.6.8
+  Downloaded unrar_sys v0.5.8
+  Downloaded syn v3.0.9
+  Downloaded regex-syntax v0.8.11
+  Downloaded regex-automata v0.4.18
+  Downloaded libc v0.2.191
+  Downloaded sevenz-rust2 v0.24.1
+  Downloaded tokio v1.54.1
+  Downloaded winapi v0.3.9
+  Downloaded windows-sys v0.61.2
+   Compiling typenum v1.20.1
+   Compiling cfg-if v1.0.5
+   Compiling proc-macro2 v1.0.107
+   Compiling version_check v0.9.5
+   Compiling unicode-ident v1.0.27
+   Compiling hybrid-array v0.4.15
+   Compiling memchr v2.8.3
+   Compiling quote v1.0.47
+   Compiling crypto-common v0.2.2
+   Compiling generic-array v0.14.7
+   Compiling crc32fast v1.5.3
+   Compiling block-padding v0.4.2
+   Compiling shlex v2.0.1
+   Compiling libc v0.2.191
+   Compiling windows-link v0.2.1
+   Compiling find-msvc-tools v0.1.15
+   Compiling windows-sys v0.61.2
+   Compiling inout v0.2.5
+   Compiling cc v1.10.0
+   Compiling syn v3.0.9
+   Compiling winapi v0.3.9
+   Compiling serde_core v1.0.229
+   Compiling simd-adler32 v0.3.10
+   Compiling bitflags v2.13.2
+   Compiling winapi-util v0.1.11
+   Compiling cipher v0.5.2
+   Compiling aho-corasick v1.1.5
+   Compiling block-buffer v0.12.1
+   Compiling unrar_sys v0.5.8
+   Compiling zmij v1.0.23
+   Compiling cpufeatures v0.3.1
+   Compiling regex-syntax v0.8.11
+   Compiling adler2 v2.0.1
+   Compiling log v0.4.34
+   Compiling equivalent v1.0.3
+   Compiling getrandom v0.4.3
+   Compiling hashbrown v0.17.1
+   Compiling const-oid v0.10.2
+   Compiling digest v0.11.3
+   Compiling indexmap v2.14.2
+   Compiling miniz_oxide v0.9.1
+   Compiling regex-automata v0.4.18
+   Compiling same-file v1.0.6
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling serde_json v1.0.154
+   Compiling serde v1.0.229
+   Compiling bumpalo v3.20.3
+   Compiling anyhow v1.0.104
+   Compiling zip v2.6.1
+   Compiling libbz2-rs-sys v0.2.5
+   Compiling cpubits v0.1.1
+   Compiling pulldown-cmark v0.13.5
+   Compiling aes v0.9.3
+   Compiling bzip2 v0.6.1
+   Compiling zopfli v0.8.4
+   Compiling digest v0.10.7
+   Compiling walkdir v2.5.0
+   Compiling regex v1.13.1
+   Compiling flate2 v1.1.10
+   Compiling serde_derive v1.0.229
+   Compiling tokio-macros v2.7.2
+   Compiling sha2 v0.11.1
+   Compiling cbc v0.2.1
+   Compiling notify-types v2.1.0
+   Compiling cpufeatures v0.2.17
+   Compiling lzma-rust2 v0.23.0
+   Compiling unicase v2.10.0
+   Compiling widestring v1.2.1
+   Compiling foldhash v0.2.0
+   Compiling itoa v1.0.18
+   Compiling pin-project-lite v0.2.17
+   Compiling ppmd-rust v1.5.2
+   Compiling pulldown-cmark-escape v0.11.0
+   Compiling tokio v1.54.1
+   Compiling sevenz-rust2 v0.24.1
+   Compiling sha2 v0.10.9
+   Compiling notify v8.2.1
+   Compiling hex v0.4.3
+   Compiling base64 v0.22.1
+   Compiling unrar v0.5.8
+   Compiling modlib-core v0.5.22 (D:\a\Model-Library\Model-Library\desktop\core)
+error: linking with `link.exe` failed: exit code: 1120
+  |
+  = note: "C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\link.exe" "/NOLOGO" "D:\\a\\Model-Library\\Model-Library\\desktop\\target\\release\\deps\\rustcTUckz1\\symbols.o" "<17 object files omitted>" "D:\\a\\Model-Library\\Model-Library\\desktop\\target\\release\\deps/{libmodlib_core-72b889bd2c55018e,libzip-6b59a71089bd4bd3,libzopfli-85c14478eeedde8b,libbumpalo-003abbde28a30dfb,libflate2-403534ba4f98ec0e,libminiz_oxide-a6816bc7d63631f8,libsimd_adler32-a4e56c1451380ef7,libsevenz_rust2-98a77edf6adb14b2,libcbc-de4442cb3fc7c394,libppmd_rust-37eb74f63d09b108,libbzip2-8ec857b15f1762dd,liblibbz2_rs_sys-cda1810cefe665c5,liblzma_rust2-705de71c923ef897,libcrc32fast-d0b5d9cbb004779d,libsha2-0e3f0819ba460ff1,libdigest-e51fc6ca70f56e89,libconst_oid-12f8c51625ec8fb4,libblock_buffer-366cce95e62f6b2d,libaes-c9d8b9c7057f2089,libcpufeatures-18a8fc6e6119ac8e,libcpubits-a5dfea05d90d45db,libcipher-d1c2f6c5fd7709db,libinout-e83bb613b3e1086b,libblock_padding-3ff5f0133f027f30,libcrypto_common-29f420c834f6a263,libhybrid_array-f20b3cbcf81d22fd,libhex-a7762740920dfce4,libtokio-924b8a653b52832e,libpin_project_lite-a3392b73e3737f3e,libnotify-551dd115b0a7388d,liblog-d82a3d545c92d6b9,libwalkdir-838a5e13a89aa817,libsame_file-b997ce7bf61ed60f,libwinapi_util-8f80c3d2958b5217,libwindows_sys-19419376d45319f5,libwindows_link-1b15221990305dac,libnotify_types-b8d2310f73b7b4bd,libpulldown_cmark-7dc9e7cf4e13c7b9,libunicase-b23f7dd86bde7f4e,libpulldown_cmark_escape-748d709e878adbb0,libserde-67cf715d47a74fcb,libunrar-96ad82613fa7e65b,libbitflags-d11d3ac4459018a0,libwidestring-f50c66230dec7f37,libregex-6e46f946a393e11b,libregex_automata-7d496bc14eb885ec,libaho_corasick-d9cc0b15c263e74e,libregex_syntax-e1fe598271ae8adc,libunrar_sys-79b9492ca60f7a97,libwinapi-65baec579a505c93,liblibc-e0ff6f129ac4b95d,libbase64-c63f249f46aeb639,libsha2-d32d8b14a544ce84,libcpufeatures-9e63a96cc44bb510,libcfg_if-c018c11f20c985c5,libdigest-2d592c284edf8052,libblock_buffer-2f3f6a70d5b44c87,libcrypto_common-47c8c0e5b77182d6,libgeneric_array-d4bdf3f42b07abb3,libtypenum-137d76cfe6f3ccd6,libserde_json-a9f6d34ee227e5a1,libmemchr-6bcc6443718c2f17,libitoa-ab978b1e8dac0392,libfoldhash-64a34cb60cb8002f,libzmij-dd38cfd3f8ec485d,libindexmap-c88a37e936ae6e6b,libequivalent-95e78223e853571a,libhashbrown-78ab2fcc570e4043,libserde_core-fc13f24b91b2a46b,libanyhow-c7e1b8a5cd5b78ac}.rlib" "<sysroot>\\lib\\rustlib\\x86_64-pc-windows-msvc\\lib/{libstd-*,libpanic_unwind-*,libcfg_if-*,libwindows_link-*,librustc_demangle-*,libstd_detect-*,libhashbrown-*,librustc_std_workspace_alloc-*,libunwind-*,librustc_std_workspace_core-*,liballoc-*,libcore-*,libcompiler_builtins-*}.rlib" "powrprof.lib" "shell32.lib" "legacy_stdio_definitions.lib" "kernel32.lib" "kernel32.lib" "kernel32.lib" "ntdll.lib" "userenv.lib" "ws2_32.lib" "dbghelp.lib" "/defaultlib:msvcrt" "/NXCOMPAT" "/LIBPATH:D:\\a\\Model-Library\\Model-Library\\desktop\\target\\release\\build\\unrar_sys-381e3a4221021503\\out" "/LIBPATH:C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Tools\\MSVC\\14.44.35207\\atlmfc\\lib\\x64" "/OUT:D:\\a\\Model-Library\\Model-Library\\desktop\\target\\release\\deps\\modlib_cli.exe" "/OPT:REF,ICF" "/DEBUG" "/PDBALTPATH:%_PDB%" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\intrinsic.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\liballoc.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\libcore.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\libstd.natvis"
+  = note: some arguments are omitted. use `--verbose` to show all linker arguments
+  = note: libunrar_sys-79b9492ca60f7a97.rlib(ac584dc45195ce55-pathfn.o) : error LNK2019: unresolved external symbol __imp_RegCloseKey referenced in function "void __cdecl GetRarDataPath(class std::basic_string<wchar_t,struct std::char_traits<wchar_t>,class std::allocator<wchar_t> > &,bool)" (?GetRarDataPath@@YAXAEAV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@_N@Z)
+          libunrar_sys-79b9492ca60f7a97.rlib(ac584dc45195ce55-pathfn.o) : error LNK2019: unresolved external symbol __imp_RegOpenKeyExW referenced in function "void __cdecl GetRarDataPath(class std::basic_string<wchar_t,struct std::char_traits<wchar_t>,class std::allocator<wchar_t> > &,bool)" (?GetRarDataPath@@YAXAEAV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@_N@Z)
+          libunrar_sys-79b9492ca60f7a97.rlib(ac584dc45195ce55-pathfn.o) : error LNK2019: unresolved external symbol __imp_RegQueryValueExW referenced in function "void __cdecl GetRarDataPath(class std::basic_string<wchar_t,struct std::char_traits<wchar_t>,class std::allocator<wchar_t> > &,bool)" (?GetRarDataPath@@YAXAEAV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@_N@Z)
+          libunrar_sys-79b9492ca60f7a97.rlib(ac584dc45195ce55-crypt.o) : error LNK2019: unresolved external symbol __imp_CryptAcquireContextW referenced in function "void __cdecl GetRnd(unsigned char *,unsigned __int64)" (?GetRnd@@YAXPEAE_K@Z)
+          libunrar_sys-79b9492ca60f7a97.rlib(ac584dc45195ce55-crypt.o) : error LNK2019: unresolved external symbol __imp_CryptReleaseContext referenced in function "void __cdecl GetRnd(unsigned char *,unsigned __int64)" (?GetRnd@@YAXPEAE_K@Z)
+          libunrar_sys-79b9492ca60f7a97.rlib(ac584dc45195ce55-crypt.o) : error LNK2019: unresolved external symbol __imp_CryptGenRandom referenced in function "void __cdecl GetRnd(unsigned char *,unsigned __int64)" (?GetRnd@@YAXPEAE_K@Z)
+          D:\a\Model-Library\Model-Library\desktop\target\release\deps\modlib_cli.exe : fatal error LNK1120: 6 unresolved externals
+          
+
+error: could not compile `modlib-core` (bin "modlib-cli") due to 1 previous error
