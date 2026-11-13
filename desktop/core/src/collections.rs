@@ -142,6 +142,45 @@ pub fn change(lib: &Library, id: &str, add: &[String], remove: &[String]) -> Res
     Ok(c)
 }
 
+/// Your order (docs/PLAN.md, "C: collections in your own order"): move `ids` to
+/// just before `before` (None: to the end), keeping their order among
+/// themselves as the collection has it. Returns the collection as it is now.
+pub fn reorder(lib: &Library, id: &str, ids: &[String], before: Option<&str>) -> Result<Value> {
+    let mut c = get(lib, id)?;
+    let ms = members(&c);
+    let moving: Vec<String> = ms.iter().filter(|m| ids.contains(m)).cloned().collect();
+    let mut out: Vec<String> = ms.iter().filter(|m| !ids.contains(m)).cloned().collect();
+    let at = before
+        .filter(|b| !ids.iter().any(|i| i == b))
+        .and_then(|b| out.iter().position(|m| m == b))
+        .unwrap_or(out.len());
+    out.splice(at..at, moving);
+    if out != ms {
+        c["models"] = json!(out);
+        save(lib, &c)?;
+    }
+    Ok(c)
+}
+
+/// Put an order back (Undo): `order` first, as far as they're still in the
+/// collection; models added since stay, after them.
+pub fn set_order(lib: &Library, id: &str, order: &[String]) -> Result<Value> {
+    let mut c = get(lib, id)?;
+    let ms = members(&c);
+    let mut out: Vec<String> = order.iter().filter(|m| ms.contains(m)).cloned().collect();
+    out.dedup();
+    for m in &ms {
+        if !out.contains(m) {
+            out.push(m.clone());
+        }
+    }
+    if out != ms {
+        c["models"] = json!(out);
+        save(lib, &c)?;
+    }
+    Ok(c)
+}
+
 /// A model's id changed (its first model.json, a move): follow it in every
 /// collection. Returns how many collections changed.
 pub fn rename_member(lib: &Library, old: &str, new: &str) -> Result<usize> {
@@ -220,6 +259,16 @@ mod tests {
         assert_eq!(members(&back), ["m9"]);
         assert_eq!(forget(&lib, &["m9".into()]).unwrap(), 2);
         assert!(members(&get(&lib, bid).unwrap()).is_empty());
+        // your order: moved before another, or to the end, keeping their own order
+        let ids = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        change(&lib, aid, &ids(&["a", "b", "c", "d"]), &ids(&["m9"])).unwrap();
+        let order = |c: Value| members(&c);
+        assert_eq!(order(reorder(&lib, aid, &ids(&["d", "b"]), Some("a")).unwrap()), ["b", "d", "a", "c"]);
+        assert_eq!(order(reorder(&lib, aid, &ids(&["b"]), None).unwrap()), ["d", "a", "c", "b"]);
+        assert_eq!(order(reorder(&lib, aid, &ids(&["a", "c"]), Some("c")).unwrap()), ["d", "b", "a", "c"], "dropped on itself: to the end");
+        change(&lib, aid, &ids(&["e"]), &ids(&["d"])).unwrap();
+        // Undo puts the old order back; added since stays, at the end
+        assert_eq!(order(set_order(&lib, aid, &ids(&["a", "b", "c", "d"])).unwrap()), ["a", "b", "c", "e"]);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

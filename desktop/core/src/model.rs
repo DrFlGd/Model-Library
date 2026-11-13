@@ -52,13 +52,19 @@ pub fn modified(path: &Path) -> u64 {
 /// Files in a model folder (relative paths, '/'), its parts' sub-folders included,
 /// without the sidecar and generated previews. Sorted.
 pub fn list_files(dir: &Path) -> Vec<(String, u64)> {
+    list_files_dated(dir).into_iter().map(|(rel, size, _)| (rel, size)).collect()
+}
+
+/// [`list_files`] with each file's modification time (Unix ms), read in the same
+/// walk (the directory listing already has it on Windows).
+pub fn list_files_dated(dir: &Path) -> Vec<(String, u64, u64)> {
     let mut out = vec![];
     walk(dir, "", &mut out);
     out.sort();
     out
 }
 
-fn walk(dir: &Path, prefix: &str, out: &mut Vec<(String, u64)>) {
+fn walk(dir: &Path, prefix: &str, out: &mut Vec<(String, u64, u64)>) {
     let Ok(rd) = std::fs::read_dir(dir) else {
         return;
     };
@@ -77,7 +83,11 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<(String, u64)>) {
             }
             Ok(_) => {
                 if !(prefix.is_empty() && name == SIDECAR) && !name.starts_with('.') {
-                    out.push((rel, e.metadata().map(|m| m.len()).unwrap_or(0)));
+                    let meta = e.metadata().ok();
+                    let ms = meta.as_ref().and_then(|m| m.modified().ok())
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map_or(0, |d| d.as_millis() as u64);
+                    out.push((rel, meta.map_or(0, |m| m.len()), ms));
                 }
             }
             Err(_) => {}
@@ -247,7 +257,9 @@ pub fn update(dir: &Path, patch: &Value, defaults: &Value) -> Result<Value> {
     }
     let mut side = read_sidecar(dir);
     let now = crate::library::now();
-    if side.get("id").and_then(Value::as_str).is_none() {
+    let first = side.get("id").and_then(Value::as_str).is_none();
+    let was = side.clone();
+    if first {
         keep_broken(dir)?;
         side["format"] = json!(FORMAT);
         side["id"] = match defaults["id"].as_str() {
@@ -296,7 +308,12 @@ pub fn update(dir: &Path, patch: &Value, defaults: &Value) -> Result<Value> {
             }
         }
     }
-    obj.insert("updated".into(), json!(now));
+    // `updated` says when the details last changed (sort "Recently changed"), so
+    // a write that changes nothing (a star, the step before a journalled edit)
+    // leaves it as it was
+    if first || side != was {
+        side.as_object_mut().unwrap().insert("updated".into(), json!(now));
+    }
     write_json(&dir.join(SIDECAR), &side)?;
     Ok(side)
 }

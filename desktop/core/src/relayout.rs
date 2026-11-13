@@ -527,7 +527,7 @@ fn folders(j: &Value) -> Vec<String> {
             .collect()
     };
     match j["kind"].as_str() {
-        Some("details") => at(&j["models"], "rel"),
+        Some("details" | "model_files") => at(&j["models"], "rel"),
         _ => {
             let mut v = at(&j["moves"], "to");
             v.extend(at(&j["moves"], "from"));
@@ -554,7 +554,9 @@ fn blocked_by<'a>(newer: &'a [Value], j: &Value) -> Option<&'a Value> {
             if j["kind"] == "model_delete" {
                 return folders(x).iter().any(|a| mine.iter().any(|b| near(a, b)));
             }
-            if x["kind"] != "details" && j["kind"] != "details" {
+            // details and the files inside one model only wait on that model
+            let local = |v: &Value| matches!(v["kind"].as_str(), Some("details" | "model_files"));
+            if !local(x) && !local(j) {
                 return true;
             }
             folders(x).iter().any(|a| mine.iter().any(|b| near(a, b)))
@@ -746,7 +748,7 @@ pub fn apply(
     if j["state"] == "emptied" {
         bail!("Those copies were deleted already.");
     }
-    if matches!(j["kind"].as_str(), Some("details" | "import" | "extract" | "wrap_loose" | "file_transfer" | "model_delete" | "archive-op")) {
+    if matches!(j["kind"].as_str(), Some("details" | "import" | "extract" | "wrap_loose" | "file_transfer" | "model_delete" | "archive-op" | "model_files")) {
         bail!("That change can't be made again from here.");
     }
     j["state"] = json!("running");
@@ -836,6 +838,8 @@ pub fn undo(
     // Archive undo performs its own preflight before changing journal state, so
     // a conflict remains actionable rather than leaving an "undoing" record.
     if j["kind"] == "archive-op" { return crate::archive_ops::undo(lib, j); }
+    // checks everything before it moves anything, and says why if it can't
+    if j["kind"] == "model_files" { return crate::modelfiles::undo(lib, j); }
     j["state"] = json!("undoing");
     j["direction"] = json!("undo");
     write(lib, &j)?;

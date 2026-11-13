@@ -637,12 +637,42 @@ impl App {
                 }
                 j(json!({ "collections": out, "ids": adding.iter().map(|a| json!({ "was": a, "id": now(a) })).collect::<Vec<_>>() }))
             }
+            // your order: `ids` moved to just before `before` (none: the end), or
+            // `models`: a whole order put back (Undo); `was` is the order before
+            "collection_order" => {
+                let id = arg(&args, "id").map_err(e2s)?;
+                let was = c::members(&c::get(&lib, id).map_err(e2s)?);
+                let now = if args["models"].is_array() {
+                    c::set_order(&lib, id, &strings(&args["models"]))
+                } else {
+                    c::reorder(&lib, id, &strings(&args["ids"]), args["before"].as_str())
+                };
+                let mut now = now.map_err(e2s)?;
+                now["was"] = json!(was);
+                j(now)
+            }
             // the collections a model is in
             "collections_of" => {
                 let id = arg(&args, "id").map_err(e2s)?;
                 j(json!(c::list(&lib).into_iter().filter(|x| c::members(x).iter().any(|m| m == id))
                     .map(|x| json!({ "id": x["id"], "name": x["name"] })).collect::<Vec<_>>()))
             }
+            _ => Err(format!("unknown command {cmd}")),
+        }
+    }
+
+    async fn searches_call(self: &Arc<Self>, cmd: &str, args: Value) -> Result<Reply, String> {
+        use crate::searches as sv;
+        let j = |v: Value| Ok(Reply::Json(v));
+        let lib = self.library()?;
+        let text = |k: &str| args[k].as_str().unwrap_or("").to_string();
+        match cmd {
+            "searches_list" => j(json!(sv::list(&lib))),
+            "search_create" => j(sv::create(&lib, &text("name"), &text("q"), &text("scope"), None).map_err(e2s)?),
+            // `name`, `q`, `scope`: only those given change
+            "search_update" => j(sv::update(&lib, arg(&args, "id").map_err(e2s)?, &args).map_err(e2s)?),
+            "search_delete" => j(sv::delete(&lib, arg(&args, "id").map_err(e2s)?).map_err(e2s)?),
+            "search_restore" => j(sv::create(&lib, args["search"]["name"].as_str().unwrap_or(""), "", "", Some(&args["search"])).map_err(e2s)?),
             _ => Err(format!("unknown command {cmd}")),
         }
     }
@@ -1252,6 +1282,9 @@ impl App {
         if cmd.starts_with("collection") {
             return self.collections_call(cmd, args).await;
         }
+        if cmd.starts_with("search_") || cmd == "searches_list" {
+            return self.searches_call(cmd, args).await;
+        }
         if cmd.starts_with("health_") {
             return self.health_call(cmd, args).await;
         }
@@ -1365,10 +1398,21 @@ impl App {
                         .filter(|m| favs.iter().any(|f| f == m.id()))
                         .count());
                     // the collections, with how many of their models are here
-                    v["collections"] = json!(crate::collections::list(lib)
+                    let colls = crate::collections::list(lib);
+                    v["collections"] = json!(colls
                         .iter()
                         .map(|c| json!({ "id": c["id"], "name": c["name"],
                             "count": crate::collections::members(c).iter().filter(|id| ix.get(id).is_some()).count() }))
+                        .collect::<Vec<_>>());
+                    // saved searches, with how many they find now
+                    v["searches"] = json!(crate::searches::list(lib)
+                        .iter()
+                        .map(|x| {
+                            let id = x["id"].as_str().unwrap_or("");
+                            let count = crate::searches::resolve(lib, id, "")
+                                .map(|(scope, q)| ix.query_at(&scope, &q, "name", 0, 0, &favs, &colls, false)["total"].clone());
+                            json!({ "id": x["id"], "name": x["name"], "q": x["q"], "scope": x["scope"], "count": count })
+                        })
                         .collect::<Vec<_>>());
                     v
                 })
@@ -1979,10 +2023,19 @@ impl App {
                     args["offset"].as_u64().unwrap_or(0) as usize,
                     args["limit"].as_u64().unwrap_or(200).min(2000) as usize,
                 );
-                let colls = crate::collections::list(&self.library()?);
+                let lib = self.library()?;
+                let colls = crate::collections::list(&lib);
+                // a saved search: its own place and words, then what's typed on its page
+                let (scope, q) = match scope.strip_prefix("search:") {
+                    Some(id) => match crate::searches::resolve(&lib, id, q) {
+                        Some(found) => found,
+                        None => return j(json!({ "total": 0, "bytes": 0, "items": [], "facets": { "authors": [], "tags": [] }, "gone": true })),
+                    },
+                    None => (scope.to_string(), q.to_string()),
+                };
                 j(self
                     .with_index(None, |ix, _| {
-                        ix.query_at(scope, q, sort, offset, limit, &favs, &colls, args["direct"].as_bool() == Some(true))
+                        ix.query_at(&scope, &q, sort, offset, limit, &favs, &colls, args["direct"].as_bool() == Some(true))
                     })
                     .await?)
             }
@@ -2103,6 +2156,22 @@ impl App {
                     crate::fileops::execute(&lib,&plan,&cancel,&|i,n,name|
                         app.job_progress(&jid,json!({"item":i,"items":n,"name":name})))
                 }))
+            }
+            // inside one model: rename, new_folder, move or delete (modelfiles.rs)
+            "model_files_change" => {
+                let id = arg(&args, "id").map_err(e2s)?.to_string();
+                let cache = self.index_cache(&self.library()?);
+                let r = self
+                    .with_index(None, |ix, lib| -> Result<Value> {
+                        let r = crate::modelfiles::change(lib, ix, &args)?;
+                        ix.refresh(lib, &id);
+                        if let Some(c) = &cache {
+                            ix.save(c)?;
+                        }
+                        Ok(r)
+                    })
+                    .await?;
+                j(r.map_err(e2s)?)
             }
             "models_delete_plan" => {
                 if args["job"] == true {
@@ -2314,6 +2383,101 @@ impl App {
                             json!(jid)
                         };
                         Ok(json!({ "saved": saved, "errors": errors, "journal": journal, "ids": renamed }))
+                    })
+                    .await?
+                    .map_err(e2s)?;
+                j(r)
+            }
+            "values_rename" => {
+                // one tag or author renamed across the library, or merged into one
+                // already used (docs/PLAN.md, "B: rename or merge tags and authors");
+                // `dry`: only say how many models have each name
+                let kind = arg(&args, "kind").map_err(e2s)?.to_string();
+                if !matches!(kind.as_str(), "tags" | "authors") {
+                    return Err("Only tags and authors can be renamed here.".into());
+                }
+                let what = if kind == "tags" { "tag" } else { "author" };
+                let from = args["from"].as_str().unwrap_or("").trim().to_string();
+                let to = args["to"].as_str().unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" ");
+                let dry = args["dry"].as_bool() == Some(true);
+                if from.is_empty() {
+                    return Err(format!("Which {what}?"));
+                }
+                if !dry && to.is_empty() {
+                    return Err(format!("Type the {what}'s new name."));
+                }
+                if to.contains(',') {
+                    return Err(format!("A{} {what}'s name can't have a comma in it: commas separate them.", if kind == "tags" { "" } else { "n" }));
+                }
+                let name_of = |v: &Value| v.as_str().or(v["name"].as_str()).unwrap_or("").to_string();
+                let cache = self.index_cache(&self.library()?);
+                let r = self
+                    .with_index(None, |ix, lib| -> Result<Value> {
+                        let has = |m: &crate::index::Model, want: &dyn Fn(&str) -> bool| {
+                            m.v[kind.as_str()].as_array().is_some_and(|a| a.iter().filter_map(Value::as_str).any(want))
+                        };
+                        let ids: Vec<String> = ix.models.iter().filter(|m| has(m, &|v| v == from)).map(|m| m.id().to_string()).collect();
+                        // the name it becomes, as the library already spells it, and on how many models
+                        let other = |v: &str| v != from && !to.is_empty() && v.to_lowercase() == to.to_lowercase();
+                        let merging = ix.models.iter().filter(|m| has(m, &other)).count();
+                        let spelt = ix.models.iter().find_map(|m| m.v[kind.as_str()].as_array()?.iter().filter_map(Value::as_str).find(|v| other(v)).map(String::from));
+                        if dry || to == from {
+                            return Ok(json!({ "count": ids.len(), "merge": merging, "spelt": spelt, "journal": null }));
+                        }
+                        lib.writable()?;
+                        // merging: the name the library already has (whatever case was typed)
+                        let to = spelt.clone().unwrap_or_else(|| to.clone());
+                        let (mut changed, mut errors, mut renamed) = (vec![], vec![], serde_json::Map::new());
+                        for id in &ids {
+                            let Some(m) = ix.get(id) else { continue };
+                            let dir = lib.resolve(m.rel())?;
+                            let (rel, name) = (m.rel().to_string(), m.v["name"].clone());
+                            let r = details_before(&dir, m).and_then(|before| {
+                                // in place, keeping an author's other details; once only
+                                let mut out: Vec<Value> = vec![];
+                                for v in before[kind.as_str()].as_array().cloned().unwrap_or_default() {
+                                    let v = if name_of(&v) == from {
+                                        match v {
+                                            Value::Object(mut o) => { o.insert("name".into(), json!(to)); Value::Object(o) }
+                                            _ if kind == "authors" => json!({ "name": to }),
+                                            _ => json!(to),
+                                        }
+                                    } else {
+                                        v
+                                    };
+                                    let n = name_of(&v).to_lowercase();
+                                    if !out.iter().any(|x| name_of(x).to_lowercase() == n) {
+                                        out.push(v);
+                                    }
+                                }
+                                model::update(&dir, &json!({ kind.as_str(): out }), &first_sidecar(m))?;
+                                Ok(before)
+                            });
+                            match r {
+                                Ok(before) => {
+                                    let after = model::read_sidecar(&dir);
+                                    ix.refresh(lib, id);
+                                    renamed.insert(id.clone(), after["id"].clone());
+                                    changed.push(json!({ "id": after["id"], "name": name, "rel": rel, "before": before, "after": after }));
+                                }
+                                Err(e) => errors.push(json!({ "id": id, "name": name, "error": e2s(e) })),
+                            }
+                        }
+                        if let Some(c) = &cache {
+                            ix.save(c)?;
+                        }
+                        let journal = if changed.is_empty() {
+                            Value::Null
+                        } else {
+                            let jid = relayout::new_id(lib)?;
+                            let label = match &spelt {
+                                Some(into) => format!("Merged the {what} {from} into {into}"),
+                                None => format!("Renamed the {what} {from} to {to}"),
+                            };
+                            relayout::record(lib, &jid, &json!({ "kind": "details", "label": label, "models": changed }))?;
+                            json!(jid)
+                        };
+                        Ok(json!({ "count": changed.len(), "merge": merging, "spelt": spelt, "errors": errors, "journal": journal, "ids": renamed }))
                     })
                     .await?
                     .map_err(e2s)?;
@@ -2790,6 +2954,14 @@ mod tests {
         assert_eq!(q["total"], 2);
         let cup_id = q["items"][0]["id"].clone();
         assert_eq!(call(&app, "collections_of", json!({ "id": cup_id })).await[0]["name"], "To print");
+        // a saved search: its place and words, narrowed by what's typed on its page
+        let sv = call(&app, "search_create", json!({ "name": "In the list", "q": "collection:\"to print\"", "scope": "all" })).await;
+        let sid = sv["id"].as_str().unwrap().to_string();
+        assert_eq!(call(&app, "models_query", json!({ "scope": format!("search:{sid}"), "q": "" })).await["total"], 2);
+        assert_eq!(call(&app, "models_query", json!({ "scope": format!("search:{sid}"), "q": "jug" })).await["total"], 1);
+        assert_eq!(call(&app, "library_overview", json!({})).await["searches"][0]["count"], 2);
+        call(&app, "search_delete", json!({ "id": sid })).await;
+        assert_eq!(call(&app, "models_query", json!({ "scope": format!("search:{sid}") })).await["gone"], true);
         // the health check finds a collection naming a model that's gone, and fixes it
         std::fs::remove_dir_all(lib.join("Things/Jug")).unwrap();
         call(&app, "library_scan", json!({})).await;
@@ -2807,6 +2979,31 @@ mod tests {
         assert!(app.call("collection_get", json!({ "id": cid })).await.is_err());
         call(&app, "collection_restore", json!({ "collection": gone })).await;
         assert_eq!(call(&app, "collection_get", json!({ "id": cid })).await["name"], "To print");
+        // your order, and Undo putting the order back
+        for n in ["Pan", "Pot"] {
+            std::fs::create_dir_all(lib.join("Things").join(n)).unwrap();
+            std::fs::write(lib.join("Things").join(n).join("a.stl"), n).unwrap();
+        }
+        call(&app, "library_scan", json!({})).await;
+        let q = call(&app, "models_query", json!({ "scope": "all", "q": "p", "sort": "name" })).await;
+        let (pan, pot) = (q["items"][0]["id"].clone(), q["items"][1]["id"].clone());
+        let r = call(&app, "collections_change", json!({ "changes": [{ "id": cid, "add": [pan, pot] }] })).await;
+        let now = |was: &Value| r["ids"].as_array().unwrap().iter().find(|x| &x["was"] == was).unwrap()["id"].clone();
+        let (pan, pot) = (now(&pan), now(&pot));
+        let r = call(&app, "collection_order", json!({ "id": cid, "ids": [pot], "before": cup_id })).await;
+        assert_eq!(r["models"], json!([pot, cup_id, pan]));
+        let order = call(&app, "models_query", json!({ "scope": format!("coll:{cid}"), "sort": "order" })).await;
+        assert_eq!(order["items"].as_array().unwrap().iter().map(|m| m["id"].clone()).collect::<Vec<_>>(), [pot.clone(), cup_id.clone(), pan.clone()]);
+        let r = call(&app, "collection_order", json!({ "id": cid, "models": r["was"] })).await;
+        assert_eq!(r["models"], json!([cup_id, pan, pot]));
+        // a file inside a model renamed, then undone from the journal as Home does
+        let r = call(&app, "model_files_change", json!({ "id": cup_id, "op": "rename", "rel": "a.stl", "name": "cup.stl" })).await;
+        assert!(lib.join("Things/Cup/cup.stl").is_file());
+        assert_eq!(call(&app, "model_get", json!({ "id": cup_id })).await["files_list"][0]["rel"], "cup.stl");
+        let done = wait(&app, &call(&app, "journal_undo", json!({ "id": r["journal"] })).await).await;
+        assert_eq!(done["result"]["state"], "undone", "{done}");
+        assert!(lib.join("Things/Cup/a.stl").is_file());
+        assert_eq!(call(&app, "model_get", json!({ "id": cup_id })).await["files_list"][0]["rel"], "a.stl");
         let _ = std::fs::remove_dir_all(&home);
     }
 
@@ -3003,6 +3200,24 @@ mod tests {
         )
         .await;
         assert_eq!(q["total"], 0);
+        // a tag merged into one the library has (its spelling wins), an author renamed, Undo
+        call(&app, "models_update", json!({ "ids": [ids[0].clone()], "patch": { "tags_add": ["beast"] } })).await;
+        let dry = call(&app, "values_rename", json!({ "kind": "tags", "from": "beast", "to": "MONSTER", "dry": true })).await;
+        assert_eq!((dry["count"].as_u64(), dry["merge"].as_u64(), dry["spelt"].as_str()), (Some(1), Some(2), Some("monster")), "{dry}");
+        let r = call(&app, "values_rename", json!({ "kind": "tags", "from": "beast", "to": "MONSTER" })).await;
+        assert_eq!(r["count"], 1, "{r}");
+        let tags = |q: Value| q["items"][0]["tags"].clone();
+        assert_eq!(tags(call(&app, "models_query", json!({ "scope": "all", "q": "tag:monster", "sort": "name", "limit": 50 })).await), json!(["monster"]));
+        assert_eq!(call(&app, "models_query", json!({ "scope": "all", "q": "tag:beast" })).await["total"], 0);
+        let r = call(&app, "values_rename", json!({ "kind": "authors", "from": "Jo Smith", "to": "  Joanna   Smith " })).await;
+        assert_eq!(r["count"], 2, "{r}");
+        assert_eq!(call(&app, "models_query", json!({ "scope": "all", "q": "author:\"joanna smith\"" })).await["total"], 2);
+        let js = call(&app, "journals", json!({})).await;
+        assert_eq!(js[0]["label"], "Renamed the author Jo Smith to Joanna Smith");
+        let done = wait(&app, &call(&app, "journal_undo", json!({ "id": js[0]["id"] })).await).await;
+        assert_eq!(done["result"]["state"], "undone", "{done}");
+        assert_eq!(call(&app, "models_query", json!({ "scope": "all", "q": "author:\"jo smith\"" })).await["total"], 2);
+        assert!(app.call("values_rename", json!({ "kind": "tags", "from": "monster", "to": "a, b" })).await.is_err());
         // a colour for all of them, then none
         let colour_of = |app: &Arc<App>, ids: &[Value]| {
             let (app, ids) = (app.clone(), ids.to_vec());

@@ -21,6 +21,105 @@ export function collectionOf(scope, overview) {
   return overview?.collections?.find((c) => c.id === id) || { id, name: null, count: 0, gone: true };
 }
 
+/** The saved search a browse scope shows (`search:<id>`), from the overview. */
+export function savedSearchOf(scope, overview) {
+  if (!scope?.startsWith("search:")) return null;
+  const id = scope.slice(7);
+  return overview?.searches?.find((x) => x.id === id) || { id, name: null, q: "", scope: "all", count: 0, gone: true };
+}
+
+/** A place's name in words, for saying where a saved search looks: "All models",
+ *  "Home and garden › Kitchen", a collection's name. */
+export function scopeLabel(scope, overview) {
+  if (!scope || scope === "all") return "All models";
+  if (scope === "unsorted") return "Unsorted";
+  if (scope === "favs") return "Starred";
+  if (scope.startsWith("coll:")) return overview?.collections?.find((c) => c.id === scope.slice(5))?.name || "a collection that's gone";
+  if (scope.startsWith("schema:")) {
+    const [id, ...values] = scope.slice(7).split("/").map(decodeURIComponent);
+    const schema = overview?.schemas?.find((x) => x.id === id);
+    if (!schema) return "a category that's gone";
+    let node = { children: schema.tree || [] };
+    for (const v of values) {
+      node = node?.children?.find((n) => n.value.toLowerCase() === v.toLowerCase());
+      if (!node) return `${[schema.name, ...values].join(" › ")} (gone)`;
+    }
+    return [schema.name, ...values].join(" › ");
+  }
+  return "All models";
+}
+
+/** Whether a saved search's place is still there. */
+export const placeGone = (scope, overview) => / \(gone\)$|that's gone$/.test(scopeLabel(scope, overview));
+
+/** Delete a saved search (no question: Undo in the message, as for a collection). */
+export async function deleteSavedSearch(sv) {
+  try {
+    const gone = await api("search_delete", { id: sv.id });
+    if (ui.get().route === `browse:search:${sv.id}`) location.hash = routeHash("browse:all");
+    await loadOverview();
+    undoable(`Deleted the saved search ${sv.name}.`, async () => {
+      await api("search_restore", { search: gone });
+      await loadOverview();
+    });
+  } catch (e) { toast(e.message || String(e), 6000); }
+}
+
+/** A saved search's menu: on its menu row (right-click) and its page's ⋯. */
+export function savedSearchItems(sv) {
+  const ro = writableNow() ? false : "The library is read-only.";
+  return [
+    { id: "search-edit", label: "Edit saved search…", icon: "edit", disabled: ro, run: () => ui.set({ dialog: { type: "saved-search", search: sv } }) },
+    { id: "search-delete", label: "Delete saved search", sub: "Only the search: no models change", icon: "trash", danger: true, disabled: ro, run: () => deleteSavedSearch(sv) },
+  ];
+}
+
+/** Save… from the search note (`q` and `scope`: the search as it is), or Edit
+ *  saved search… (`search`). */
+export function SavedSearchDialog({ search = null, q = "", scope = "all" }) {
+  const overview = ui.get().overview;
+  const [name, setName] = useState(search?.name || q);
+  const [text, setText] = useState(search?.q || q);
+  const from = search?.scope || scope;
+  const [where, setWhere] = useState(search && placeGone(from, overview) ? "all" : from);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const places = [...new Set([from, "all"])];
+  const submit = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      if (search) {
+        const was = { name: search.name, q: search.q, scope: search.scope };
+        await api("search_update", { id: search.id, name, q: text, scope: where });
+        await loadOverview();
+        close();
+        undoable(`Changed the saved search ${was.name}.`, async () => { await api("search_update", { id: search.id, ...was }); await loadOverview(); });
+      } else {
+        const r = await api("search_create", { name, q: text, scope: where });
+        await loadOverview();
+        close();
+        ui.set({ q: "" });
+        location.hash = routeHash(`browse:search:${r.id}`);
+        undoable(`Saved the search ${r.name}. It's under Collections in the menu.`, async () => {
+          await api("search_delete", { id: r.id });
+          if (ui.get().route === `browse:search:${r.id}`) location.hash = routeHash("browse:all");
+          await loadOverview();
+        });
+      }
+    } catch (e) { setError(e.message || String(e)); } finally { setBusy(false); }
+  };
+  return html`<${Dialog} title=${search ? `Edit ${search.name}` : "Save this search"} id="saved-search-dialog" onSubmit=${submit} busy=${busy || !name.trim() || !text.trim()} error=${error}
+      submitLabel=${search ? "Save" : "Save search"}>
+    ${search ? null : html`<p class="muted">It's kept under Collections in the menu and finds what matches whenever you open it.</p>`}
+    <label class="field-block"><span>Name</span><input type="text" id="saved-search-name" required maxlength="80" value=${name} onInput=${(e) => setName(e.target.value)} /></label>
+    <label class="field-block"><span>Search for</span><input type="text" id="saved-search-q" required value=${text} spellcheck="false" autocomplete="off" onInput=${(e) => setText(e.target.value)} /></label>
+    ${places.length > 1 ? html`<div class="field-block" role="radiogroup" aria-label="Search in" id="saved-search-where"><span>Search in</span>
+      ${places.map((p) => html`<label class="check-row long" key=${p}><input type="radio" name="saved-search-where" value=${p} checked=${where === p} onChange=${() => setWhere(p)} /><span>${scopeLabel(p, overview)}</span></label>`)}
+    </div>` : html`<p class="muted" id="saved-search-where">Searches in ${scopeLabel(from, overview)}.</p>`}
+  <//>`;
+}
+
 /** The models' ids changed (they got a model.json): selection and stars follow. */
 function follow(r) {
   const map = {};

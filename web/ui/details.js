@@ -10,6 +10,7 @@ import { ui } from "./state.js";
 import { routeHash, schemaScope } from "./context.js";
 import { api, saveDetails, recorded, toast } from "./library.js";
 import { ActionRow } from "./actions.js";
+import { valueMenu } from "./values.js";
 import { EditBox } from "./layout.js";
 import { Icon } from "./icons.js";
 import { TypeTag } from "./filetypes.js";
@@ -56,11 +57,15 @@ export function showTagged(tag) {
 /** Tags as links. A model's own tags show every model with the tag; `onPick`
  *  instead does something else with it (a place's summary narrows the place). */
 export function TagLinks({ tags, id = null, onPick = null, on = [] }) {
+  // right-click: the link's own action, then Rename tag… (values.js)
+  const menu = (e, t) => valueMenu(e, "tags", t, onPick
+    ? { label: on.includes(t) ? "Show them all again" : `Only tagged #${t}`, run: () => onPick(t) }
+    : { label: `Show every model tagged #${t}`, run: () => showTagged(t) });
   return html`<span class="tag-links" id=${id}>${tags.map((t) => onPick
     ? html`<button type="button" key=${t} class="chip tag-link" aria-pressed=${on.includes(t) ? "true" : "false"} title=${on.includes(t) ? "Show them all again" : `Only tagged ${t}`}
-        onClick=${() => onPick(t)}>#${t}</button>`
+        onClick=${() => onPick(t)} onContextMenu=${(e) => menu(e, t)}>#${t}</button>`
     : html`<a key=${t} class="chip tag-link" href=${routeHash("browse:all")} title=${`Show every model tagged ${t}`}
-        onClick=${(e) => { e.preventDefault(); showTagged(t); }}>#${t}</a>`)}</span>`;
+        onClick=${(e) => { e.preventDefault(); showTagged(t); }} onContextMenu=${(e) => menu(e, t)}>#${t}</a>`)}</span>`;
 }
 
 const placeText = (overview, m) => {
@@ -154,17 +159,24 @@ export function SelectedPanel({ models, ctx = { page: "browse" } }) {
 
 /** Nothing selected: what the place shown holds (`result`: the search's answer). */
 /** What a place holds. `here`: how many of them are filed at this level, when its subcategories are shown as tiles. */
-export function PlaceSummary({ name, result, here = null, onTag = null, tagsOn = [] }) {
+export function PlaceSummary({ name, result, here = null, onTag = null, tagsOn = [], onAuthor = null, authorsOn = [], about = null }) {
   if (!result) return null;
   const authors = result.facets?.authors || [];
   const tags = result.facets?.tags || [];
   return html`<div class="place-summary">
     <h2 class="insp-title">${name}</h2>
+    ${about ? html`<p class="muted" id="place-about">${about}</p>` : null}
     <p id="place-counts">${plural(result.total, "model", "models")}${result.bytes ? ` · ${size(result.bytes)}` : ""}</p>
     ${here !== null && result.total > here ? html`<p class="muted" id="place-here">${here === 0
       ? (result.total === 1 ? "It's in a subcategory." : `All ${result.total} are in its subcategories.`)
       : `${here} filed here, ${result.total - here} in its subcategories.`}</p>` : null}
-    ${authors.length ? html`<div class="insp-section"><h3>Authors</h3><ul class="insp-files">${authors.slice(0, 8).map((a) => html`<li key=${a.value}><span>${a.value}</span><span class="muted">${a.count}</span></li>`)}</ul></div>` : null}
+    ${authors.length ? html`<div class="insp-section"><h3>Authors</h3><ul class="insp-files" id="place-authors">${authors.slice(0, 8).map((a) => {
+      const on = authorsOn.includes(a.value);
+      const first = onAuthor ? { label: on ? "Show them all again" : `Only by ${a.value}`, run: () => onAuthor(a.value) } : null;
+      return html`<li key=${a.value}>${onAuthor ? html`<button type="button" class="linkish author-link" aria-pressed=${on ? "true" : "false"} title=${on ? "Show them all again" : `Only by ${a.value}`}
+          onClick=${() => onAuthor(a.value)} onContextMenu=${(e) => valueMenu(e, "authors", a.value, first)}>${a.value}</button>`
+        : html`<span onContextMenu=${(e) => valueMenu(e, "authors", a.value)}>${a.value}</span>`}<span class="muted">${a.count}</span></li>`;
+    })}</ul></div>` : null}
     ${tags.length ? html`<div class="insp-section"><h3>Tags</h3><div class="insp-chips"><${TagLinks} tags=${tags.slice(0, 12).map((t) => t.value)} onPick=${onTag} on=${tagsOn} /></div></div>` : null}
     <p class="muted insp-later">Select a model to see its details and files. Ctrl+A selects everything shown.</p>
   </div>`;

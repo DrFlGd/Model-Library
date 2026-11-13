@@ -16,7 +16,8 @@ use std::time::UNIX_EPOCH;
 pub const UNSORTED: &str = "Unsorted";
 // 2: preview summaries include source metadata and explicit cover mode.
 // 3: a generated preview used as the cover carries thumb_modified.
-const CACHE_FORMAT: u64 = 3;
+// 4: models carry `changed` (details edited or a file changed, the later).
+const CACHE_FORMAT: u64 = 4;
 
 #[derive(Clone, Debug)]
 pub struct Model {
@@ -104,7 +105,9 @@ fn read_model(lib: &Library, dir: &Path, schema: Option<&Schema>, cats: &[String
         Some(s) => s.parse_folder(&folder_name),
         None => schema::parse_folder_name("{name} ({author})", &folder_name),
     };
-    let files = model::list_files(dir);
+    let dated = model::list_files_dated(dir);
+    let newest_file = dated.iter().map(|f| f.2).max().unwrap_or(0);
+    let files: Vec<(String, u64)> = dated.into_iter().map(|(rel, size, _)| (rel, size)).collect();
     let mut summary = model::summarise(&files, &side);
     // Each preview URL/cache key includes the underlying file's modification
     // time, not just the model folder's time (nested edits leave that unchanged).
@@ -147,6 +150,12 @@ fn read_model(lib: &Library, dir: &Path, schema: Option<&Schema>, cats: &[String
     let moved = side["id"].is_string()
         && (side["schema"].as_str() != schema.map(|s| s.id.as_str())
             || (schema.is_some() && model::path_of(&side).as_deref() != Some(cats)));
+    let added = side["added"].as_str().map(String::from).unwrap_or_else(|| crate::library::iso_from_unix((dir_mtime / 1000) as i64));
+    let changed = [side["updated"].as_str().map(String::from), (newest_file > 0).then(|| crate::library::iso_from_unix((newest_file / 1000) as i64))]
+        .into_iter()
+        .flatten()
+        .max()
+        .unwrap_or_else(|| added.clone());
     let v = json!({
         "id": id,
         "rel": rel,
@@ -161,7 +170,9 @@ fn read_model(lib: &Library, dir: &Path, schema: Option<&Schema>, cats: &[String
         "source": side["source"],
         "license": side["license"],
         "fields": side["fields"].as_object().cloned().unwrap_or_default(),
-        "added": side["added"].as_str().map(String::from).unwrap_or_else(|| crate::library::iso_from_unix((dir_mtime / 1000) as i64)),
+        "added": added,
+        // the details edited or a file added or changed, whichever was last (sort "changed")
+        "changed": changed,
         "sidecar": side.get("id").is_some(),
         "moved": moved,
         "files": summary,
@@ -605,8 +616,41 @@ impl Index {
             .collect();
         match sort {
             "added" => hits.sort_by(|a, b| b.v["added"].as_str().cmp(&a.v["added"].as_str())),
+            "changed" => hits.sort_by(|a, b| b.v["changed"].as_str().cmp(&a.v["changed"].as_str())),
             "size" => {
                 hits.sort_by_key(|m| std::cmp::Reverse(m.v["files"]["bytes"].as_u64().unwrap_or(0)))
+            }
+            "files" => hits.sort_by_key(|m| std::cmp::Reverse(m.v["files"]["count"].as_u64().unwrap_or(0))),
+            // newest release first; undated last (then by name, as below)
+            "released" => {
+                hits.sort_by_cached_key(|m| fold(m.v["name"].as_str().unwrap_or("")));
+                hits.sort_by(|a, b| {
+                    let date = |m: &Model| m.v["released"].as_str().map(str::trim).filter(|d| !d.is_empty()).map(String::from);
+                    match (date(a), date(b)) {
+                        (Some(x), Some(y)) => y.cmp(&x),
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (None, None) => std::cmp::Ordering::Equal,
+                    }
+                });
+            }
+            // A to Z by the first author, then name; no author last
+            "author" => hits.sort_by_cached_key(|m| {
+                let first = m.v["authors"].as_array().and_then(|a| a.first()).and_then(Value::as_str).map(fold);
+                (first.is_none(), first.unwrap_or_default(), fold(m.v["name"].as_str().unwrap_or("")))
+            }),
+            "order" if place == "coll" => {
+                let order: HashMap<&str, usize> = colls
+                    .iter()
+                    .find(|c| c["id"].as_str() == Some(sub))
+                    .and_then(|c| c["models"].as_array())
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .enumerate()
+                    .map(|(i, id)| (id, i))
+                    .collect();
+                hits.sort_by_key(|m| order.get(m.id()).copied().unwrap_or(usize::MAX));
             }
             _ => hits.sort_by_cached_key(|m| fold(m.v["name"].as_str().unwrap_or(""))),
         }
@@ -669,7 +713,26 @@ impl Index {
                         .schema(s)
                         .is_some_and(|sc| fold(&sc.name).starts_with(want))
             }),
-            "kind" => m.v["files"]["kinds"].get(want).is_some(),
+            // a kind of file (model, slicer, image…) or a type (3mf, stl, zip…)
+            "kind" => m.v["files"]["kinds"].get(want).is_some() || m.v["files"]["exts"].get(want).is_some(),
+            // what needs tidying: missing:author, tags, source, licence, released, picture
+            "missing" => {
+                let empty = |v: &Value| match v {
+                    Value::Null => true,
+                    Value::String(s) => s.trim().is_empty(),
+                    Value::Array(a) => a.is_empty(),
+                    Value::Object(o) => o.values().all(|x| x.as_str().is_some_and(|s| s.trim().is_empty()) || x.is_null()),
+                    _ => false,
+                };
+                match MISSING.iter().find(|(names, _)| names.iter().any(|n| n.starts_with(want))) {
+                    Some((_, "picture")) => {
+                        let cover = &m.v["files"]["cover"];
+                        cover.is_null() || cover.as_str() == Some(crate::thumb::THUMB)
+                    }
+                    Some((_, key)) => empty(&m.v[*key]),
+                    None => false,
+                }
+            }
             "in" => has(&mut m.v["path"]
                 .as_array()
                 .into_iter()
@@ -692,6 +755,16 @@ impl Index {
         }
     }
 }
+
+/// The details `missing:` knows, by the words it takes (the start of one is enough).
+const MISSING: [(&[&str], &str); 6] = [
+    (&["author", "authors"], "authors"),
+    (&["tag", "tags"], "tags"),
+    (&["source", "link"], "source"),
+    (&["licence", "license"], "license"),
+    (&["released", "release", "date"], "released"),
+    (&["picture", "pictures", "photo", "image", "cover"], "picture"),
+];
 
 /// Words and `key:value` filters (values may be quoted: `faction:"blood angels"`), folded.
 pub fn parse_query(q: &str) -> (Vec<String>, Vec<(String, String)>) {
@@ -915,7 +988,7 @@ mod tests {
         m("Wargames/Kill Team/Loose Model", &["x.stl"]); // a model.json makes this folder a model above the usual depth
         std::fs::write(
             dir.join("Wargames/Kill Team/Loose Model/model.json"),
-            r#"{"id":"mloose","name":"Loose","tags":["café"]}"#,
+            r#"{"id":"mloose","name":"Loose","tags":["café"],"released":"2024-05-01"}"#,
         )
         .unwrap();
         m("Wargames/_drafts/Not A Model", &["x.stl"]);
@@ -1060,6 +1133,30 @@ mod tests {
         );
         // every author, most used first, for suggestions
         assert_eq!(ix.values()["authors"][0], "Jo Smith");
+        // the other sorts
+        assert_eq!(
+            names(ix.query("all", "", "author", 0, 50, &[])),
+            ["Warboss", "Hive Tyrant", "Rat Ogre", "Carnifex", "Loose", "Some Download"]
+        );
+        assert_eq!(names(ix.query("all", "", "files", 0, 2, &[])), ["Hive Tyrant", "Carnifex"]);
+        assert_eq!(names(ix.query("all", "", "released", 0, 2, &[])), ["Loose", "Carnifex"]);
+        let changed = ix.query("all", "", "changed", 0, 50, &[]);
+        assert!(changed["items"].as_array().unwrap().iter().all(|m| m["changed"].as_str().is_some_and(|c| c.len() >= 19)), "{changed:#}");
+        // a collection in its own order
+        assert_eq!(
+            names(ix.query_at("coll:c1", "", "order", 0, 50, &[], &colls, false)),
+            ["Loose", "Carnifex"]
+        );
+        // what needs tidying
+        assert_eq!(
+            names(ix.query("all", "missing:author", "name", 0, 50, &[])),
+            ["Carnifex", "Loose", "Some Download"]
+        );
+        assert_eq!(names(ix.query("all", "missing:tags missing:auth kind:3mf", "name", 0, 50, &[])), ["Carnifex"]);
+        assert_eq!(names(ix.query("all", "missing:released author:jo", "name", 0, 50, &[])), ["Hive Tyrant", "Rat Ogre"]);
+        assert_eq!(names(ix.query("all", "missing:picture hive", "name", 0, 50, &[])), Vec::<String>::new());
+        assert_eq!(names(ix.query("all", "missing:picture carni", "name", 0, 50, &[])), ["Carnifex"]);
+        assert!(names(ix.query("all", "missing:nonsense", "name", 0, 50, &[])).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

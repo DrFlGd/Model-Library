@@ -12,7 +12,7 @@ import { Icon } from "./icons.js";
 import { CatIcon, iconOf } from "./caticons.js";
 import { openMenu } from "./actions.js";
 import { categoryItems } from "./categories.js";
-import { collectionItems } from "./collections.js";
+import { collectionItems, savedSearchItems } from "./collections.js";
 import { NavHead, ThemeButton, useMedia, useNavFolded } from "./chrome.js";
 
 const NARROW = "(max-width: 900px)";
@@ -26,11 +26,13 @@ export function routeCategory(route) {
   return id ? { id, path: path.filter(Boolean) } : null;
 }
 
-function NavLink({ route, label, icon, count, current, depth = 0, toggle = null, menu = null, on = null, id = null }) {
+/** One row of the menu. `drop`: models dragged onto it are added (drag.js):
+ *  "favs" or "coll:<id>". */
+function NavLink({ route, label, icon, count, current, depth = 0, toggle = null, menu = null, on = null, id = null, title = null, drop = null }) {
   const active = on ?? current === route;
   return html`<li class="nav-row" style=${depth ? `--depth: ${depth}` : null}>
     ${toggle || html`<span class="nav-toggle-space"></span>`}
-    <a class=${`nav-link${active ? " active" : ""}`} id=${id} href=${routeHash(route)} title=${label} aria-label=${label} aria-current=${current === route ? "page" : null}
+    <a class=${`nav-link${active ? " active" : ""}`} id=${id} href=${routeHash(route)} title=${title || label} aria-label=${label} data-drop=${drop} aria-current=${current === route ? "page" : null}
       onClick=${() => ui.set({ navOpen: false })} onContextMenu=${menu ? (e) => openMenu(e, menu()) : null}
       onKeyDown=${menu ? (e) => { if ((e.shiftKey && e.key === "F10") || e.key === "ContextMenu") { e.preventDefault(); e.stopPropagation(); openMenu(e.currentTarget, menu()); } } : null}>
       ${typeof icon === "string" ? html`<span class="nav-icon">${Icon[icon](15)}</span>` : icon ? html`<span class="nav-icon">${icon}</span>` : null}<span class="nav-label">${label}</span>
@@ -164,7 +166,7 @@ export function Sidebar() {
         <${NavLink} route="import" label="Import" icon="inbox" current=${s.route} />
         <${NavLink} route="browse:all" label="All models" icon="grid" count=${ov?.all} current=${s.route} />
         <${NavLink} route="browse:unsorted" label="Unsorted" icon="box" count=${ov?.unsorted} current=${s.route} />
-        <${NavLink} route="browse:favs" label="Starred" icon="star" count=${ov?.starred} current=${s.route} />
+        <${NavLink} route="browse:favs" label="Starred" icon="star" count=${ov?.starred} current=${s.route} drop="favs" />
       </ul>
       <p class="nav-head">Categories</p>
       ${ov?.schemas?.length ? html`<ul class="nav-list" id="schema-tree">${ov.schemas.map((sc) => {
@@ -185,8 +187,10 @@ export function Sidebar() {
       })}</ul>` : html`<p class="muted nav-note">None yet.</p>`}
       ${s.library && !s.library.read_only ? html`<button type="button" class="ghost nav-add" id="new-schema" onClick=${() => ui.set({ dialog: { type: "new-schema" }, navOpen: false })}>${Icon.plus(14)} New category…</button>` : null}
       <p class="nav-head">Collections</p>
-      ${ov?.collections?.length ? html`<ul class="nav-list" id="collection-list">${ov.collections.map((c) => html`<${NavLink} key=${c.id} route=${`browse:coll:${c.id}`} label=${c.name}
-          icon="bookmark" count=${c.count} current=${s.route} menu=${() => collectionItems(c)} />`)}</ul>` : html`<p class="muted nav-note">None yet.</p>`}
+      ${ov?.collections?.length || ov?.searches?.length ? html`<ul class="nav-list" id="collection-list">${(ov.collections || []).map((c) => html`<${NavLink} key=${c.id} route=${`browse:coll:${c.id}`} label=${c.name}
+          icon="bookmark" count=${c.count} current=${s.route} menu=${() => collectionItems(c)} drop=${`coll:${c.id}`} />`)}
+        ${(ov.searches || []).map((x) => html`<${NavLink} key=${x.id} route=${`browse:search:${x.id}`} label=${x.name} title=${`Saved search: ${x.q}`}
+          icon="search" count=${x.count ?? ""} current=${s.route} menu=${() => savedSearchItems(x)} />`)}</ul>` : html`<p class="muted nav-note">None yet.</p>`}
       ${s.library && !s.library.read_only ? html`<button type="button" class="ghost nav-add" id="new-collection" onClick=${() => ui.set({ dialog: { type: "name-collection" }, navOpen: false })}>${Icon.plus(14)} New collection…</button>` : null}
       <ul class="nav-list nav-foot">
         <${NavLink} route="duplicates" label="Duplicates" icon="stack" current=${s.route} />

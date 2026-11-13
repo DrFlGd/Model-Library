@@ -285,6 +285,15 @@ button.tag-link { font-family: inherit; line-height: inherit; min-height: 0; }
 .card:hover { border-color: var(--graphite); }
 .card[aria-selected="true"], .row[aria-selected="true"] { border-color: var(--tool); box-shadow: 0 0 0 2px var(--tool); background: var(--sel); }
 .card:focus { outline: none; }
+/* dragging models (drag.js): the label under the pointer, where they'd land */
+html.dragging-models, html.dragging-models * { cursor: grabbing !important; user-select: none; }
+.drag-ghost { position: fixed; left: 0; top: 0; z-index: 1000; pointer-events: none; max-width: 260px; padding: 5px 10px; border-radius: var(--radius-s);
+  background: var(--ink); color: var(--white); font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: var(--shadow); }
+.nav-link.drop-on { background: var(--sel); outline: 2px solid var(--tool); outline-offset: -2px; }
+.card.drop-before { box-shadow: -5px 0 0 -1px var(--focus); }
+.card.drop-after { box-shadow: 5px 0 0 -1px var(--focus); }
+.row.drop-before { box-shadow: 0 -3px 0 0 var(--focus); }
+.row.drop-after { box-shadow: 0 3px 0 0 var(--focus); }
 .card:focus-visible, .row:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .card-name { margin-top: 8px; font-weight: 700; font-size: 13.5px; line-height: 1.25; }
 .card-sub { font-size: 12px; color: var(--graphite); line-height: 1.3; }
@@ -356,6 +365,10 @@ button.tag-link { font-family: inherit; line-height: inherit; min-height: 0; }
 .insp-files { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: 13px; max-height: 260px; overflow: auto; }
 .insp-files li { display: flex; gap: 8px; align-items: baseline; }
 .insp-files li span:first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* a place's authors narrow it, as its tags do; right-click renames */
+.insp-files li .author-link { display: block; flex: 1; min-width: 0; text-align: left; overflow-wrap: anywhere; color: var(--ink); text-decoration: none; }
+.insp-files li .author-link:hover { text-decoration: underline; }
+.insp-files li .author-link[aria-pressed="true"] { font-weight: 700; text-decoration: underline; }
 .insp-files .muted { white-space: nowrap; font-size: 12px; }
 .insp-kinds { display: flex; flex-wrap: wrap; gap: 6px; }
 .nav-sub { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
@@ -806,6 +819,11 @@ button.tag-link { font-family: inherit; line-height: inherit; min-height: 0; }
 .search-note > span:first-child { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .search-note a { color: var(--focus); }
 .search-clear { padding: 3px 8px; }
+/* inside a model: the folders to move to, the files about to be deleted */
+.move-folder-list { max-height: 300px; overflow: auto; gap: 2px; }
+.delete-file-list { margin: 0; padding-left: 18px; max-height: 200px; overflow: auto; font-size: 13.5px; overflow-wrap: anywhere; }
+/* a saved search's words in its place summary */
+.saved-q { font: 12.5px/1.4 var(--font-mono); padding: 0 4px; border-radius: var(--radius-xs); background: var(--panel); color: var(--ink); overflow-wrap: anywhere; }
 .sort-page > .search-note { margin: 0; }
 .sort-page > * { flex-shrink: 0; }
 .sort-page > .sw-filters { align-self: flex-start; flex-wrap: wrap; }

@@ -1283,7 +1283,7 @@ async def ui_pass3(pg):
     names = await pg.eval_on_selector_all(".results .row .row-name", "els => els.map(e => e.textContent.trim().toLowerCase())")
     await pg.click('.view-switch [data-view="grid"]')
     check("one view switcher and one sort menu, and the list's headers sort",
-          switch == [["grid", True, "Grid", "Grid"], ["list", True, "List", "List"]] and sorts == ["Name", "Recently added", "Largest first"]
+          switch == [["grid", True, "Grid", "Grid"], ["list", True, "List", "List"]] and sorts == ["Name", "Recently added", "Largest first", "Author", "Released", "Recently changed", "Most files"]
           and len(sizes) > 2 and names == sorted(names), (switch, sorts, sizes[:4], names[:4]))
 
     # 47. a search carried into another place says so, and can be cleared there
@@ -2946,6 +2946,187 @@ async def group6(pg):
         shutil.rmtree(library / f"Household/Kitchen/{name} (Tess Ter)", ignore_errors=True)
     await api(pg, "library_scan", {"full": False})
 
+async def group7(pg):
+    """The organising round (docs/PLAN.md, "Organising round"): more sorts, missing:
+    filters, saved searches, renaming tags and authors, collections in your own
+    order with dragging, and tidying the files inside a model."""
+    side = lambda i, name, authors, tags, released=None: json.dumps({"format": 1, "id": f"morganise000{i}", "name": name, "authors": [{"name": a} for a in authors],
+        "tags": tags, "schema": "household", "path": ["Kitchen"], **({"released": released} if released else {})})
+    model_folder("Household/Kitchen/Org one", {"model.json": side(1, "Org one", ["Kit Walker"], ["petg"], "2020-01-01"), "a.stl": cube(4), "photo.png": PNG})
+    model_folder("Household/Kitchen/Org two", {"model.json": side(2, "Org two", ["K. Walker"], ["PETG"], "2024-06-01"), "b.stl": cube(4), "c.stl": cube(3), "d.stl": cube(2)})
+    model_folder("Household/Kitchen/Org three", {"model.json": side(3, "Org three", [], []), "e.stl": cube(4)})
+    await api(pg, "library_scan", {"full": False})
+    one, two, three = "morganise0001", "morganise0002", "morganise0003"
+    names = lambda: labels_of(pg, ".results [data-model] .card-name")
+
+    # G: more sorts, from the sort menu
+    await pg.goto(B + "#/browse/all")
+    await pg.reload()
+    await search(pg, "org")
+    await pg.click("#sort")
+    sorts = await labels_of(pg, "#context-menu .menu-item")
+    await pg.click("#context-menu [data-action=sort-files]")
+    await pg.wait_for_function("() => document.querySelector('#sort')?.dataset.sort === 'files'")
+    await pg.wait_for_timeout(300)
+    by_files = await names()
+    await pg.click("#sort")
+    await pg.click("#context-menu [data-action=sort-released]")
+    await pg.wait_for_function("() => document.querySelector('#sort')?.dataset.sort === 'released'")
+    await pg.wait_for_timeout(300)
+    by_released = await names()
+    await pg.click("#sort")
+    await pg.click("#context-menu [data-action=sort-name]")
+    check("the sort menu has Author, Released, Recently changed and Most files too, and they sort",
+          sorts == ["Name", "Recently added", "Largest first", "Author", "Released", "Recently changed", "Most files"]
+          and by_files[0] == "Org two" and by_released[:2] == ["Org two", "Org one"] and by_released[-1] == "Org three", (sorts, by_files, by_released))
+
+    # H: missing:author, from the ? menu too
+    n = await search(pg, "org missing:author")
+    shown = await names()
+    await pg.click("#search-help")
+    offered = await labels_of(pg, "#context-menu .menu-item")
+    await pg.keyboard.press("Escape")
+    check("missing:author finds the models without one, and the ? menu offers it",
+          n.startswith("1 ") and shown == ["Org three"] and any(o.startswith("missing:author") for o in offered), (n, shown, offered))
+
+    # D: Save… keeps the search under Collections, and it narrows further when typed in
+    await search(pg, "org kind:stl")
+    await pg.click("#search-save")
+    await pg.wait_for_selector("#saved-search-dialog")
+    await pg.fill("#saved-search-name", "Org models")
+    await pg.click("#saved-search-dialog button[type=submit]")
+    await pg.wait_for_function("() => location.hash.startsWith('#/browse/search/')")
+    await pg.wait_for_function("() => /\\d/.test(document.querySelector('#browse-count')?.textContent || '')")
+    found = await pg.inner_text("#browse-count")
+    row = await labels_of(pg, "#collection-list .nav-link .nav-label")
+    about = await pg.inner_text("#place-about")
+    await pg.screenshot(path=str(out / "70-saved-search.png"))
+    narrowed = await search(pg, "two")
+    await pg.fill("#search", "")
+    await pg.wait_for_timeout(300)
+    await pg.click("#saved-search-menu")
+    await pg.click("#context-menu [data-action=search-delete]")
+    await pg.wait_for_function("() => location.hash === '#/browse/all'")
+    gone = len((await api(pg, "library_overview")).get("searches", []))
+    await pg.click(".toast button:has-text('Undo')")
+    await pg.wait_for_timeout(600)
+    back = [x["name"] for x in (await api(pg, "library_overview")).get("searches", [])]
+    check("Save… keeps a search under Collections; typing narrows it; Delete saved search has Undo",
+          found.startswith("3 ") and "Org models" in row and "org kind:stl" in about and narrowed.startswith("1 ") and gone == 0 and back == ["Org models"],
+          (found, row, about, narrowed, gone, back))
+    for x in (await api(pg, "library_overview")).get("searches", []):
+        await api(pg, "search_delete", {"id": x["id"]})
+
+    # B: a tag merged into the library's own spelling from a chip's right-click
+    await pg.goto(B + "#/browse/all")
+    await pg.reload()
+    await search(pg, "org")
+    await pg.click(".filters .chip-btn[data-filter='tag:petg']", button="right")
+    await pg.click("#context-menu [data-action=value-rename]")
+    await pg.wait_for_selector("#rename-value-dialog")
+    await pg.fill("#rename-value-to", "Petg")
+    await pg.wait_for_selector("#rename-value-merge")
+    label = await pg.inner_text("#rename-value-dialog button[type=submit]")
+    await pg.screenshot(path=str(out / "71-merge-tag.png"))
+    await pg.click("#rename-value-dialog button[type=submit]")
+    await pg.wait_for_selector("#rename-value-dialog", state="detached")
+    tags = sorted(t for m in (await api(pg, "models_query", {"scope": "all", "q": "org"}))["items"] for t in m["tags"])
+    # an author renamed from the place summary's right-click
+    await clear_selection(pg)
+    await pg.click("#place-authors .author-link:text-is('K. Walker')", button="right")
+    await pg.click("#context-menu [data-action=value-rename]")
+    await pg.fill("#rename-value-to", "Kit Walker")
+    await pg.click("#rename-value-dialog button[type=submit]")
+    await pg.wait_for_selector("#rename-value-dialog", state="detached")
+    authors = sorted(a for m in (await api(pg, "models_query", {"scope": "all", "q": "org"}))["items"] for a in m["authors"])
+    await pg.click(".toast button:has-text('Undo')")
+    await pg.wait_for_timeout(1500)
+    undone = (await api(pg, "model_get", {"id": two}))["authors"]
+    check("a tag spelt two ways becomes one (Merge), an author is renamed, Undo puts it back",
+          label == "Merge" and tags == ["PETG", "PETG"] and authors == ["Kit Walker", "Kit Walker"] and undone == ["K. Walker"], (label, tags, authors, undone))
+
+    # C: a collection in your own order: drag a card, Alt+↓, and drag onto the menu
+    coll = await api(pg, "collection_create", {"name": "Org order", "ids": [one, two]})
+    await pg.goto(B + f"#/browse/collection/{coll['id']}")
+    await pg.reload()
+    await pg.wait_for_selector(".results [data-model]")
+    sort_label = await pg.inner_text("#sort")
+    first = await names()
+    cards = await pg.query_selector_all(".results [data-model]")
+    a, b = await cards[1].bounding_box(), await cards[0].bounding_box()
+    await pg.mouse.move(a["x"] + 40, a["y"] + 40)
+    await pg.mouse.down()
+    await pg.mouse.move(a["x"] + 55, a["y"] + 55, steps=3)
+    await pg.mouse.move(b["x"] + 10, b["y"] + 40, steps=8)
+    mark = await pg.locator(".card.drop-before").count()
+    await pg.mouse.up()
+    await pg.wait_for_function("() => document.querySelector('.results [data-model] .card-name')?.textContent === 'Org two'")
+    dragged = await names()
+    await pg.click(".results [data-model]:has(.card-name:text-is('Org two'))")
+    await pg.keyboard.press("Alt+ArrowDown")
+    await pg.wait_for_function("() => document.querySelector('.results [data-model] .card-name')?.textContent === 'Org one'")
+    keyed = (await api(pg, "collection_get", {"id": coll["id"]}))["models"]
+    await clear_selection(pg)
+    await pg.goto(B + "#/browse/all")
+    await search(pg, "org three")
+    card = await pg.query_selector(".results [data-model]")
+    row = await pg.query_selector(f"[data-drop='coll:{coll['id']}']")
+    cb, rb = await card.bounding_box(), await row.bounding_box()
+    await pg.mouse.move(cb["x"] + 40, cb["y"] + 40)
+    await pg.mouse.down()
+    await pg.mouse.move(cb["x"] + 55, cb["y"] + 55, steps=3)
+    await pg.mouse.move(rb["x"] + 30, rb["y"] + rb["height"] / 2, steps=10)
+    lit = await pg.locator(".nav-link.drop-on").count()
+    await pg.mouse.up()
+    await pg.wait_for_timeout(800)
+    added = (await api(pg, "collection_get", {"id": coll["id"]}))["models"]
+    check("a collection opens in Your order; a card dragged or Alt+↓ moves; a card dropped on the menu row joins it",
+          "Your order" in sort_label and first == ["Org one", "Org two"] and mark == 1 and dragged == ["Org two", "Org one"]
+          and keyed == [one, two] and lit == 1 and added == [one, two, three], (sort_label, first, mark, dragged, keyed, lit, added))
+    await api(pg, "collection_delete", {"id": coll["id"]})
+
+    # A: inside a model: F2 renames a file, New folder… takes the selection, Delete… and Undo
+    await pg.goto(B + f"#/model/{two}")
+    await pg.reload()
+    await pg.wait_for_timeout(800)
+    if not await pg.locator("[data-file='b.stl']").count():
+        await pg.keyboard.press("[")
+    await pg.wait_for_selector("[data-file='b.stl']")
+    await pg.click("[data-file='b.stl']")
+    await pg.keyboard.press("F2")
+    await pg.wait_for_selector("#file-rename-dialog")
+    selected = await pg.evaluate("(() => { const b = document.querySelector('#file-rename-name'); return b.value.slice(b.selectionStart, b.selectionEnd); })()")
+    await pg.keyboard.type("base")
+    await pg.click("#file-rename-dialog button[type=submit]")
+    await pg.wait_for_selector("[data-file='base.stl']")
+    await pg.click("[data-file='c.stl'] ~ input, [data-file='c.stl']", modifiers=["Control"])
+    await pg.click("[data-file='d.stl']", modifiers=["Control"])
+    await pg.click("[data-file='d.stl']", button="right")
+    await pg.click("#context-menu [data-action=file-new-folder]")
+    await pg.wait_for_selector("#file-new-folder-dialog")
+    await pg.fill("#file-new-folder-name", "Spares")
+    ticked = await pg.is_checked("#file-new-folder-move input")
+    await pg.click("#file-new-folder-dialog button[type=submit]")
+    await pg.wait_for_selector("[data-file='Spares/c.stl']")
+    files = sorted(f["rel"] for f in (await api(pg, "model_get", {"id": two}))["files_list"])
+    await pg.click("[data-dir='Spares']", button="right")
+    await pg.click("#context-menu [data-action=file-delete]")
+    await pg.wait_for_selector("#file-delete-dialog")
+    await pg.screenshot(path=str(out / "72-delete-files.png"))
+    await pg.click("#file-delete-dialog button[type=submit]")
+    await pg.wait_for_selector("[data-dir='Spares']", state="detached")
+    deleted = sorted(f["rel"] for f in (await api(pg, "model_get", {"id": two}))["files_list"])
+    await pg.click(".toast button:has-text('Undo')")
+    await pg.wait_for_selector("[data-file='Spares/c.stl']")
+    restored = sorted(f["rel"] for f in (await api(pg, "model_get", {"id": two}))["files_list"])
+    check("inside a model: F2 renames (the name without its type selected), New folder… takes the selection, Delete… keeps them for Undo",
+          selected == "b" and ticked and files == ["Spares/c.stl", "Spares/d.stl", "base.stl"] and deleted == ["base.stl"] and restored == files,
+          (selected, ticked, files, deleted, restored))
+    for name in ["Org one", "Org two", "Org three"]:
+        shutil.rmtree(library / f"Household/Kitchen/{name}", ignore_errors=True)
+    await api(pg, "library_scan", {"full": False})
+
+
 async def main():
     server = start_server()
     try:
@@ -3007,6 +3188,7 @@ async def main():
             await review5(pg)
             await group5(pg)
             await group6(pg)
+            await group7(pg)
 
             # 3. renaming the library
             await pg.click('.sidebar a[href="#/settings"]')
