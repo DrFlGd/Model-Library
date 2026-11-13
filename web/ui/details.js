@@ -14,6 +14,7 @@ import { EditBox } from "./layout.js";
 import { Icon } from "./icons.js";
 import { TypeTag } from "./filetypes.js";
 import { colourName } from "./colours.js";
+import { CollectionLinks } from "./collections.js";
 
 export const KIND_LABEL = { model: ["3D file", "3D files"], slicer: ["slicer file", "slicer files"], image: ["picture", "pictures"], doc: ["document", "documents"], video: ["video", "videos"], archive: ["archive", "archives"], other: ["other", "other"] };
 const KIND_ICON = { model: "box", slicer: "stack", image: "image", doc: "file", video: "image", archive: "archive", other: "file" };
@@ -105,6 +106,7 @@ export function ModelDetails({ id, empty = null, ctx = { page: "browse" }, row =
       <${EditBox} id="details-authors" label="Authors" caption="Authors" placeholder="Authors, separated by commas" value=${m.authors.join(", ")} off=${s.readOnly} onSave=${save("authors")} />
       <${EditBox} id="details-tags" label="Tags" caption="Tags" placeholder="Tags, separated by commas" value=${(m.tags || []).join(", ")} off=${s.readOnly} onSave=${save("tags")} />
       ${m.tags?.length ? html`<div class="edit-row tag-links-row"><span></span><${TagLinks} tags=${m.tags} id="details-tag-links" /></div>` : null}
+      ${m.collections?.length ? html`<div class="edit-row tag-links-row"><span></span><${CollectionLinks} list=${m.collections} id="details-collections" /></div>` : null}
     </div>
     <p class="insp-sub panel-place" id="details-place">${Icon.layers(13)} <${PlaceLinks} m=${m} overview=${s.overview} /></p>
     ${row ? html`<${ActionRow} targets=${[m]} ctx=${ctx} idPrefix="details" />` : null}

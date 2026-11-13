@@ -112,7 +112,7 @@ export function ModelPage({ id }) {
     const l = letter(e);
     if (e.key === "F2") { e.preventDefault(); const ok = writable(); if (ok === true) openDetails(true); else toast(ok); }
     else if (l === "e") { e.preventDefault(); const ok = writable(); if (ok === true) openDetails(); else toast(ok); }
-    else if (l === "m" || l === "s") { e.preventDefault(); runKey(MODEL_ACTIONS, l.toUpperCase(), [m], CTX); }
+    else if (l === "m" || l === "s" || l === "c") { e.preventDefault(); runKey(MODEL_ACTIONS, l.toUpperCase(), [m], CTX); }
   });
   const src = m ? { kind: "model", id: m.id, rel: m.rel, model: m } : null;
   const picking = useFileSelection(src, m);

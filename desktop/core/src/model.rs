@@ -142,6 +142,27 @@ pub fn summarise(files: &[(String, u64)], sidecar: &Value) -> Value {
     })
 }
 
+/// A model.json that can't be read is never written over: it's kept beside the
+/// new one as `model.json.broken` (then `-2`, `-3`…). Returns where it went.
+pub fn keep_broken(dir: &Path) -> Result<Option<std::path::PathBuf>> {
+    let p = dir.join(SIDECAR);
+    let readable = std::fs::read(&p)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .is_some_and(|v| v.is_object());
+    if !p.is_file() || readable {
+        return Ok(None);
+    }
+    let mut to = dir.join("model.json.broken");
+    let mut n = 2;
+    while to.exists() {
+        to = dir.join(format!("model.json.broken-{n}"));
+        n += 1;
+    }
+    std::fs::rename(&p, &to)?;
+    Ok(Some(to))
+}
+
 /// The sidecar, or {} when the folder has none (or it isn't valid JSON).
 pub fn read_sidecar(dir: &Path) -> Value {
     read_json_object(&dir.join(SIDECAR))
@@ -227,6 +248,7 @@ pub fn update(dir: &Path, patch: &Value, defaults: &Value) -> Result<Value> {
     let mut side = read_sidecar(dir);
     let now = crate::library::now();
     if side.get("id").and_then(Value::as_str).is_none() {
+        keep_broken(dir)?;
         side["format"] = json!(FORMAT);
         side["id"] = match defaults["id"].as_str() {
             Some(id) if crate::library::valid_id(id).is_ok() => json!(id),

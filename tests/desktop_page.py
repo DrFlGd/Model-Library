@@ -49,6 +49,10 @@ shown, undone; sorted on Import).
 Group 4: a 7z and a RAR unfold into their files (a big one opened once as a job,
 a locked one asking for its password), Extract archive… for a 7z, Compress to
 ZIP… for selected files, and Make a model… packed into one ZIP, with Undo.
+Group 5: collections (Add to collection with C, a collection's page, Remove
+and Undo, links in a model's details, collection: in search, rename and delete
+undone) and the health check (a quick check, reading every file, leftovers moved
+to Unsorted, an empty model deleted).
 Writes <out>/library-info.json and <out>/library.zip for the cross-platform check.
 """
 import argparse
@@ -1021,8 +1025,8 @@ async def ui_pass(pg):
     await pg.keyboard.press("Escape")
     check("the command bar and the right-click menu have the same actions, in the same order",
           row == ["Open", "Edit details…", "Move to category…"] and bar_count == "1 model selected"
-          and menu == ["Open", "Edit details…", "Move to category…", "Star", "Show in folder", "Delete model…", "Compress to ZIP…", "Extract archive…", "Make a new preview", "Copy folder path"]
-          and more == ["Star", "Show in folder", "Delete model…", "Compress to ZIP…", "Extract archive…", "Make a new preview", "Copy folder path"], (row, bar_count, menu, more))
+          and menu == ["Open", "Edit details…", "Move to category…", "Star", "Show in folder", "Add to collection…", "Delete model…", "Compress to ZIP…", "Extract archive…", "Make a new preview", "Copy folder path"]
+          and more == ["Star", "Show in folder", "Add to collection…", "Delete model…", "Compress to ZIP…", "Extract archive…", "Make a new preview", "Copy folder path"], (row, bar_count, menu, more))
 
     # 34. keys: arrows and Shift, Ctrl+A, Esc, E, M, S, Ctrl+Z
     n = int((await count(pg)).split()[0])
@@ -2674,6 +2678,100 @@ async def review5(pg):
     check("text pages have the plain sheet, not the grid", grid == ["drafting", "none"], grid)
 
 
+async def group5(pg):
+    """Collections and the health check (docs/PLAN.md, "Collections and the health check")."""
+    # two models put in a new collection from Add to collection (C)
+    await pg.goto(B + "#/browse/all")
+    await count(pg)
+    cards = pg.locator(".results .card")
+    picked = [await cards.nth(i).inner_text() for i in range(2)]
+    await cards.nth(0).click()
+    await cards.nth(1).click(modifiers=["Control"])
+    await pg.keyboard.press("c")
+    await pg.wait_for_selector("#collect-dialog")
+    await pg.fill("#collect-new", "Print next")
+    await pg.click("#collect-dialog button[type=submit]")
+    await pg.wait_for_selector("#collection-list .nav-link")
+    row = await labels_of(pg, "#collection-list .nav-link")
+    stored = [json.loads(f.read_text()) for f in (library / "_library/collections").glob("*.json")]
+    check("Add to collection (C) makes a collection with the models chosen, listed in the menu with its count",
+          len(row) == 1 and row[0].startswith("Print next") and row[0].endswith("2") and len(stored) == 1 and len(stored[0]["models"]) == 2, (row, stored))
+    # its page; Remove from it, and Ctrl+Z puts the model back
+    await pg.click("#collection-list .nav-link")
+    await pg.wait_for_function("() => document.querySelector('#browse-count')?.textContent === '2 models'")
+    where = pg.url.split("#")[1]
+    await pg.locator(".results .card").first.click(button="right")
+    await pg.click('#context-menu [data-action="uncollect"]')
+    await pg.wait_for_function("() => document.querySelector('#browse-count')?.textContent === '1 model'")
+    await pg.keyboard.press("Control+z")
+    await pg.wait_for_function("() => document.querySelector('#browse-count')?.textContent === '2 models'")
+    check("a collection has its own page; Remove from it takes a model off, and Ctrl+Z puts it back", where.startswith("/browse/collection/c"), where)
+    # a model's details link to its collections
+    await pg.locator(".results .card").first.click()
+    await open_tab(pg, "details")
+    await pg.wait_for_selector("#details-collections .collection-link")
+    link = (await pg.inner_text("#details-collections .collection-link")).strip()
+    await clear_selection(pg)
+    # collection: in a search, anywhere
+    await pg.goto(B + "#/browse/all")
+    found = await search(pg, 'collection:"print next"')
+    await search(pg, "")
+    check("a model's details link to its collections, and collection:\"…\" finds their models anywhere", link == "Print next" and found == "2 models", (link, found))
+    await pg.screenshot(path=str(out / "60-collection.png"))
+    # renamed and deleted from its menu row; the delete is undone
+    await pg.click("#collection-list .nav-link", button="right")
+    await pg.click('#context-menu [data-action="collection-rename"]')
+    await pg.fill("#collection-name", "To print")
+    await pg.click("#collection-name-dialog button[type=submit]")
+    await pg.wait_for_selector("#collection-list .nav-link:has-text('To print')")
+    await pg.click("#collection-list .nav-link", button="right")
+    await pg.click('#context-menu [data-action="collection-delete"]')
+    await pg.wait_for_selector("#collection-list", state="detached")
+    gone = not any((library / "_library/collections").glob("*.json"))
+    await pg.keyboard.press("Control+z")
+    await pg.wait_for_selector("#collection-list .nav-link:has-text('To print')")
+    back = json.loads(next((library / "_library/collections").glob("*.json")).read_text())
+    check("a collection is renamed and deleted from its menu, and the delete is undone with its models", gone and back["name"] == "To print" and len(back["models"]) == 2, back)
+
+    # the health check: a leftover and an empty model (quick), a cut-short STL (reading every file)
+    put(library / "Unsorted/.importing-Gone/x.stl")
+    (library / "Unsorted/Empty one").mkdir(parents=True)
+    (library / "Unsorted/Empty one/model.json").write_text('{"format": 1, "id": "mempty0000001", "name": "Empty one"}')
+    (library / "Unsorted/Cut short").mkdir(parents=True)
+    (library / "Unsorted/Cut short/cut.stl").write_bytes(b"\0" * 80 + (5).to_bytes(4, "little") + b"\1" * 100)
+    await api(pg, "library_scan", {"full": False})
+    await pg.goto(B + "#/health")
+    await pg.wait_for_selector("#health-check")
+    if await pg.is_checked("#health-deep"):
+        await pg.click("#health-deep")
+    await pg.click("#health-check")
+    await pg.wait_for_selector("#health-summary[data-checked]", timeout=60000)
+    kinds = await pg.eval_on_selector_all(".health-group", "els => els.map(e => e.dataset.kind)")
+    check("a quick check finds a leftover of a stopped copy and an empty model, not files it didn't read",
+          "leftovers" in kinds and "empty" in kinds and "unreadable" not in kinds, kinds)
+    await pg.click("#health-deep")
+    await pg.click("#health-check")
+    await pg.wait_for_selector("#health-unreadable", timeout=120000)
+    cut = await pg.inner_text("#health-unreadable .health-items")
+    order = await pg.eval_on_selector_all(".health-group", "els => els.map(e => e.dataset.kind)")
+    check("reading every file finds a cut-short STL, and the most serious kinds come first",
+          "Cut short" in cut and "cut short" in cut and order.index("unreadable") < order.index("empty"), (cut, order))
+    await pg.screenshot(path=str(out / "61-health.png"), full_page=True)
+    # leftovers go to Unsorted after asking; an empty model is deleted with the usual dialog
+    await pg.click("#health-fix-leftovers")
+    await pg.click("#ask-dialog button[type=submit]")
+    await pg.wait_for_selector("#health-leftovers", state="detached")
+    moved = (library / "Unsorted/Leftovers from stopped copies/importing-Gone/x.stl").is_file() and not (library / "Unsorted/.importing-Gone").exists()
+    await pg.click("#health-fix-empty")
+    await pg.click("#delete-models-dialog button[type=submit]")
+    await pg.wait_for_selector("#health-empty", state="detached")
+    check("leftovers are moved to Unsorted after asking, and an empty model is deleted with the usual dialog",
+          moved and not (library / "Unsorted/Empty one").exists(), moved)
+    for d in ["Unsorted/Leftovers from stopped copies", "Unsorted/Cut short"]:
+        shutil.rmtree(library / d, ignore_errors=True)
+    await api(pg, "library_scan", {"full": False})
+
+
 async def main():
     server = start_server()
     try:
@@ -2708,7 +2806,7 @@ async def main():
             await pg.wait_for_selector("#no-results")
             unsorted = await pg.inner_text(".cmdbar h1")
             active = await pg.inner_text(".sidebar .nav-link.active .nav-label")
-            check("the menu's places open", labels == ["Model Library", "Home", "Import", "All models", "Unsorted", "Starred", "Duplicates", "Settings", "About", "Theme: System"] and unsorted == "Unsorted" and active == "Unsorted", (labels, unsorted, active))
+            check("the menu's places open", labels == ["Model Library", "Home", "Import", "All models", "Unsorted", "Starred", "Duplicates", "Health check", "Settings", "About", "Theme: System"] and unsorted == "Unsorted" and active == "Unsorted", (labels, unsorted, active))
 
             await phase1(pg)
             await phase2(pg)
@@ -2733,6 +2831,7 @@ async def main():
             await group3(pg)
             await group4(pg)
             await review5(pg)
+            await group5(pg)
 
             # 3. renaming the library
             await pg.click('.sidebar a[href="#/settings"]')

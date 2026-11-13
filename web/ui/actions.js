@@ -10,6 +10,7 @@ import { routeHash } from "./context.js";
 import { Icon } from "./icons.js";
 import { addFiles } from "./fileops.js";
 import { api, isDesktop, setStar, showModelFolder, toast, undoable, undoLast, followJob, loadOverview, followIds, recorded } from "./library.js";
+import { removeFromCollection } from "./collections.js";
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const nameOf = (ms) => (ms.length === 1 ? ms[0].name : plural(ms.length, "model", "models"));
@@ -224,7 +225,8 @@ async function copyText(text) {
 }
 
 /** Everything that can be done to models, in the order shown everywhere. `ctx.page`:
- *  "browse", "model" (the model's own page) or "dupes". */
+ *  "browse", "model" (the model's own page) or "dupes"; `ctx.collection`: the
+ *  collection shown, if any. */
 export const MODEL_ACTIONS = [
   { id: "open", label: "Open", icon: "eye", key: "Enter", primary: true,
     applies: (ms, c) => ms.length === 1 && c.page !== "model",
@@ -234,6 +236,10 @@ export const MODEL_ACTIONS = [
     run: (ms) => ui.set({ dialog: { type: "move-models", models: ms } }) },
   { id: "add-files", label: "Add files…", icon: "plus", enabled: writable, applies: (ms, c) => c.page === "model" && ms.length === 1,
     run: (ms) => addFiles(ms[0]) },
+  { id: "collect", label: "Add to collection…", icon: "bookmark", key: "C", more: true, enabled: writable,
+    run: (ms) => ui.set({ dialog: { type: "collect", models: ms } }) },
+  { id: "uncollect", label: (ms, c) => `Remove from ${c.collection.name}`, icon: "close", more: true, enabled: writable,
+    applies: (ms, c) => !!c.collection?.name, run: (ms, c) => removeFromCollection(ms, c.collection) },
   { id: "delete", label: (ms) => ms.length === 1 ? "Delete model…" : "Delete models…", icon: "trash", danger: true, more: true, enabled: writable,
     run: (ms) => ui.set({ dialog: { type: "delete-models", models: ms } }) },
   { id: "star", label: (ms) => (allStarred(ms) ? "Remove star" : "Star"), button: (ms) => (allStarred(ms) ? "Starred" : "Star"),

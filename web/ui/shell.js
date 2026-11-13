@@ -14,6 +14,7 @@ import { About } from "./about.js";
 import { ImportPage } from "./sort.js";
 import { onDropped, DropHint } from "./drop.js";
 import { DuplicatesPage } from "./dupes.js";
+import { HealthPage } from "./health.js";
 import { ModelPage } from "./modelpage.js";
 import { loadOverview } from "./library.js";
 import { ContextMenu, onWindowKey } from "./actions.js";
@@ -25,6 +26,7 @@ function Main() {
   if (route === "about") return html`<${About} />`;
   if (route === "import" && !blocked) return html`<${ImportPage} />`;
   if (route === "duplicates" && !blocked) return html`<${DuplicatesPage} />`;
+  if (route === "health" && !blocked) return html`<${HealthPage} />`;
   if (route.startsWith("model:") && !blocked) return html`<${ModelPage} key=${route} id=${route.slice(6)} />`;
   if (route.startsWith("browse:") && !blocked) return html`<${Browser} key=${route} />`;
   return html`<${Home} />`;

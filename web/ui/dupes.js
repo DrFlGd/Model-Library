@@ -75,7 +75,7 @@ export function DuplicatesPage() {
     if (selectAllKey(e) && groups.length) { e.preventDefault(); setSkip({}); }
     else if (e.key === "Escape" && groups.length) setSkip(Object.fromEntries(groups.map((g) => [keyOf(g), true])));
     else if (e.key === "Enter" && m) { e.preventDefault(); openModel(m.id); }
-    else if ((l === "e" || l === "m" || l === "s") && m) { e.preventDefault(); runKey(MODEL_ACTIONS, l.toUpperCase(), [m], CTX); }
+    else if ((l === "e" || l === "m" || l === "s" || l === "c") && m) { e.preventDefault(); runKey(MODEL_ACTIONS, l.toUpperCase(), [m], CTX); }
   });
   if (!lib) return html`<div class="pages"><h1>Duplicates</h1><p>Open a library first.</p></div>`;
   const readOnly = !!lib.read_only;

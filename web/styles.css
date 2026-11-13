@@ -828,6 +828,42 @@ button.tag-link { font-family: inherit; line-height: inherit; min-height: 0; }
 #home-waiting p { margin: 0; }
 #about-layout .folder-tree { max-width: 100%; }
 /* Duplicates: the list, and the details panel beside it */
+/* collections: a model's lists as links, and the Add to collection dialog */
+.collection-link { display: inline-flex; gap: 4px; align-items: center; padding: 1px 7px; font-size: 12px; font-weight: 600; color: var(--tool); }
+.collection-link:hover { border-color: var(--tool); }
+.collect-list { display: grid; gap: 2px; max-height: min(320px, 45vh); overflow: auto; padding: 4px; border: 1px solid var(--steel-2); border-radius: var(--radius-s); background: var(--white); }
+.collect-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 8px; border-radius: var(--radius-xs, 4px); cursor: pointer; }
+.collect-row:hover { background: var(--panel); }
+.collect-row > input { width: auto; margin: 0; }
+.collect-name { display: inline-flex; gap: 6px; align-items: center; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+
+/* the health check: one card per kind of problem, most serious first */
+.health-page #health-deep-row { margin: 0 0 14px; }
+.health-group { margin-top: 16px; padding: 12px 14px; background: var(--white); border: 1px solid var(--steel-2); border-left: 4px solid var(--steel-2); border-radius: var(--radius-m); }
+.health-group.tone-bad { border-left-color: var(--danger); }
+.health-group.tone-warn { border-left-color: var(--warn-border); }
+.health-group.tone-info { border-left-color: var(--tool); }
+.health-group-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+.health-group h2 { margin: 0; font-size: 16px; font-family: var(--font-head); font-stretch: var(--head-stretch); font-weight: 800; }
+.health-group > p { margin: 6px 0 10px; max-width: 90ch; font-size: 13.5px; }
+.health-items, .health-copies { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.health-item { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto); gap: 2px 14px; align-items: baseline; padding: 5px 8px; border-radius: var(--radius-s); font-size: 13.5px; }
+.health-item.health-set { display: block; padding: 4px 0; border-top: 1px solid var(--steel-2); border-radius: 0; }
+.health-item.health-set:first-child { border-top: 0; }
+.health-model { cursor: default; user-select: none; }
+.health-model:hover { background: var(--panel); }
+.health-model[aria-selected="true"] { background: var(--sel); box-shadow: inset 3px 0 0 var(--tool); }
+.health-what { display: grid; min-width: 0; }
+.health-item:not(.health-model) .health-what { display: flex; gap: 6px; align-items: center; }
+.health-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.health-rel { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.health-detail { font-size: 12.5px; text-align: right; overflow-wrap: anywhere; }
+.health-file { font-family: var(--font-mono); font-size: 12px; color: var(--ink); }
+.health-all-well { display: flex; gap: 8px; align-items: center; margin-top: 16px; font-weight: 600; color: var(--ok); }
+@media (max-width: 700px) {
+  .health-item { grid-template-columns: minmax(0, 1fr); }
+  .health-detail { text-align: left; }
+}
 .dupes-layout { min-height: 0; }
 .dupes-layout > .pages { min-width: 0; }
 .dupe-models li { cursor: default; user-select: none; }

@@ -101,7 +101,7 @@ const SORT_UNDO: usize = 20;
 const FAVS_KEY: &str = "ml-favs";
 
 /// What a model's first model.json starts from: what its folder and the index say.
-fn first_sidecar(m: &crate::index::Model) -> Value {
+pub(crate) fn first_sidecar(m: &crate::index::Model) -> Value {
     json!({ "name": m.v["name"], "schema": m.v["schema"], "path": if m.v["schema"].is_null() { Value::Null } else { m.v["path"].clone() },
         "authors": m.v["authors"].as_array().filter(|a| !a.is_empty()).map(|a| a.iter().map(|n| json!({ "name": n })).collect::<Vec<_>>()) })
 }
@@ -580,6 +580,158 @@ impl App {
 
     /// Where the open library's last search for duplicates is kept, and the hashes
     /// of its models that have no model.json.
+    // ------------------------------------------------------------ collections
+
+    /// Give models that have no model.json yet one (so their ids last, as a star
+    /// does); returns their ids as they are now, in order.
+    async fn lasting_ids(self: &Arc<Self>, ids: &[String]) -> Result<Vec<String>, String> {
+        let mut out = vec![];
+        for id in ids {
+            let has = self.with_index(None, |ix, _| ix.get(id).map(|m| m.v["sidecar"] == true)).await?;
+            match has {
+                Some(false) => {
+                    if let Reply::Json(v) = Box::pin(self.call("model_update", json!({ "id": id, "patch": {} }))).await? {
+                        out.push(v["id"].as_str().unwrap_or(id).to_string());
+                    }
+                }
+                Some(true) => out.push(id.clone()),
+                None => return Err("That model isn't in the library any more.".into()),
+            }
+        }
+        Ok(out)
+    }
+
+    async fn collections_call(self: &Arc<Self>, cmd: &str, args: Value) -> Result<Reply, String> {
+        use crate::collections as c;
+        let j = |v: Value| Ok(Reply::Json(v));
+        let lib = self.library()?;
+        match cmd {
+            // every collection with its models' ids (for "Add to collection…")
+            "collections_list" => j(json!(c::list(&lib))),
+            "collection_get" => j(c::get(&lib, arg(&args, "id").map_err(e2s)?).map_err(e2s)?),
+            "collection_create" => {
+                let made = c::create(&lib, args["name"].as_str().unwrap_or(""), None).map_err(e2s)?;
+                let ids = self.lasting_ids(&strings(&args["ids"])).await?;
+                let id = made["id"].as_str().unwrap_or("").to_string();
+                j(c::change(&lib, &id, &ids, &[]).map_err(e2s)?)
+            }
+            "collection_restore" => j(c::create(&lib, args["collection"]["name"].as_str().unwrap_or(""), Some(&args["collection"])).map_err(e2s)?),
+            "collection_rename" => j(c::rename(&lib, arg(&args, "id").map_err(e2s)?, args["name"].as_str().unwrap_or("")).map_err(e2s)?),
+            "collection_delete" => j(c::delete(&lib, arg(&args, "id").map_err(e2s)?).map_err(e2s)?),
+            // `changes`: [{ id, add: [model ids], remove: [...] }], all at once
+            "collections_change" => {
+                lib.writable().map_err(e2s)?;
+                let mut adding: Vec<String> = vec![];
+                for ch in args["changes"].as_array().into_iter().flatten() {
+                    adding.extend(strings(&ch["add"]));
+                }
+                adding.sort();
+                adding.dedup();
+                let lasting = self.lasting_ids(&adding).await?;
+                let now = |id: &String| lasting[adding.iter().position(|a| a == id).unwrap()].clone();
+                let mut out = vec![];
+                for ch in args["changes"].as_array().into_iter().flatten() {
+                    let cid = arg(ch, "id").map_err(e2s)?;
+                    let add: Vec<String> = strings(&ch["add"]).iter().map(now).collect();
+                    out.push(c::change(&lib, cid, &add, &strings(&ch["remove"])).map_err(e2s)?);
+                }
+                j(json!({ "collections": out, "ids": adding.iter().map(|a| json!({ "was": a, "id": now(a) })).collect::<Vec<_>>() }))
+            }
+            // the collections a model is in
+            "collections_of" => {
+                let id = arg(&args, "id").map_err(e2s)?;
+                j(json!(c::list(&lib).into_iter().filter(|x| c::members(x).iter().any(|m| m == id))
+                    .map(|x| json!({ "id": x["id"], "name": x["name"] })).collect::<Vec<_>>()))
+            }
+            _ => Err(format!("unknown command {cmd}")),
+        }
+    }
+
+    // ------------------------------------------------------------ the health check
+
+    fn health_file(&self, lib: &Library) -> Result<PathBuf, String> {
+        let id = lib.meta()["id"].as_str().unwrap_or("").to_string();
+        library::valid_id(&id).map_err(e2s)?;
+        Ok(self.paths.data_dir.join("health").join(format!("{id}.json")))
+    }
+
+    async fn health_call(self: &Arc<Self>, cmd: &str, args: Value) -> Result<Reply, String> {
+        let j = |v: Value| Ok(Reply::Json(v));
+        let lib = self.library()?;
+        let saved = self.health_file(&lib)?;
+        match cmd {
+            "health_get" => {
+                let found = crate::config::read_json_object(&saved);
+                let mut v = if found["checked"].is_string() {
+                    self.with_index(None, |ix, _| crate::health::current(&found, ix)).await?
+                } else {
+                    json!({})
+                };
+                v["writable"] = json!(lib.writable().is_ok());
+                j(v)
+            }
+            "health_check" => {
+                let deep = args["deep"] == true;
+                let (lib, ix) = self.snapshot().await?;
+                j(self.spawn_job(if deep { "Checking the library and reading its files" } else { "Checking the library" }, move |app, jid, cancel| {
+                    let r = crate::health::check(&lib, &ix, deep, &cancel, &|p| app.job_progress(&jid, p))?;
+                    if let Some(dir) = saved.parent() {
+                        std::fs::create_dir_all(dir)?;
+                    }
+                    crate::config::write_json(&saved, &r)?;
+                    Ok(json!({ "problems": r["groups"].as_array().map_or(0, |g| g.iter().map(|g| g["count"].as_u64().unwrap_or(0)).sum::<u64>()),
+                        "refresh": r["refresh"] }))
+                }))
+            }
+            // make a fix: `kind`, `keys` of the items chosen (from the saved result)
+            "health_fix" => {
+                lib.writable().map_err(e2s)?;
+                let _g = self.busy.try_lock().map_err(|_| "Wait until the job that's running has finished.".to_string())?;
+                let kind = arg(&args, "kind").map_err(e2s)?.to_string();
+                let keys = strings(&args["keys"]);
+                let mut found = crate::config::read_json_object(&saved);
+                let items: Vec<Value> = found["groups"].as_array().into_iter().flatten()
+                    .filter(|g| g["kind"] == json!(kind))
+                    .flat_map(|g| g["items"].as_array().cloned().unwrap_or_default())
+                    .filter(|it| keys.iter().any(|k| it["key"].as_str() == Some(k)))
+                    .collect();
+                if kind == "leftovers" && self.sort_busy.load(Ordering::Relaxed) {
+                    return Err("Wait until the workspace has finished importing.".into());
+                }
+                let r = self.with_index(None, |ix, lib| crate::health::fix(lib, ix, &kind, &items, &first_sidecar)).await?.map_err(e2s)?;
+                for (old, new) in &r.renamed {
+                    if old != new {
+                        crate::collections::rename_member(&lib, old, new).map_err(e2s)?;
+                        let favs = lib.favourites();
+                        if favs.as_array().is_some_and(|f| f.iter().any(|x| x.as_str() == Some(old))) {
+                            let favs: Vec<Value> = favs.as_array().unwrap().iter().map(|x| if x.as_str() == Some(old) { json!(new) } else { x.clone() }).collect();
+                            lib.set_favourites(&json!(favs)).map_err(e2s)?;
+                        }
+                    }
+                }
+                let mut journal = Value::Null;
+                if !r.journal.is_empty() {
+                    let jid = relayout::new_id(&lib).map_err(e2s)?;
+                    let n = r.journal.len();
+                    let label = match kind.as_str() {
+                        "cover" => format!("Gave {n} {} the automatic preview", if n == 1 { "model" } else { "models" }),
+                        _ => format!("Gave {n} copied {} their own id", if n == 1 { "model" } else { "models" }),
+                    };
+                    relayout::record(&lib, &jid, &json!({ "kind": "details", "label": label, "models": r.journal, "files": [] })).map_err(e2s)?;
+                    journal = json!(jid);
+                }
+                crate::health::without(&mut found, &kind, &r.fixed);
+                if found["checked"].is_string() {
+                    crate::config::write_json(&saved, &found).map_err(e2s)?;
+                }
+                drop(_g);
+                self.with_index(Some(false), |_, _| ()).await?;
+                j(json!({ "fixed": r.fixed.len(), "failed": r.failed, "journal": journal }))
+            }
+            _ => Err(format!("unknown command {cmd}")),
+        }
+    }
+
     fn dupes_files(&self, lib: &Library) -> Result<(PathBuf, PathBuf), String> {
         let id = lib.meta()["id"].as_str().unwrap_or("").to_string();
         library::valid_id(&id).map_err(e2s)?;
@@ -1097,6 +1249,12 @@ impl App {
         if cmd.starts_with("dupes_") {
             return self.dupes_call(cmd, args).await;
         }
+        if cmd.starts_with("collection") {
+            return self.collections_call(cmd, args).await;
+        }
+        if cmd.starts_with("health_") {
+            return self.health_call(cmd, args).await;
+        }
         match cmd {
             "app_info" => {
                 let lib = self.library();
@@ -1206,6 +1364,12 @@ impl App {
                         .iter()
                         .filter(|m| favs.iter().any(|f| f == m.id()))
                         .count());
+                    // the collections, with how many of their models are here
+                    v["collections"] = json!(crate::collections::list(lib)
+                        .iter()
+                        .map(|c| json!({ "id": c["id"], "name": c["name"],
+                            "count": crate::collections::members(c).iter().filter(|id| ix.get(id).is_some()).count() }))
+                        .collect::<Vec<_>>());
                     v
                 })
                 .await?),
@@ -1786,6 +1950,9 @@ impl App {
                                     for f in favs.iter_mut().filter(|f| f.as_str() == Some(id)) {
                                         *f = new_id.clone();
                                     }
+                                    if let Some(n) = new_id.as_str() {
+                                        crate::collections::rename_member(lib, id, n)?;
+                                    }
                                     moved.push(json!({ "id": id, "new_id": new_id, "rel": lib.relative(&dest) }));
                                 }
                                 Err(e) => errors.push(json!({ "id": id, "error": e2s(e) })),
@@ -1811,9 +1978,10 @@ impl App {
                     args["offset"].as_u64().unwrap_or(0) as usize,
                     args["limit"].as_u64().unwrap_or(200).min(2000) as usize,
                 );
+                let colls = crate::collections::list(&self.library()?);
                 j(self
                     .with_index(None, |ix, _| {
-                        ix.query_at(scope, q, sort, offset, limit, &favs, args["direct"].as_bool() == Some(true))
+                        ix.query_at(scope, q, sort, offset, limit, &favs, &colls, args["direct"].as_bool() == Some(true))
                     })
                     .await?)
             }
@@ -1832,6 +2000,10 @@ impl App {
                 v["main"] = json!(thumb::pick_main(&dir)
                     .map(|(file, entry)| json!({ "file": file, "entry": entry })));
                 v["has_thumb"] = json!(thumb::has(&dir));
+                let lib = self.library()?;
+                v["collections"] = json!(crate::collections::list(&lib).into_iter()
+                    .filter(|c| crate::collections::members(c).iter().any(|m| v["id"].as_str() == Some(m)))
+                    .map(|c| json!({ "id": c["id"], "name": c["name"] })).collect::<Vec<_>>());
                 j(v)
             }
             "model_update" => {
@@ -1874,6 +2046,7 @@ impl App {
                         // a favourite keeps its star when the model gets its real id
                         let new_id = v["id"].as_str().unwrap_or("").to_string();
                         if new_id != id {
+                            crate::collections::rename_member(lib, &id, &new_id)?;
                             let favs = lib.favourites();
                             if favs.as_array().is_some_and(|f| f.iter().any(|x| x == &json!(id))) {
                                 let favs: Vec<Value> = favs.as_array().unwrap().iter().map(|x| if x == &json!(id) { json!(new_id) } else { x.clone() }).collect();
@@ -2586,6 +2759,54 @@ mod tests {
             Reply::Bytes(b) => b,
             Reply::Json(v) => panic!("json {v}"),
         }
+    }
+
+    #[tokio::test]
+    async fn collections_follow_models_and_the_health_check_fixes() {
+        let (app, home) = app("colls");
+        let lib = home.join("Lib");
+        call(&app, "library_open", json!({ "path": lib.display().to_string() })).await;
+        call(&app, "schema_create", json!({ "schema": { "name": "Things" } })).await;
+        for n in ["Cup", "Jug"] {
+            std::fs::create_dir_all(lib.join("Things").join(n)).unwrap();
+            std::fs::write(lib.join("Things").join(n).join("a.stl"), n).unwrap();
+        }
+        call(&app, "library_scan", json!({})).await;
+        let q = call(&app, "models_query", json!({ "scope": "all" })).await;
+        let (cup, jug) = (q["items"][0]["id"].as_str().unwrap().to_string(), q["items"][1]["id"].as_str().unwrap().to_string());
+        // adding gives the model its model.json, so the collection keeps it
+        let c = call(&app, "collection_create", json!({ "name": "To print", "ids": [cup] })).await;
+        let cid = c["id"].as_str().unwrap().to_string();
+        assert!(lib.join("Things/Cup/model.json").is_file());
+        assert_ne!(c["models"][0], json!(cup));
+        let r = call(&app, "collections_change", json!({ "changes": [{ "id": cid, "add": [jug] }] })).await;
+        assert_eq!(r["collections"][0]["models"].as_array().unwrap().len(), 2);
+        let ov = call(&app, "library_overview", json!({})).await;
+        assert_eq!(ov["collections"], json!([{ "id": cid, "name": "To print", "count": 2 }]));
+        let q = call(&app, "models_query", json!({ "scope": format!("coll:{cid}"), "q": "cup" })).await;
+        assert_eq!(q["total"], 1);
+        let q = call(&app, "models_query", json!({ "scope": "all", "q": "collection:\"to print\"" })).await;
+        assert_eq!(q["total"], 2);
+        let cup_id = q["items"][0]["id"].clone();
+        assert_eq!(call(&app, "collections_of", json!({ "id": cup_id })).await[0]["name"], "To print");
+        // the health check finds a collection naming a model that's gone, and fixes it
+        std::fs::remove_dir_all(lib.join("Things/Jug")).unwrap();
+        call(&app, "library_scan", json!({})).await;
+        let job = call(&app, "health_check", json!({})).await;
+        assert!(wait(&app, &job).await["error"].is_null());
+        let h = call(&app, "health_get", json!({})).await;
+        assert_eq!(h["groups"][0]["kind"], "lists", "{h:#}");
+        let key = h["groups"][0]["items"][0]["key"].clone();
+        let f = call(&app, "health_fix", json!({ "kind": "lists", "keys": [key] })).await;
+        assert_eq!(f["fixed"], 1);
+        assert!(call(&app, "health_get", json!({})).await["groups"].as_array().unwrap().is_empty());
+        assert_eq!(call(&app, "collection_get", json!({ "id": cid })).await["models"], json!([cup_id]));
+        // a deleted collection comes back with Undo
+        let gone = call(&app, "collection_delete", json!({ "id": cid })).await;
+        assert!(app.call("collection_get", json!({ "id": cid })).await.is_err());
+        call(&app, "collection_restore", json!({ "collection": gone })).await;
+        assert_eq!(call(&app, "collection_get", json!({ "id": cid })).await["name"], "To print");
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     async fn wait(app: &Arc<App>, job: &Value) -> Value {

@@ -116,7 +116,7 @@ pub fn now() -> String {
     iso_from_unix(secs as i64)
 }
 
-fn random_id(prefix: &str) -> String {
+pub(crate) fn random_id(prefix: &str) -> String {
     use sha2::{Digest, Sha256};
     let seed = format!(
         "{:?}{}{:?}",
