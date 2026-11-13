@@ -15,6 +15,13 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
+// unrar's C++ code calls the registry and CryptGenRandom in advapi32 without
+// linking it. Rust's standard library no longer links advapi32 on Windows, and
+// modlib-cli has no other crate that does, so it's asked for here.
+#[cfg(windows)]
+#[link(name = "advapi32")]
+extern "system" {}
+
 /// What a locked archive says; the page asks for the password when it sees it.
 pub const LOCKED: &str = "This archive is locked with a password.";
 /// What a wrong password says; the page asks again.
