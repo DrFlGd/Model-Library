@@ -173,7 +173,7 @@ export function HealthPage() {
   const count = data?.checked ? (total ? plural(total, "thing to look at", "things to look at") : "All well") : null;
   const lead = html`<p class="page-lead">What in the library needs looking at, most serious first, with the fix the app can make. Nothing is checked until you choose Check now.</p>`;
   return html`<${CommandBar} id="health-head" title="Health check" count=${count}
-      primary=${html`<button type="button" class=${data?.checked ? "ghost" : "primary"} id="health-check" disabled=${busy} onClick=${check}>${Icon.pulse(15)} Check now</button>`}
+      primary=${html`<button type="button" class=${data?.checked ? "ghost" : "primary compact"} id="health-check" disabled=${busy} onClick=${check}>${Icon.pulse(15)} Check now</button>`}
       selection=${pickedModel ? { count: `1 model selected: ${pickedModel.name}`, onClear: () => setPicked(null), items: menuItems(MODEL_ACTIONS, [pickedModel], CTX), buttons: 3 } : null} />
   <div class="browser dupes-layout" id="health-page">
    <div class="pages dupes-page health-page">

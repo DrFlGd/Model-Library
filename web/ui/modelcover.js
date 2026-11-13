@@ -86,23 +86,31 @@ function FileTile({ model, item }) {
   </span>`;
 }
 
-/** Deterministic, bounded composition. File-kind counts must describe the
- *  kinds actually shown: never relabel all remaining files as a single kind.
- *  The +N badge counts every file not represented by a tile (not just meshes). */
+/** Deterministic, bounded composition. Pictures (3D previews and images) get
+ *  the whole card; file-kind signs only stand in when there's nothing to picture
+ *  (docs/PLAN.md, "0.5.23"). Kind counts must describe the kinds actually shown:
+ *  never relabel all remaining files as a single kind. The +N badge counts every
+ *  file not represented by a tile (not just meshes). */
 export function automaticTiles(model) {
   const files = model.files || {};
-  const previews = (files.previews || []).filter((it) => it?.file).slice(0, 4);
+  let previews = (files.previews || []).filter((it) => it?.file).slice(0, 4);
+  // nothing loose to picture (a model kept as a ZIP): its generated preview,
+  // drawn from the first 3D file inside, stands for the archive
+  if (!previews.length && files.cover && files.thumb_modified) {
+    const archive = Object.keys(files.kinds || {}).includes("archive") ? "archive" : "model";
+    previews = [{ file: files.cover, kind: "image", modified: files.thumb_modified, size: 0, stands: archive }];
+  }
   const tiles = previews.map((item) => ({ type: "preview", item }));
 
   // Subtract the files we already represent individually. The remainder can
   // contain PDFs, videos, unrenderable model formats, archives or other kinds.
   const remaining = Object.entries(files.kinds || {}).map(([kind, value]) => {
-    const shown = previews.filter((p) => p.kind === kind).length;
+    const shown = previews.filter((p) => (p.stands || p.kind) === kind).length;
     return [kind, Math.max(0, Number(value) - shown)];
   }).filter(([, count]) => count > 0);
   remaining.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 
-  for (const [kind, count] of remaining.slice(0, 4 - tiles.length)) {
+  if (!tiles.length) for (const [kind, count] of remaining.slice(0, 4)) {
     tiles.push({ type: "kind", kind, count });
   }
   if (!tiles.length) tiles.push({ type: "kind", kind: "other", count: 0, label: "No files" });

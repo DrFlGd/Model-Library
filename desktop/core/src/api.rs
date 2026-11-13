@@ -1966,6 +1966,7 @@ impl App {
                 self.with_index(Some(false), |_, _| ()).await?;
                 j(r)
             }
+            "library_values" => j(self.with_index(None, |ix, _| ix.values()).await?),
             "models_query" => {
                 let favs: Vec<String> =
                     serde_json::from_value(self.library()?.favourites()).unwrap_or_default();

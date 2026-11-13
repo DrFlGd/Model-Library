@@ -164,11 +164,20 @@ function ModelWorkspace({ model, names, narrow, onModelChange }) {
   useLayoutEffect(() => setCrowdOpen(false), [filesFit]);
   const open = narrow ? prefs.mobilePanel === "files" : filesFit ? prefs.filePanelOpen !== false : crowdOpen;
   const paneFits = !room || room - (open ? fileW : RAIL) - paneW - RAIL >= STAGE;
-  const toggle = () => narrow ? ui.set({ mobilePanel: open ? null : "files", navOpen: false }) : filesFit ? setPref({ filePanelOpen: !open }) : setCrowdOpen(!open);
+  // read at the press, not from the last render: a key pressed again before the
+  // page has drawn the last change would otherwise undo it
+  const toggle = () => {
+    const now = ui.get();
+    if (narrow) ui.set({ mobilePanel: now.mobilePanel === "files" ? null : "files", navOpen: false });
+    else if (filesFit) setPref({ filePanelOpen: now.filePanelOpen === false });
+    else setCrowdOpen((o) => !o);
+  };
   useLayoutEffect(() => {
     setVariant(undefined); ui.set({ mobilePanel: null });
     const main = model.main;
     reset(src, main ? main.entry ? `z:${main.file}!${main.entry}` : `f:${main.file}` : "d:");
+    // leaving: the next page mustn't start on this model's file (or ask for its archive)
+    return () => reset(null);
   }, [model.id]);
   useLayoutEffect(() => {
     const s = fileSel.get();

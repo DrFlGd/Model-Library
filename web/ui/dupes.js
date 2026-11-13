@@ -135,7 +135,7 @@ export function DuplicatesPage() {
   const count = data?.found ? plural(groups.length, "model with copies", "models with copies") : null;
   const pickedModel = pickedHere ? groups.flatMap((g) => g.models).find((m) => m.id === pickedHere) : null;
   return html`<${CommandBar} id="dupes-head" title="Duplicates" count=${count}
-      primary=${html`<button type="button" class=${data?.found ? "ghost" : "primary"} id="dupes-find" disabled=${busy} onClick=${find}>${Icon.search(15)} Look for duplicates</button>`}
+      primary=${html`<button type="button" class=${data?.found ? "ghost" : "primary compact"} id="dupes-find" disabled=${busy} onClick=${find}>${Icon.search(15)} Look for duplicates</button>`}
       selection=${pickedModel ? { count: `1 model selected: ${pickedModel.name}`, onClear: () => setPicked(null), items: menuItems(MODEL_ACTIONS, [pickedModel], CTX), buttons: 3 } : null} />
   <div class="browser dupes-layout" id="dupes-page">
    <div class="pages dupes-page">

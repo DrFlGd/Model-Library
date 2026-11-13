@@ -16,6 +16,7 @@ import { collectionItems } from "./collections.js";
 import { NavHead, ThemeButton, useMedia, useNavFolded } from "./chrome.js";
 
 const NARROW = "(max-width: 900px)";
+export const NAV_WIDTH = 212, NAV_MIN = 180, NAV_MAX = 380;
 const useNarrow = () => useMedia(NARROW);
 
 /** The category a route shows: { id, path } or null. */
@@ -67,25 +68,29 @@ function useOpenTo(schemaId, path) {
 }
 
 /** The category's tree beside the menu: resizable, folds to a strip with its name. */
-function CategoryPanel({ schema, path, route, open }) {
-  const prefs = useStore(ui, (s) => [s.catPanel, s.catPanelWidth]);
+function CategoryPanel({ schema, path, route, open, onModel }) {
+  const prefs = useStore(ui, (s) => [s.catPanel, s.catPanelWidth, s.catPanelModel]);
   const medium = useMedia("(max-width: 1250px)");
-  const folded = prefs[0] === "folded" || (prefs[0] == null && medium);
+  // a model's page keeps its own setting and starts folded, so the 3D view gets the room
+  const pref = onModel ? "catPanelModel" : "catPanel";
+  const folded = onModel ? prefs[2] !== "open" : prefs[0] === "folded" || (prefs[0] == null && medium);
   const width = Math.max(180, Math.min(420, prefs[1] || 230));
+  const hint = onModel ? "" : " ([)";
   const stopResize = useRef(null);
   useEffect(() => () => stopResize.current?.(), []);
   useOpenTo(schema.id, path);
   useEffect(() => {
+    if (onModel) return; // there [ folds the model's file list
     const key = (e) => {
       if (e.key !== "[" || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || ui.get().dialog || ui.get().menu) return;
       const t = e.target;
       if (t && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName))) return;
       e.preventDefault();
-      setPref({ catPanel: document.querySelector("#category-panel.folded") ? "open" : "folded" });
+      setPref({ [pref]: document.querySelector("#category-panel.folded") ? "open" : "folded" });
     };
     addEventListener("keydown", key);
     return () => removeEventListener("keydown", key);
-  }, []);
+  }, [pref, onModel]);
   const top = `browse:${schemaScope(schema.id)}`;
   const resize = (e) => {
     e.preventDefault();
@@ -98,7 +103,7 @@ function CategoryPanel({ schema, path, route, open }) {
   };
   if (folded) {
     return html`<aside class="category-panel folded" id="category-panel" aria-label=${`${schema.name}'s subcategories`}>
-      <button type="button" class="ghost panel-strip" id="category-panel-open" title="Show subcategories ([)" aria-label="Show subcategories ([)" onClick=${() => setPref({ catPanel: "open" })}>
+      <button type="button" class="ghost panel-strip" id="category-panel-open" title=${`Show subcategories${hint}`} aria-label=${`Show subcategories${hint}`} onClick=${() => setPref({ [pref]: "open" })}>
         <span class="panel-strip-icon"><${CatIcon} icon=${iconOf(schema)} size=${16} fallback="layers" /></span><span class="panel-strip-name">${schema.name}</span>${Icon.chevronsRight(13)}</button>
     </aside>`;
   }
@@ -107,7 +112,7 @@ function CategoryPanel({ schema, path, route, open }) {
       <a class=${`cat-panel-title${route === top ? " active" : ""}`} href=${routeHash(top)} title=${schema.name}
         onContextMenu=${(e) => openMenu(e, categoryItems(schema.id, []))}><${CatIcon} icon=${iconOf(schema)} size=${17} fallback="layers" /><span>${schema.name}</span>
         <span class="nav-count">${schema.count}</span></a>
-      <button type="button" class="ghost panel-fold" id="category-panel-close" title="Hide subcategories ([)" aria-label="Hide subcategories ([)" onClick=${() => setPref({ catPanel: "folded" })}>${Icon.chevronsLeft(14)}</button>
+      <button type="button" class="ghost panel-fold" id="category-panel-close" title=${`Hide subcategories${hint}`} aria-label=${`Hide subcategories${hint}`} onClick=${() => setPref({ [pref]: "folded" })}>${Icon.chevronsLeft(14)}</button>
     </header>
     <ul class="nav-list cat-panel-tree" id="category-tree">
       <${TreeRows} schema=${schema} nodes=${schema.tree} values=${[]} depth=${0} current=${route} open=${open} />
@@ -118,16 +123,41 @@ function CategoryPanel({ schema, path, route, open }) {
   </aside>`;
 }
 
+/** The menu's right edge: drag it (or ← →) to make the menu wider, remembered. */
+function MenuResize({ width }) {
+  const stop = useRef(null);
+  useEffect(() => () => stop.current?.(), []);
+  const clamp = (w) => Math.max(NAV_MIN, Math.min(NAV_MAX, Math.round(w)));
+  const down = (e) => {
+    e.preventDefault();
+    stop.current?.();
+    const start = e.clientX, before = width;
+    document.documentElement.classList.add("nav-resizing");
+    const move = (event) => setPref({ navWidth: clamp(before + event.clientX - start) });
+    const end = () => {
+      document.documentElement.classList.remove("nav-resizing");
+      removeEventListener("pointermove", move); removeEventListener("pointerup", end); removeEventListener("pointercancel", end);
+    };
+    stop.current = end;
+    addEventListener("pointermove", move); addEventListener("pointerup", end); addEventListener("pointercancel", end);
+  };
+  return html`<div class="nav-resize" id="menu-resize" role="separator" aria-label="Menu width" aria-orientation="vertical" aria-valuemin=${NAV_MIN} aria-valuemax=${NAV_MAX} aria-valuenow=${width} tabIndex="0"
+    title="Drag to make the menu wider or narrower" onPointerDown=${down} onDblClick=${() => setPref({ navWidth: NAV_WIDTH })}
+    onKeyDown=${(e) => { if (["ArrowLeft", "ArrowRight"].includes(e.key)) { e.preventDefault(); setPref({ navWidth: clamp(width + (e.key === "ArrowLeft" ? -20 : 20)) }); } }}></div>`;
+}
+
 export function Sidebar() {
-  const s = useStore(ui, (st) => ({ route: st.route, navOpen: st.navOpen, overview: st.overview, open: st.open, library: st.library, navCollapsed: st.navCollapsed, modelPlace: st.modelPlace }));
+  const s = useStore(ui, (st) => ({ route: st.route, navOpen: st.navOpen, overview: st.overview, open: st.open, library: st.library, navCollapsed: st.navCollapsed, modelPlace: st.modelPlace, navWidth: st.navWidth }));
   const narrow = useNarrow();
   const { folded } = useNavFolded();
+  const navWidth = Math.max(NAV_MIN, Math.min(NAV_MAX, s.navWidth || NAV_WIDTH));
   const ov = s.overview;
   // a category's page, or the page of a model filed in one
-  const shown = routeCategory(s.route) || (s.route.startsWith("model:") && s.modelPlace ? { id: s.modelPlace.schema, path: s.modelPlace.path } : null);
+  const category = routeCategory(s.route);
+  const shown = category || (s.route.startsWith("model:") && s.modelPlace ? { id: s.modelPlace.schema, path: s.modelPlace.path } : null);
   const panelSchema = !narrow && shown ? ov?.schemas?.find((sc) => sc.id === shown.id) : null;
   return html`${s.navOpen ? html`<div class="nav-backdrop" onClick=${() => ui.set({ navOpen: false })}></div>` : null}
-    <nav class=${`sidebar${s.navOpen ? " open" : ""}${folded ? " collapsed" : ""}`} aria-label="Library">
+    <nav class=${`sidebar${s.navOpen ? " open" : ""}${folded ? " collapsed" : ""}`} aria-label="Library" style=${narrow || folded ? null : { "--nav-w": `${navWidth}px` }}>
       <${NavHead} />
       <ul class="nav-list">
         <${NavLink} route="home" label="Home" icon="home" current=${s.route} />
@@ -166,5 +196,6 @@ export function Sidebar() {
         <${ThemeButton} />
       </ul>
     </nav>
-    ${panelSchema ? html`<${CategoryPanel} key=${panelSchema.id} schema=${panelSchema} path=${shown.path} route=${s.route} open=${s.open} />` : null}`;
+    ${narrow || folded ? null : html`<${MenuResize} width=${navWidth} />`}
+    ${panelSchema ? html`<${CategoryPanel} key=${panelSchema.id} schema=${panelSchema} path=${shown.path} route=${s.route} open=${s.open} onModel=${!category} />` : null}`;
 }

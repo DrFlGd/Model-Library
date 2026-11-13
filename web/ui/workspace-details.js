@@ -187,11 +187,11 @@ export function WorkspaceDetails({ model, onModelChange }) {
     <p class="insp-sub"><${PlaceLinks} m=${model} overview=${overview} /></p>
     <p class="muted details-save-note">${readOnly ? "This library is read-only." : "Changes are saved when you leave a box. Esc puts it back."}</p>
     <label class="field-block"><span>Name</span><input id="workspace-edit-name" required maxlength="200" type="text" value=${form.name} disabled=${readOnly} onInput=${change("name")} /></label>
-    <label class="field-block"><span>Authors</span><input id="workspace-edit-authors" type="text" placeholder="Separate several with commas" value=${form.authors} disabled=${readOnly} onInput=${change("authors")} /></label>
+    <label class="field-block"><span>Authors</span><input id="workspace-edit-authors" type="text" data-suggest="authors" autocomplete="off" placeholder="Separate several with commas" value=${form.authors} disabled=${readOnly} onInput=${change("authors")} /></label>
     <label class="field-block"><span>Released</span><input type="date" value=${form.released} disabled=${readOnly} onInput=${change("released")} /></label>
-    <label class="field-block"><span>Licence</span><input type="text" value=${form.license} disabled=${readOnly} onInput=${change("license")} /></label>
+    <label class="field-block"><span>Licence</span><input id="workspace-edit-license" type="text" data-suggest="licences" autocomplete="off" value=${form.license} disabled=${readOnly} onInput=${change("license")} /></label>
     <label class="field-block"><span>Source</span><input type="url" placeholder="https://…" value=${form.source} disabled=${readOnly} onInput=${change("source")} /></label>
-    <label class="field-block"><span>Tags</span><input id="workspace-edit-tags" type="text" placeholder="tag one, tag two" value=${form.tags} disabled=${readOnly} onInput=${change("tags")} /></label>
+    <label class="field-block"><span>Tags</span><input id="workspace-edit-tags" type="text" data-suggest="tags" autocomplete="off" placeholder="tag one, tag two" value=${form.tags} disabled=${readOnly} onInput=${change("tags")} /></label>
     ${tagList.length ? html`<div class="tag-links-row"><${TagLinks} tags=${tagList} id="workspace-tag-links" /></div>` : null}
     ${model.collections?.length ? html`<div class="field-block"><span>Collections</span><${CollectionLinks} list=${model.collections} id="workspace-collections" /></div>` : null}
     ${(schema?.fields || []).map((field) => html`<label class="field-block" key=${field.key}><span>${field.label}</span>

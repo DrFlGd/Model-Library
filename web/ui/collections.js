@@ -122,11 +122,11 @@ export function CollectDialog({ models }) {
   useEffect(() => {
     api("collections_list", {}).then(setList, (e) => setError(e.message || String(e)));
   }, []);
-  const stateOf = (c) => {
-    if (want[c.id]) return want[c.id];
+  const was = (c) => {
     const n = ids.filter((id) => c.models.includes(id)).length;
     return n === 0 ? "none" : n === ids.length ? "all" : "some";
   };
+  const stateOf = (c) => want[c.id] || was(c);
   const submit = async () => {
     setBusy(true);
     setError("");
@@ -160,7 +160,7 @@ export function CollectDialog({ models }) {
   return html`<${Dialog} title=${`Add ${nameOf(models)} to a collection`} id="collect-dialog" onSubmit=${submit} busy=${busy || !list} error=${error} submitLabel="Save">
     ${list?.length ? html`<div class="collect-list" role="group" aria-label="Collections">${list.map((c) => html`<${Tri} key=${c.id} label=${c.name} count=${c.models.length}
         state=${stateOf(c)} onChange=${(v) => setWant({ ...want, [c.id]: v })} />`)}</div>
-      ${models.length > 1 ? html`<p class="muted">A dash means some of them are in it already.</p>` : null}` : list ? html`<p class="muted">No collections yet: name the first one below.</p>` : null}
+      ${list.some((c) => was(c) === "some") ? html`<p class="muted" id="collect-dash-note">A dash means some of them are in it already.</p>` : null}` : list ? html`<p class="muted">No collections yet: name the first one below.</p>` : null}
     <label class="field-block"><span>New collection</span><input type="text" id="collect-new" maxlength="80" placeholder="Name, such as Print next" value=${fresh} onInput=${(e) => setFresh(e.target.value)} /></label>
   <//>`;
 }
