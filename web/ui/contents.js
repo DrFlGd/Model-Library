@@ -12,6 +12,7 @@ import { SortMenu, ViewSwitch } from "./layout.js";
 import { openMenu, typing } from "./actions.js";
 import { MESH, LazyPreview, srcArgs, useAsCover, useSeen, queued } from "./parts.js";
 import { fileSel, keyParts, pick, pickEvent, show, view, clear } from "./filesel.js";
+import { renameKey } from "./modelfiles.js";
 
 export const parentPath = (path) => path.replace(/\/$/, "").split("/").slice(0, -1).join("/");
 export function parentKey(key) {
@@ -135,6 +136,7 @@ export function Contents({ src, model, files, shown, archive, entries, error, co
     if (typing(e) || ui.get().dialog || ui.get().menu) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") { e.preventDefault(); e.stopPropagation(); fileSel.set({ picked: order, anchor: order[0] || null }); }
     else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); clear(); }
+    else if (e.key === "F2" && src.kind === "model" && !archive) { if (renameKey(model)) { e.preventDefault(); e.stopPropagation(); } }
     else if (e.key === "Enter") { const row = rows.find((r) => r.key === e.target.closest?.("[data-key]")?.dataset.key) || rows.find((r) => r.key === picked[picked.length - 1]); if (row) { e.preventDefault(); open(row); } }
   };
   const preview = (row) => {

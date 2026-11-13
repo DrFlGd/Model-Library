@@ -22,6 +22,7 @@ import { fileSel, pick, pickEvent, listClick, show, view, clear } from "./filese
 import { TypeTag, isArchive, setPart, fileType } from "./filetypes.js";
 import { PdfDocument } from "./document-viewer.js";
 import { GRAY, colourItems, colourName, libraryColour, setModelColour } from "./colours.js";
+import { renameKey } from "./modelfiles.js";
 
 export const MESH = /\.(stl|obj|3mf)$/i;
 const MD = /\.(md|markdown|txt)$/i;
@@ -638,6 +639,8 @@ export function SelectionRows({ src, files, name, view = "folders", contextActio
   };
   const keys = (e) => {
     if (typing(e)) return;
+    // F2: rename the file or folder picked, as in Windows Explorer (not the model)
+    if (e.key === "F2" && src.kind === "model" && src.model) { if (renameKey(src.model)) { e.preventDefault(); e.stopPropagation(); } return; }
     if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
       const row = rows.find((r) => r.key === (e.target.closest?.("[data-key]")?.dataset.key || sel.shown));
       if (row) { e.preventDefault(); menu(e, row); }

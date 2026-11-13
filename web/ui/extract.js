@@ -11,6 +11,7 @@ import { fileSel, pickedFiles, keyParts, clear, show } from "./filesel.js";
 import { sendFilesAction } from "./fileops.js";
 import { useCheck } from "./checking.js";
 import { isArchive } from "./filetypes.js";
+import { tidyActions } from "./modelfiles.js";
 
 export function extractionReason(src, model = src?.model, keys = fileSel.get().picked) {
   if (writable() !== true) return writable();
@@ -46,7 +47,8 @@ export function extractionAction(src, model = src?.model) {
  *  (the command bar while files are selected, and every right-click menu on its files). */
 export function fileActions(src, model = src?.model) {
   if (!src || src.kind !== "model") return [];
-  return [extractionAction(src, model), sendFilesAction(model), compressAction(model), extractArchiveAction(model)].filter(Boolean);
+  // then tidying inside the model (modelfiles.js), Delete… last
+  return [extractionAction(src, model), sendFilesAction(model), compressAction(model), extractArchiveAction(model), { sep: true }, ...tidyActions(model)].filter(Boolean);
 }
 
 /** Compress to ZIP… for the selected files and folders (docs/PLAN.md, "Group 4 design"):

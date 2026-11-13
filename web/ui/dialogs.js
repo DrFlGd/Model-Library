@@ -12,8 +12,10 @@ import { RenameNode, EditSchema, DeleteSchema, DeleteSubcategory, MergeCategorie
 import { ExtractDialog } from "./extract.js";
 import { AddFilesDialog, SendFilesDialog, DeleteModelsDialog } from "./fileops.js";
 import { ArchiveDialog } from "./archive-actions.js";
-import { CollectDialog, NameCollection } from "./collections.js";
+import { CollectDialog, NameCollection, SavedSearchDialog } from "./collections.js";
 import { ShortcutsDialog } from "./shortcuts.js";
+import { RenameValueDialog } from "./values.js";
+import { RenameFileDialog, NewFolderDialog, MoveToFolderDialog, DeleteFilesDialog } from "./modelfiles.js";
 import { COLOURS, MORE_COLOURS, GRAY, ColourSelect, remakePreview } from "./colours.js";
 
 export const FIELD_TYPES = [["text", "Text"], ["number", "Number"], ["choice", "Choice"], ["yes-no", "Yes or no"], ["date", "Date"]];
@@ -339,6 +341,12 @@ function MainDialog() {
   if (dialog.type === "new-schema") return html`<${NewSchema} />`;
   if (dialog.type === "collect") return html`<${CollectDialog} models=${dialog.models} />`;
   if (dialog.type === "name-collection") return html`<${NameCollection} collection=${dialog.collection || null} />`;
+  if (dialog.type === "file-rename") return html`<${RenameFileDialog} model=${dialog.model} rel=${dialog.rel} folder=${dialog.folder} />`;
+  if (dialog.type === "file-new-folder") return html`<${NewFolderDialog} model=${dialog.model} parent=${dialog.parent} rels=${dialog.rels || []} />`;
+  if (dialog.type === "file-move") return html`<${MoveToFolderDialog} model=${dialog.model} rels=${dialog.rels} />`;
+  if (dialog.type === "file-delete") return html`<${DeleteFilesDialog} model=${dialog.model} items=${dialog.items} />`;
+  if (dialog.type === "rename-value") return html`<${RenameValueDialog} kind=${dialog.kind} value=${dialog.value} />`;
+  if (dialog.type === "saved-search") return html`<${SavedSearchDialog} search=${dialog.search || null} q=${dialog.q || ""} scope=${dialog.scope || "all"} />`;
   if (dialog.type === "move-models") return html`<${MoveModels} models=${dialog.models} />`;
   if (dialog.type === "choose-icon") return html`<${ChooseIcon} schemaId=${dialog.schemaId} path=${dialog.path} />`;
   if (dialog.type === "add-subcategory") return html`<${AddSubcategory} schemaId=${dialog.schemaId} path=${dialog.path} />`;

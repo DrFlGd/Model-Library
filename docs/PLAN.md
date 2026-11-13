@@ -933,3 +933,74 @@ Review 6 (R17) looked at Drafting Sheet only, at 1440 px: https://claude.ai/arti
 15. **? shows a Keyboard shortcuts sheet** (shortcuts.js), grouped by page; About links to it. Every key in it is one the pages handle; keep it in step with them.
 16. **Add to collection explains the dash only when a row has one.**
 
+
+## Organising round (Jerred, 13 November 2026)
+
+Of the eight missing features at the end of review 6, Jerred chose the organising ones: A, B, C, D, G and H, built together as 0.5.24 in the order G, H, D, B, C, A (the smallest first). Next after it, in the review's order: group 6 (Open with), then a printing round (E, F), then groups 5 and 7.
+
+### G: more sorts
+
+The sort menu on a place (All models, Unsorted, Starred, a category, a collection, a saved search) gets four more, after Name, Recently added and Largest first:
+
+- **Author**: A to Z by the first author, then by name; models with no author last.
+- **Released**: newest release date first; models with none last.
+- **Recently changed**: the newest of when the details were last edited (model.json's `updated`) and the newest file in the model, so adding a picture or a file counts too. The index reads each file's date in the walk it already makes for sizes (no extra disk reads), and keeps it as `changed` on the model.
+- **Most files**.
+
+In the list view, the Authors header sorts by author too, and the date column follows the sort: Added normally, Released or Changed when sorting by those; with Most files the size column shows the count. The index cache format goes to 4.
+
+### H: filters for what needs tidying
+
+`missing:` finds models without a detail: `missing:author`, `missing:tags`, `missing:source`, `missing:licence` (or `license`), `missing:released`, and `missing:picture` (nothing to picture and no generated preview). Like the other filters it takes the start of the word (`missing:auth`) and combines with the rest (`missing:author kind:3mf`). A word it doesn't know matches nothing, so a typo shows an empty page with its search note rather than everything. The ? menu in the search box lists it with the words it knows.
+
+### D: saved searches
+
+A search kept under a name, shown with the collections and up to date whenever it's opened ("Terrain in 3MF": `tag:terrain kind:3mf`).
+
+- **Stored in the library**, one file each: `_library/searches/<id>.json` with `{ id, name, q, scope, created }`. `scope` is the place it was saved in (All models, a category or subcategory, Unsorted, Starred, a collection). They have their own folder, not the collections', so an older app version opening the library doesn't show them as empty collections.
+- **Save it** from the search note above the results ("Searching for tag:terrain · 12 models · **Save…** · Clear"). The dialog asks for a name (the search text to start with) and says where it searches. A search typed on a saved search's page saves as a new one combining both.
+- **The menu**: saved searches are listed in the Collections section after the collections, with a magnifier instead of the list sign and their count. The right-click menu and the page's ⋯ have **Edit saved search…** (name and search text) and **Delete saved search** (no question; Undo in the message, as for a collection).
+- **Its page** (`#/browse/search/<id>`) is a place like any other: the place summary says what it searches for and where ("tag:terrain kind:3mf, in Home and garden"), and typing in the search box narrows it further. Models can't be added to or removed from it, so it isn't in Add to collection….
+- If the place it searches in is gone (a category deleted), the page says so and Edit saved search… can point it at All models.
+
+### B: rename or merge tags and authors
+
+One change across the library for a tag or an author spelt two ways ("petg" and "PETG", "K. Walker" and "Kit Walker").
+
+- **Where**: right-click a tag or an author wherever it's a link or a chip: the filter chips over the results, the tags and authors in the place summary, a model's Details (panel and page). The menu has the link's own action (Show models tagged petg) and **Rename tag…** or **Rename author…**.
+- **The dialog** has one box with the library's suggestions. It says how many models have the old name; when the new name is already used (whatever the case), it says so and the button becomes **Merge**: those models end up with the one name, once. Changing only the case is a rename.
+- **The change** is one journalled edit of every model with that exact name (as the Edit N models change is), so Undo is in the message and on Home. Authors keep their other details (a link) and their place in the list; a model that had both names keeps one. Folder names don't change: they were made from the category's naming pattern when the model was filed, as Edit details already works.
+- Core: `values_rename { kind: "tags" | "authors", from, to }`, returning how many models changed and the journal.
+
+### C: collections in your own order
+
+- **A collection's page has a sort of its own, Your order**: the order the models were added in, until they're moved. It's the first sort on a collection's page and the one a collection opens with; the other sorts are still there, and the choice is kept for collection pages apart from the other places (`collSort`).
+- **Drag to reorder**: with Your order, drag a card (or a row in the list) to where it should go; a line shows where it lands. Dragging a selected card moves all the selected models, in their order. Alt+↑ and Alt+↓ move the selected models one place earlier or later from the keyboard. Each move has Undo in its message. With a search typed, the dragged models go just before the one they're dropped on, among all the collection's models.
+- **Drag models onto a collection in the menu** from any page of models: the collection's row lights up and dropping adds them (Undo in the message). Starred takes them too, as a star.
+- Dragging uses pointer events rather than the browser's drag and drop, which the desktop window keeps for files dropped from outside. A drag starts after the pointer moves a few pixels, so clicks, double-clicks and ticks behave as before; Esc cancels a drag.
+- Core: `collection_order { id, ids, before }` moves `ids` to just before `before` (or to the end); `collection_order { id, models }` puts a whole order back (for Undo; models added since stay, at the end).
+
+### A: rename, delete and new folder inside a model
+
+For the files and folders in a model's file list (on its page, and the folder view in the middle), right-click or the selection's ⋯:
+
+- **Rename…** a file or folder (one at a time; F2 when the file list has the focus, as in Windows Explorer). The name must be one Windows can use and not already be in that folder (whatever the case). The extension is kept unless it's typed.
+- **New folder…** in the folder right-clicked (or beside the file right-clicked). With files or folders selected, a tick box, on to start with, moves them into it.
+- **Move to folder…** for the selected files and folders: a list of the model's folders (and its top level) to pick from, and New folder… there too.
+- **Delete…** the selected files and folders, last in the menu after a divider: a red confirm saying how many files and how big, then they go to the library's recovery storage (`_library/journal/<id>/files/`), never erased, and Undo puts them back, as Delete model does.
+- model.json follows: a renamed or moved cover picture stays the cover, a deleted one stops being it; recorded file fingerprints (from Duplicates and the health check) follow renames and moves, and go with deleted files. `model.json`, `_thumbs` and the `_media` folder itself can't be renamed, moved or deleted (pictures inside `_media` can). Files inside archives aren't changed here; Extract archive… first.
+- Every change is one journal (`model_files`: the moves in order, the folders made, model.json before and after), so Undo is in the message and on Home. Like a details edit, it only waits on newer changes to the same model.
+- Read-only library: the actions are there but off, saying why.
+- Core: `model_files_change { id, op: "rename" | "new_folder" | "move" | "delete", … }`.
+
+### Organising round notes (0.5.24)
+
+Built as designed above, with these differences and details:
+
+- **G**: "Recently changed" needed model.json's `updated` to mean what it says, so `model::update` now sets it only when the details actually change (or the file is new). Before, every save set it: starring a model (which gives it a lasting id) and the first step of a journalled edit both counted.
+- **H**: `missing:picture` means no picture of its own: no cover, or only the generated preview as the cover. A model whose only picture is a preview the app drew counts as missing one, since that's what needs tidying. Besides the words in the design, `missing:` takes `link` (source), `date` and `release` (released), and `photo`, `image` and `cover` (picture). `kind:` now also matches a file type (`kind:3mf`, `kind:pdf`), not only a kind (`kind:archive`), since the ? menu's examples suggested it would.
+- **D**: Save… asks where to search: the place it was typed in or All models (a radio pair, only when they differ). On a saved search's page the new search combines the saved text and what's typed, and searches the saved search's place.
+- **B**: authors in the place summary became links that narrow to that author (they were plain text), so they could have the right-click menu like tags. A model's authors in Details are an edit box, whose right-click is the box's own, so Rename author… is on the place summary and the filter chips only. The dialog counts the models first ("Counting…") and checks the new name 200 ms after typing stops.
+- **C**: Starred in the menu takes dropped models as well as the collections. Dragging a picture on a card no longer starts the browser's own image drag (which cancelled ours): the page stops `dragstart` while a press is held.
+- **A**: Rename… selects the name without its extension, as Windows Explorer does, and warns under the box when the extension changes ("The type changes from .stl to .obj: apps may not open it."). Move to folder… lists the folders only; for a new one it points to New folder…, which takes the selection with it. Deleting tells you the number of files and their size, and says they go to the library's recovery storage, not the bin.
+- Tests: `desktop_page.py` has a group of checks for the round (sorts, `missing:`, saving and deleting a search, merging a tag and renaming an author with Undo, dragging in a collection and onto the menu, Alt+↓, and renaming, a new folder and deleting inside a model with Undo); the core has tests for saved searches, collection order, `values_rename` and `model_files_change` with Undo.

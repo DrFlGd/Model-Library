@@ -4,10 +4,11 @@ export const ctx = {};
 export function setContext(values) { Object.assign(ctx, values); }
 
 /** Where a route lives in the URL, and back. Browse places: all, unsorted, favs,
- *  schema:<id>[/<category value>…] (values URI-encoded), coll:<collection id>. */
+ *  schema:<id>[/<category value>…] (values URI-encoded), coll:<collection id>,
+ *  search:<saved search id>. */
 export function routeHash(route) {
   if (route === "home") return "#/";
-  if (route.startsWith("browse:")) return `#/browse/${route.slice(7).replace(/^schema:/, "schema/").replace(/^coll:/, "collection/")}`;
+  if (route.startsWith("browse:")) return `#/browse/${route.slice(7).replace(/^schema:/, "schema/").replace(/^coll:/, "collection/").replace(/^search:/, "search/")}`;
   if (route.startsWith("model:")) return `#/model/${encodeURIComponent(route.slice(6))}`;
   return `#/${route}`;
 }
@@ -19,6 +20,7 @@ export function routeFromHash(hash) {
   if (first === "browse") {
     if (rest[0] === "schema" && rest[1]) return `browse:schema:${rest.slice(1).join("/")}`;
     if (rest[0] === "collection" && rest[1]) return `browse:coll:${rest[1]}`;
+    if (rest[0] === "search" && rest[1]) return `browse:search:${rest[1]}`;
     return `browse:${rest[0] || "all"}`;
   }
   if (first === "model" && rest[0]) return `model:${decodeURIComponent(rest[0])}`;

@@ -19,13 +19,19 @@ import { fileSel, clear as clearFiles } from "./filesel.js";
 import { useFileSelection } from "./extract.js";
 import { UnsortedPreview } from "./unsorted-preview.js";
 import { CatIcon, iconOf } from "./caticons.js";
-import { collectionOf, collectionItems } from "./collections.js";
+import { valueMenu } from "./values.js";
+import { pressModel, moveInCollection } from "./drag.js";
+import { collectionOf, collectionItems, savedSearchOf, savedSearchItems, scopeLabel, placeGone } from "./collections.js";
 
 /** Open a model's own page. */
 const openModel = (m) => { location.hash = routeHash(`model:${m.id}`); };
 
 const PAGE = 300;
-const SORTS = [["name", "Name"], ["added", "Recently added"], ["size", "Largest first"]];
+const SORTS = [["name", "Name"], ["added", "Recently added"], ["size", "Largest first"], ["author", "Author"], ["released", "Released"], ["changed", "Recently changed"], ["files", "Most files"]];
+/** A collection's page has its own order first (docs/PLAN.md, "C: collections in your own order"). */
+const COLL_SORTS = [["order", "Your order"], ...SORTS];
+/** The date a list row shows, following the sort. */
+const DATE_COL = { released: ["released", "Released"], changed: ["changed", "Changed"] };
 const VIEWS = [["grid", "Grid", "grid"], ["list", "List", "list"]];
 const BROWSE = { page: "browse" };
 
@@ -37,6 +43,8 @@ function titleOf(scope, overview) {
   if (scope === "favs") return { title: "Starred" };
   const c = collectionOf(scope, overview);
   if (c) return { title: html`<h1 class="crumbs" title=${c.name || "Collection"}>${Icon.bookmark(20)}<span class="crumbs-name">${c.name || "Collection"}</span></h1>` };
+  const sv = savedSearchOf(scope, overview);
+  if (sv) return { title: html`<h1 class="crumbs" title=${sv.name ? `Saved search: ${sv.q}` : "Saved search"}>${Icon.search(20)}<span class="crumbs-name">${sv.name || "Saved search"}</span></h1>` };
   const [id, ...values] = scope.slice(7).split("/").map(decodeURIComponent);
   const schema = overview?.schemas?.find((s) => s.id === id);
   const crumbs = [[schema?.name || id, []], ...values.map((v, i) => [v, values.slice(0, i + 1)])];
@@ -54,6 +62,8 @@ function placeName(scope, overview) {
   if (scope === "favs") return "Starred";
   const c = collectionOf(scope, overview);
   if (c) return c.name || "this collection";
+  const sv = savedSearchOf(scope, overview);
+  if (sv) return sv.name || "this saved search";
   const [id, ...values] = scope.slice(7).split("/").map(decodeURIComponent);
   return values.length ? values[values.length - 1] : overview?.schemas?.find((s) => s.id === id)?.name || id;
 }
@@ -63,6 +73,8 @@ function placeName(scope, overview) {
 function categoryMenu(scope, overview) {
   const c = collectionOf(scope, overview);
   if (c?.name) return { id: "collection-menu", title: "Collection: rename or delete", items: () => collectionItems(c) };
+  const sv = savedSearchOf(scope, overview);
+  if (sv?.name) return { id: "saved-search-menu", title: "Saved search: edit or delete", items: () => savedSearchItems(sv) };
   if (!scope.startsWith("schema:")) return null;
   const [id, ...values] = scope.slice(7).split("/").map(decodeURIComponent);
   return { id: "category-menu", title: `${values.length ? "Subcategory" : "Category"}: add, edit, rename or remove`, items: () => categoryItems(id, values) };
@@ -149,9 +161,9 @@ function placeLine(m, place, unsorted, overview) {
   return fullPlace(m, overview) || null;
 }
 
-function Card({ m, selected, fav, items, onMenu, where, full }) {
+function Card({ m, selected, fav, items, onMenu, where, full, onPress }) {
   return html`<div class="card" role="option" tabindex="0" data-model=${m.id} aria-selected=${selected ? "true" : "false"}
-    onClick=${(e) => choose(e, m, items)} onDblClick=${() => openModel(m)} onContextMenu=${(e) => onMenu(e, m)}>
+    onPointerDown=${(e) => onPress?.(e, m)} onClick=${(e) => choose(e, m, items)} onDblClick=${() => openModel(m)} onContextMenu=${(e) => onMenu(e, m)}>
     <${Cover} model=${m} />
     <${Tick} m=${m} on=${selected} items=${items} />
     ${fav ? html`<span class="card-fav" title="Starred">${Icon.star(14, true)}</span>` : null}
@@ -163,16 +175,17 @@ function Card({ m, selected, fav, items, onMenu, where, full }) {
   </div>`;
 }
 
-function Row({ m, selected, fav, items, onMenu, where, full }) {
+function Row({ m, selected, fav, items, onMenu, where, full, sort, onPress }) {
+  const [dateKey] = DATE_COL[sort] || ["added"];
   return html`<div class="row" role="option" tabindex="0" data-model=${m.id} aria-selected=${selected ? "true" : "false"}
-    onClick=${(e) => choose(e, m, items)} onDblClick=${() => openModel(m)} onContextMenu=${(e) => onMenu(e, m)}>
+    onPointerDown=${(e) => onPress?.(e, m)} onClick=${(e) => choose(e, m, items)} onDblClick=${() => openModel(m)} onContextMenu=${(e) => onMenu(e, m)}>
     <${Tick} m=${m} on=${selected} items=${items} />
     <${Cover} model=${m} cls="thumb-sm" />
     <span class="row-name">${m.name}${fav ? html` <span class="badge-star" title="Starred">${Icon.star(12, true)}</span>` : null}</span>
     <span class="row-author">${m.authors.join(", ")}</span>
     <span class="row-cat" title=${full || null}>${where || ""}</span>
-    <span class="row-added">${(m.added || "").slice(0, 10)}</span>
-    <span class="row-size">${size(m.files?.bytes || 0)}</span>
+    <span class="row-added">${String(m[dateKey] || "").slice(0, 10)}</span>
+    <span class="row-size">${sort === "files" ? `${m.files?.count || 0} ${m.files?.count === 1 ? "file" : "files"}` : size(m.files?.bytes || 0)}</span>
   </div>`;
 }
 
@@ -202,7 +215,8 @@ function FilterChips({ chips, isOn, toggle }) {
   const chip = ([k, f]) => {
     const on = isOn(k, f.value);
     return html`<button type="button" class=${`chip-btn${on ? " on" : ""}`} key=${k + f.value} aria-pressed=${on ? "true" : "false"} data-filter=${filterOf(k, f.value)}
-      onClick=${() => toggle(k, f.value)} title=${on ? "Show them all again" : `Only ${k === "author" ? "by" : "tagged"} ${f.value}`}>${k === "tag" ? "#" : ""}${f.value} ${on ? html`<span aria-hidden="true">×</span>` : html`<span class="muted">${f.count}</span>`}</button>`;
+      onClick=${() => toggle(k, f.value)} title=${on ? "Show them all again" : `Only ${k === "author" ? "by" : "tagged"} ${f.value}`}
+      onContextMenu=${(e) => valueMenu(e, k === "tag" ? "tags" : "authors", f.value, { label: on ? "Show them all again" : `Only ${k === "author" ? "by" : "tagged #"}${k === "author" ? " " : ""}${f.value}`, run: () => toggle(k, f.value) })}>${k === "tag" ? "#" : ""}${f.value} ${on ? html`<span aria-hidden="true">×</span>` : html`<span class="muted">${f.count}</span>`}</button>`;
   };
   const rest = chips.slice(fit);
   return html`<div class="filters" aria-label="Narrow down" ref=${box}>${chips.slice(0, fit).map(chip)}
@@ -211,14 +225,17 @@ function FilterChips({ chips, isOn, toggle }) {
         icon: isOn(k, f.value) ? "check" : null, run: () => toggle(k, f.value) })))}>+${rest.length} more ▾</button>` : null}</div>`;
 }
 
-/** The list's column headers: Name, Added and Size sort when clicked, as on Import. */
-function ListHead({ sort }) {
+/** The list's column headers: Name, Authors, the date and Size sort when clicked, as
+ *  on Import. The date column is the one the sort uses (Added, Released, Changed);
+ *  sorting by Most files makes the size column the count. */
+function ListHead({ sort, setSort }) {
   const col = (k, label, cls) => html`<button type="button" class=${`linkish ${cls}`} data-sort=${k} aria-pressed=${sort === k ? "true" : "false"}
-    title=${`Sort by ${label.toLowerCase()}`} onClick=${() => setPref({ sort: k })}>${label}${sort === k ? " ▾" : ""}</button>`;
+    title=${`Sort by ${label.toLowerCase()}`} onClick=${() => setSort(k)}>${label}${sort === k ? " ▾" : ""}</button>`;
+  const [dateSort, dateLabel] = DATE_COL[sort] ? [sort, DATE_COL[sort][1]] : ["added", "Added"];
   return html`<div class="list-head" id="list-head" aria-hidden="true">
     <span class="row-tick-gap"></span><span class="thumb-gap"></span>
-    ${col("name", "Name", "row-name")}<span class="row-author">Authors</span><span class="row-cat">Category</span>
-    ${col("added", "Added", "row-added")}${col("size", "Size", "row-size")}
+    ${col("name", "Name", "row-name")}${col("author", "Authors", "row-author")}<span class="row-cat">Category</span>
+    ${col(dateSort, dateLabel, "row-added")}${sort === "files" ? col("files", "Files", "row-size") : col("size", "Size", "row-size")}
   </div>`;
 }
 
@@ -241,7 +258,8 @@ function filterItems(scope, overview, facets, add) {
   const filed = scope !== "unsorted";
   if (filed && !place && schemas.length) items.push(item("category", schemas[0].name, "Filed in this category"));
   if (filed && sub) items.push(item("in", sub, "Filed in a subcategory with this name"));
-  items.push(item("kind", "slicer", "Has files of this kind: model, slicer, image, doc, video or archive"));
+  items.push(item("kind", "slicer", "Has files of this kind (model, slicer, image, doc, video, archive) or type (3mf, stl, zip…)"));
+  items.push(item("missing", "author", "Has no author; also tags, source, licence, released or picture"));
   if (overview?.collections?.length) items.push(item("collection", overview.collections[0].name, "In this collection"));
   for (const f of schema?.fields || []) {
     const example = String(f.choices || "").split(",").map((x) => x.trim()).find(Boolean) || (f.type === "number" ? "1" : f.label.toLowerCase());
@@ -256,9 +274,13 @@ function filtersIn(q) {
 }
 
 export function Browser() {
-  const s = useStore(ui, (st) => ({ route: st.route, q: st.q, sort: st.sort, layout: st.layout, selection: st.selection, picked: st.picked, rev: st.catalogRev, favs: st.favs, overview: st.overview, library: st.library, navOpen: st.navOpen }));
+  const s = useStore(ui, (st) => ({ route: st.route, q: st.q, sort: st.sort, collSort: st.collSort, layout: st.layout, selection: st.selection, picked: st.picked, rev: st.catalogRev, favs: st.favs, overview: st.overview, library: st.library, navOpen: st.navOpen }));
   const scope = s.route.slice(7);
   const coll = collectionOf(scope, s.overview);
+  // a collection's page keeps its own sort, Your order to start with
+  const inColl = scope.startsWith("coll:");
+  const sort = inColl ? s.collSort || "order" : s.sort === "order" ? "name" : s.sort;
+  const setSort = (v) => setPref(inColl ? { collSort: v } : { sort: v });
   const CTX = coll?.name ? { ...BROWSE, collection: coll } : BROWSE;
   const catShow = useStore(ui, (st) => st.catShow);
   const place = placeOf(scope, s.overview);
@@ -271,20 +293,20 @@ export function Browser() {
   const [limit, setLimit] = useState(PAGE);
   const seq = useRef(0);
   useLayoutEffect(() => { setText(s.q); }, [s.q]); // before paint, so nothing typed meanwhile is put back
-  useEffect(() => { setLimit(PAGE); }, [scope, s.q, s.sort]);
+  useEffect(() => { setLimit(PAGE); }, [scope, s.q, sort]);
   useEffect(() => {
     if (!s.library) return;
     const n = ++seq.current;
     const q = s.q;
-    api("models_query", { scope, q, sort: s.sort, limit, direct }).then((r) => { if (n === seq.current) setResult({ ...r, q, scope, direct }); },
+    api("models_query", { scope, q, sort, limit, direct }).then((r) => { if (n === seq.current) setResult({ ...r, q, scope, direct }); },
       (e) => { if (n === seq.current) { setResult({ total: 0, items: [], facets: {}, q, scope, direct, error: e.message || String(e) }); } });
-  }, [scope, s.q, s.sort, limit, s.rev, s.favs.length, s.library?.path, direct]);
+  }, [scope, s.q, sort, limit, s.rev, s.favs.length, s.library?.path, direct]);
   // what the summary beside the tiles describes: everything below, not only the models filed here
   const [whole, setWhole] = useState(null);
   useEffect(() => {
     if (!s.library || !direct) return;
     let live = true;
-    api("models_query", { scope, q: "", sort: s.sort, limit: 1 }).then((r) => { if (live) setWhole({ ...r, scope }); }, () => {});
+    api("models_query", { scope, q: "", sort, limit: 1 }).then((r) => { if (live) setWhole({ ...r, scope }); }, () => {});
     return () => { live = false; };
   }, [scope, direct, s.rev, s.library?.path]);
   // typing searches after a short pause
@@ -322,10 +344,32 @@ export function Browser() {
     if (!picked.some((x) => x.id === m.id)) { ui.set({ picked: [m.id], selection: m.id, anchor: m.id }); sel = [m]; }
     openMenu(e, menuItems(MODEL_ACTIONS, sel, CTX));
   };
+  // drag cards onto a list in the menu, or (Your order) among the others
+  const reorderColl = inColl && sort === "order" && coll?.name ? coll : null;
+  const onPress = (e, m) => pressModel(e, s.picked.includes(m.id) ? items.filter((x) => s.picked.includes(x.id)) : [m], reorderColl);
   usePageKeys((e) => {
     const st = ui.get();
     const ids = items.map((m) => m.id);
     const sel = items.filter((m) => st.picked.includes(m.id));
+    // Alt+↑ and Alt+↓: the selected models one place earlier or later (Your order)
+    if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown") && !e.ctrlKey && !e.metaKey) {
+      if (!reorderColl || !sel.length || st.library?.read_only) return;
+      e.preventDefault();
+      const on = (id) => st.picked.includes(id);
+      let before;
+      if (e.key === "ArrowUp") {
+        const prev = ids.slice(0, ids.findIndex(on)).filter((id) => !on(id)).pop();
+        if (!prev) return;
+        before = prev;
+      } else {
+        const last = ids.length - 1 - [...ids].reverse().findIndex(on);
+        const next = ids.slice(last + 1).find((id) => !on(id));
+        if (!next) return;
+        before = ids[ids.indexOf(next) + 1] || null;
+      }
+      moveInCollection(reorderColl, sel.map((m) => m.id), before);
+      return;
+    }
     const l = letter(e);
     if (e.key === "Enter") { if (sel.length === 1) { e.preventDefault(); openModel(sel[0]); } return; }
     if (e.key === "F2") { if (sel.length === 1) { e.preventDefault(); const ok = writable(); if (ok === true) editDetails(sel, true); else toast(ok); } return; }
@@ -375,16 +419,26 @@ export function Browser() {
   const fresh = result && result.q === s.q && result.scope === scope && result.direct === direct ? result : null;
   const total = direct ? place.node.count : result?.total;
   const count = html`<span class="page-count" id="browse-count" data-q=${result ? result.q : null} data-scope=${result ? result.scope : null}>${result ? `${total} ${total === 1 ? "model" : "models"}` : ""}</span>`;
-  const emptyNote = s.q ? `Nothing in ${name} matches that search.` : scope === "favs" ? "Nothing starred yet: star a model to keep it here."
+  const sv = savedSearchOf(scope, s.overview);
+  const svGone = sv && !sv.gone && placeGone(sv.scope, s.overview);
+  const emptyNote = sv?.gone ? "That saved search isn't in the library any more."
+    : svGone ? `It searches in ${scopeLabel(sv.scope, s.overview)}. Choose Edit saved search… in ⋯ to search all models instead.`
+    : s.q ? `Nothing in ${name} matches that search.` : scope === "favs" ? "Nothing starred yet: star a model to keep it here."
+    : sv ? "Nothing matches this saved search at the moment."
     : coll?.gone ? "That collection isn't in the library any more."
     : coll ? "Nothing in this collection yet. Select models anywhere and press C, or right-click them and choose Add to collection…"
     : scope === "unsorted" ? "No models here yet."
     : html`No models here yet. Drop model files or folders on this window to add them here, or use <a href=${routeHash("import")}>Import</a>.`;
-  const wider = s.q && scope !== "all" ? html`<a href=${routeHash("browse:all")} id="search-everywhere">Search all models</a>` : null;
+  // Save… keeps the search under Collections (on a saved search's page, both together)
+  const save = s.q && s.library && !s.library.read_only && !sv?.gone ? html`<button type="button" class="linkish" id="search-save" title="Keep this search under Collections in the menu"
+    onClick=${() => ui.set({ dialog: { type: "saved-search", q: sv ? `${sv.q} ${s.q}` : s.q, scope: sv ? sv.scope : scope } })}>Save…</button>` : null;
+  const wider = html`${s.q && scope !== "all" ? html`<a href=${routeHash("browse:all")} id="search-everywhere">Search all models</a>` : null}${save}`;
   const head = titleOf(scope, s.overview);
   const details = picked.length > 1 ? html`<${SelectedPanel} models=${picked} />`
     : html`<${ModelDetails} id=${picked[0]?.id || null} row=${false} empty=${html`<${PlaceSummary} name=${name} result=${direct ? (fresh && whole?.scope === scope ? whole : null) : fresh} here=${direct && fresh ? fresh.total : null}
-        onTag=${(v) => toggleFilter("tag", v)} tagsOn=${active.filter(([k]) => k === "tag").map(([, v]) => v)} />`} />`;
+        about=${sv?.name ? html`Finds <code class="saved-q">${sv.q}</code> in ${scopeLabel(sv.scope, s.overview)}.` : null}
+        onTag=${(v) => toggleFilter("tag", v)} tagsOn=${active.filter(([k]) => k === "tag").map(([, v]) => v)}
+        onAuthor=${(v) => toggleFilter("author", v)} authorsOn=${active.filter(([k]) => k === "author").map(([, v]) => v)} />`} />`;
   const selection = filesPicking || (picked.length ? { count: `${picked.length} ${picked.length === 1 ? "model" : "models"} selected`, onClear: () => ui.set({ picked: [] }),
     items: menuItems(MODEL_ACTIONS, picked, CTX), buttons: 3 } : null);
   return html`<${CommandBar} id="browse-head" up=${head.up} title=${head.title} count=${count} more=${categoryMenu(scope, s.overview)} selection=${selection}
@@ -395,7 +449,7 @@ export function Browser() {
             onClick=${(e) => openMenu(e.currentTarget, filterItems(scope, s.overview, (direct && whole?.scope === scope ? whole.facets : null) || facets, addFilter))}>?</button></label>`}
       tools=${html`${subs.length ? html`<${ViewSwitch} id="cat-show" label="Show" views=${SHOW} value=${s.q ? "models" : show} onChange=${(v) => setPref({ catShow: { ...catShow, [scope]: v } })} />` : null}
         <${ViewSwitch} id="layout-switch" views=${VIEWS} value=${s.layout === "list" ? "list" : "grid"} onChange=${(v) => setPref({ layout: v })} />
-        <${SortMenu} id="sort" options=${SORTS} value=${s.sort} onChange=${(v) => setPref({ sort: v })} />`} />
+        <${SortMenu} id="sort" options=${inColl ? COLL_SORTS : SORTS} value=${sort} onChange=${setSort} />`} />
   <div class="browser">
     <div class="browse-main">
       ${chips.length ? html`<${FilterChips} chips=${chips} isOn=${isOn} toggle=${toggleFilter} />` : null}
@@ -407,10 +461,10 @@ export function Browser() {
           ${items.length ? html`<h2 class="here-head" id="here-head">Here in ${name}</h2>` : null}
           ${result && !place.node.count ? html`<div class="empty" id="no-results">${emptyNote}</div>` : null}` : null}
         ${result && !items.length && !result.error && !direct ? html`<div class="empty" id="no-results">${emptyNote}</div>` : null}
-        ${s.layout === "list" && items.length ? html`<${ListHead} sort=${s.sort} />` : null}
+        ${s.layout === "list" && items.length ? html`<${ListHead} sort=${sort} setSort=${setSort} />` : null}
         <div class=${`results ${s.layout === "list" ? "list-view" : "grid-view"}${picked.length > 1 ? " picking" : ""}`} role="listbox" aria-multiselectable="true" aria-label="Models">
           ${items.map((m) => html`<${View} key=${m.id} m=${m} items=${items} selected=${s.picked.includes(m.id)} fav=${s.favs.includes(m.id)} onMenu=${onMenu}
-            where=${placeLine(m, place, scope === "unsorted", s.overview)} full=${fullPlace(m, s.overview)} />`)}
+            where=${placeLine(m, place, scope === "unsorted", s.overview)} full=${fullPlace(m, s.overview)} sort=${sort} onPress=${onPress} />`)}
         </div>
         ${result && result.total > items.length ? html`<button type="button" class="ghost more-btn" onClick=${() => setLimit(limit + PAGE)}>Show more (${result.total - items.length} left)</button>` : null}
       </div>

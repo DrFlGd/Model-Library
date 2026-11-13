@@ -38,11 +38,12 @@ const DONE = [
   ["Group 4", "RAR and 7z opened and extracted; compressing selected files"],
   ["Skins", "Drafting Sheet, Parts Bin and Layer Line, chosen in Settings"],
   ["Collections", "Lists of models from any categories, and a health check for the library"],
+  ["Organising", "Saved searches, collections in your own order, renaming tags and authors, folders inside a model, more sorts, missing: filters"],
 ];
 const NEXT = [
-  ["Next", "One of: more ways to organise (folders inside a model, renaming tags and authors, saved searches, more sorts and filters), opening files in other programs, or print tracking"],
-  ["Group 5", "Several libraries open at once, and sending models between them"],
   ["Group 6", "Opening files in other programs (slicers, Meshmixer) and running tools such as MeshMill"],
+  ["Printing", "What's been printed and how, and whether a model fits your printer"],
+  ["Group 5", "Several libraries open at once, and sending models between them"],
   ["Group 7", "Details filled in from a Printables, Thingiverse, Thangs or MakerWorld link"],
   ["Later", "Running on a server (Docker) with sign-in, to browse the library from another computer"],
 ];

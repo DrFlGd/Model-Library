@@ -24,6 +24,7 @@ const GROUPS = [
     [["C"], "Add to collection…"],
     [["S"], "Star, or take the star off"],
     [["["], "Fold or unfold a category's subcategories"],
+    [["Alt", "↑"], "In a collection sorted by Your order: move the selected models one place earlier (Alt+↓ later), or drag them"],
   ]],
   ["A model's page", [
     [["E"], "Edit details (F2 with the name ready to change)"],
@@ -33,6 +34,7 @@ const GROUPS = [
     [["Ctrl", "A"], "Select all the files in the list"],
     [["Enter"], "Show the selected file"],
     [["N"], "Make a model… from the selected files"],
+    [["F2"], "In the file list: rename the file or folder picked"],
     [["["], "Fold or unfold the file list"],
   ]],
   ["Import", [
@@ -52,7 +54,7 @@ const GROUPS = [
   ]],
 ];
 
-const Keys = ({ keys }) => html`<span class="keys">${keys.map((k, i) => html`${i ? html`<span class="key-join">${keys[0] === "Ctrl" || keys[0] === "Shift" ? "+" : " "}</span>` : null}<kbd>${k}</kbd>`)}</span>`;
+const Keys = ({ keys }) => html`<span class="keys">${keys.map((k, i) => html`${i ? html`<span class="key-join">${["Ctrl", "Shift", "Alt"].includes(keys[0]) ? "+" : " "}</span>` : null}<kbd>${k}</kbd>`)}</span>`;
 
 export function ShortcutsDialog() {
   return html`<${Dialog} title="Keyboard shortcuts" id="shortcuts-dialog" onSubmit=${close} submitLabel="Close" cancelLabel=${null}>
