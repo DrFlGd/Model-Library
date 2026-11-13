@@ -62,8 +62,8 @@ function OpenedArchives() {
   };
   if (!info) return null;
   return html`<div class="field-block" id="settings-archives"><span class="field-label">Opened archives</span>
-    <div class="pick-row"><span id="archive-cache-size">${info.size ? size(info.size) : "Empty"}</span>
-      <button type="button" class="ghost" id="archive-cache-empty" disabled=${busy || !info.size} onClick=${empty}>Empty</button></div>
+    <div class="pick-row"><span id="archive-cache-size">${info.size ? size(info.size) : "Nothing unpacked"}</span>
+      ${info.size ? html`<button type="button" class="ghost" id="archive-cache-empty" disabled=${busy} onClick=${empty}>Empty</button>` : null}</div>
     <small class="muted">To look inside a 7z or RAR file, the app unpacks it once on this computer. It keeps those used in the last ${info.days} days, up to ${size(info.limit)}; your archives aren't changed.</small>
   </div>`;
 }

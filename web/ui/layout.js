@@ -116,7 +116,7 @@ export function SearchNote({ q, found, onClear, wider }) {
 /** A box in a details panel, saved when you leave it (or press Enter); Esc puts
  *  it back. What's typed stays while the panel is drawn again; a new value from
  *  outside replaces it. `caption`: a label shown before it. */
-export function EditBox({ id, cls = "", label, caption, title, placeholder, value, off, onSave }) {
+export function EditBox({ id, cls = "", label, caption, title, placeholder, value, off, onSave, suggest = null }) {
   const [v, setV] = useState(value || "");
   // before the next paint: after it, text typed as the box appeared was put back
   useLayoutEffect(() => { setV(value || ""); }, [value]);
@@ -124,7 +124,7 @@ export function EditBox({ id, cls = "", label, caption, title, placeholder, valu
     if (e.key === "Escape") { e.stopPropagation(); e.currentTarget.value = value || ""; setV(value || ""); e.currentTarget.blur(); }
     else if (e.key === "Enter") e.currentTarget.blur();
   };
-  const box = html`<input type="text" class=${`edit-box ${cls}`} id=${id} aria-label=${label} title=${title || label} placeholder=${placeholder} value=${v} disabled=${off}
+  const box = html`<input type="text" class=${`edit-box ${cls}`} id=${id} aria-label=${label} title=${title || label} placeholder=${placeholder} value=${v} disabled=${off} data-suggest=${suggest} autocomplete="off"
     onInput=${(e) => setV(e.target.value)} onKeyDown=${key} onChange=${(e) => onSave(e.target.value.trim())} />`;
   return caption ? html`<label class="edit-row"><span class="edit-cap">${caption}</span>${box}</label>` : box;
 }

@@ -87,17 +87,20 @@ async def card_checks(pg, library, base, out, api, check, png, cube):
         mixed: automaticTiles({files:{count:3,kinds:{model:1,doc:1,video:1},
           previews:[{file:'part.stl',kind:'model'}]}}),
         full: automaticTiles({files:{count:6,kinds:{model:1,doc:1,video:1,archive:1,slicer:1,other:1},
-          previews:[{file:'part.stl',kind:'model'}]}})
+          previews:[{file:'part.stl',kind:'model'}]}}),
+        nothing: automaticTiles({files:{count:6,kinds:{doc:2,video:1,archive:1,slicer:1,other:1},previews:[]}}),
+        zipped: automaticTiles({files:{count:2,kinds:{archive:1,doc:1},previews:[],cover:'_thumbs/model.png',thumb_modified:5}})
       };
     }""")
+    # pictures take the whole card and the rest go in +N; kind signs only when there's nothing to picture
     check("Agent F grouping preserves each kind's actual counts and accurately reports overflow",
           grouping["none"]["more"] == 0
           and len(grouping["none"]["tiles"]) == 1
-          and [(t["kind"], t["count"]) for t in grouping["mixed"]["tiles"] if t["type"] == "kind"]
-             == [("doc", 1), ("video", 1)]
-          and len(grouping["full"]["tiles"]) == 4
-          and grouping["full"]["more"] == 2
-          and all(t["count"] == 1 for t in grouping["full"]["tiles"] if t["type"] == "kind"),
+          and [t["type"] for t in grouping["mixed"]["tiles"]] == ["preview"] and grouping["mixed"]["more"] == 2
+          and [t["type"] for t in grouping["full"]["tiles"]] == ["preview"] and grouping["full"]["more"] == 5
+          and [(t["kind"], t["count"]) for t in grouping["nothing"]["tiles"]] == [("doc", 2), ("archive", 1), ("other", 1), ("slicer", 1)]
+          and grouping["nothing"]["more"] == 1
+          and [t["item"]["file"] for t in grouping["zipped"]["tiles"]] == ["_thumbs/model.png"] and grouping["zipped"]["more"] == 1,
           grouping)
 
     # Scroll first, then require *actual loaded* mesh and image previews, not
@@ -120,11 +123,12 @@ async def card_checks(pg, library, base, out, api, check, png, cube):
     mixed_tiles = await mixed.locator(".cover-kind").all_text_contents()
     all_kind_tiles = await all_kinds.locator(".cover-kind").all_text_contents()
     check("Agent F mixed file types have accurate labels and counts",
-          await one.locator(".cover-tiles-2 .cover-kind").count() == 1
+          await one.locator(".cover-tiles-1 .cover-file").count() == 1
+          and await one.locator(".cover-count").inner_text() == "+1"
           and await two.locator(".cover-tiles-2 .cover-file").count() == 2
           and await five.locator(".cover-tiles-4 .cover-file").count() == 4
           and await five.locator(".cover-count").inner_text() == "+1"
-          and sorted(t.strip() for t in mixed_tiles) == ["Document", "Video"]
+          and mixed_tiles == []
           and sorted(t.strip() for t in all_kind_tiles) == ["Archive", "Document", "File"]
           and await unknown.locator(".cover-kind").count() == 2
           and await missing.locator(".cover-warning").inner_text() == "Cover missing",

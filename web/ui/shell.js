@@ -18,6 +18,7 @@ import { HealthPage } from "./health.js";
 import { ModelPage } from "./modelpage.js";
 import { loadOverview } from "./library.js";
 import { ContextMenu, onWindowKey } from "./actions.js";
+import { Suggestions } from "./suggest.js";
 
 function Main() {
   const route = useStore(ui, (s) => s.route);
@@ -43,7 +44,7 @@ export function mountShell(context) {
   mount("main-root", Main);
   mount("statusbar", StatusBar);
   mount("dialog-root", Dialogs);
-  mount("menu-root", () => html`<${ContextMenu} /><${DropHint} />`);
+  mount("menu-root", () => html`<${ContextMenu} /><${Suggestions} /><${DropHint} />`);
   addEventListener("keydown", onWindowKey);
   loadOverview();
   context.platform.onDrop?.(onDropped, (dragging) => ui.set({ dragging }));

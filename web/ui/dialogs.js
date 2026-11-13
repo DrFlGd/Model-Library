@@ -13,6 +13,7 @@ import { ExtractDialog } from "./extract.js";
 import { AddFilesDialog, SendFilesDialog, DeleteModelsDialog } from "./fileops.js";
 import { ArchiveDialog } from "./archive-actions.js";
 import { CollectDialog, NameCollection } from "./collections.js";
+import { ShortcutsDialog } from "./shortcuts.js";
 import { COLOURS, MORE_COLOURS, GRAY, ColourSelect, remakePreview } from "./colours.js";
 
 export const FIELD_TYPES = [["text", "Text"], ["number", "Number"], ["choice", "Choice"], ["yes-no", "Yes or no"], ["date", "Date"]];
@@ -37,7 +38,7 @@ export function Dialog({ title, id, onSubmit, busy, error, submitLabel, danger =
       <div class="dialog-foot">
         ${error ? html`<p class="form-error" role="alert">${error}</p>` : null}
         <div class="dialog-actions">
-          <button type="button" class="ghost" id=${id ? `${id}-cancel` : null} onClick=${close}>${cancelLabel}</button>
+          ${cancelLabel ? html`<button type="button" class="ghost" id=${id ? `${id}-cancel` : null} onClick=${close}>${cancelLabel}</button>` : null}
           <button type="submit" class=${danger ? "primary danger" : "primary"} disabled=${busy}>${submitLabel}</button>
         </div>
       </div>
@@ -173,12 +174,12 @@ function EditModel({ model, schema, select }) {
     <p class="muted">Saved in <span class="preview-path">${model.rel}/model.json</span>. Changing the name doesn't rename the folder.</p>
     <div class="form-two">
       <label class="field-block"><span>Name</span><input id="edit-name" ref=${nameBox} type="text" required maxlength="200" value=${form.name} onInput=${set("name")} /></label>
-      <label class="field-block"><span>Authors</span><input id="edit-authors" type="text" placeholder="Separate several with commas" value=${form.authors} onInput=${set("authors")} /></label>
+      <label class="field-block"><span>Authors</span><input id="edit-authors" type="text" data-suggest="authors" autocomplete="off" placeholder="Separate several with commas" value=${form.authors} onInput=${set("authors")} /></label>
       <label class="field-block"><span>Released</span><input id="edit-released" type="date" value=${form.released} onInput=${set("released")} /></label>
-      <label class="field-block"><span>Licence</span><input id="edit-license" type="text" value=${form.license} onInput=${set("license")} /></label>
+      <label class="field-block"><span>Licence</span><input id="edit-license" type="text" data-suggest="licences" autocomplete="off" value=${form.license} onInput=${set("license")} /></label>
     </div>
     <label class="field-block"><span>Source</span><input id="edit-source" type="url" placeholder="https://…" value=${form.source} onInput=${set("source")} /></label>
-    <label class="field-block"><span>Tags</span><input id="edit-tags" type="text" placeholder="tag one, tag two" value=${form.tags} onInput=${set("tags")} /></label>
+    <label class="field-block"><span>Tags</span><input id="edit-tags" type="text" data-suggest="tags" autocomplete="off" placeholder="tag one, tag two" value=${form.tags} onInput=${set("tags")} /></label>
     ${schema?.fields?.length ? html`<div class="form-two">${schema.fields.map((f) => html`<label class="field-block" key=${f.key}><span>${f.label}</span>
       <${FieldInput} field=${f} value=${fields[f.key]} onChange=${(v) => setFields({ ...fields, [f.key]: v })} /></label>`)}</div>` : null}
     ${images.length ? html`<label class="field-block"><span>Cover picture</span>
@@ -347,6 +348,7 @@ function MainDialog() {
   if (dialog.type === "delete-subcategory") return html`<${DeleteSubcategory} schemaId=${dialog.schemaId} path=${dialog.path} />`;
   if (dialog.type === "merge-categories") return html`<${MergeCategories} schemaId=${dialog.schemaId} path=${dialog.path} />`;
   if (dialog.type === "edit-picked") return html`<${EditPicked} models=${dialog.models} />`;
+  if (dialog.type === "shortcuts") return html`<${ShortcutsDialog} />`;
   if (dialog.type === "ask") return html`<${AskDialog} ...${dialog} />`;
   if (dialog.type === "colour") return html`<${ColourDialog} key=${dialog.title} ...${dialog} />`;
   if (dialog.type === "confirm") return html`<${ConfirmDialog} ...${dialog} />`;

@@ -7,6 +7,7 @@ import { useStore } from "../lib/store.js";
 import { ui } from "./state.js";
 import { ctx } from "./context.js";
 import { CommandBar } from "./layout.js";
+import { showShortcuts } from "./shortcuts.js";
 
 const OS = { windows: "Windows", linux: "Linux", macos: "macOS" };
 const RELEASES = "https://github.com/DrFlGd/Model-Library/releases";
@@ -31,12 +32,15 @@ const DONE = [
   ["Phase 4", "Editing categories: a tree of subcategories, renamed, merged and moved with folders to match, and undo"],
   ["Phase 5", "Large collections: sorting a whole folder tree as it is, finding duplicates, noticing changes made outside the app"],
   ["UI pass", "The same actions, keys and undo on every page, and one page layout; a workspace for a model's files"],
-];
-const NEXT = [
-  ["Group 1", "File actions in every view, adding a subcategory where you are, and this page", true],
-  ["Group 2", "Subcategories in a panel beside the menu, a category's subcategories or its models, icons, and a style of its own"],
+  ["Group 1", "File actions in every view, adding a subcategory where you are, and this page"],
+  ["Group 2", "Subcategories in a panel beside the menu, a category's subcategories or its models, and icons"],
   ["Group 3", "Gray models with 3MF colours on request, other colours, 3MF thumbnails"],
   ["Group 4", "RAR and 7z opened and extracted; compressing selected files"],
+  ["Skins", "Drafting Sheet, Parts Bin and Layer Line, chosen in Settings"],
+  ["Collections", "Lists of models from any categories, and a health check for the library"],
+];
+const NEXT = [
+  ["Next", "One of: more ways to organise (folders inside a model, renaming tags and authors, saved searches, more sorts and filters), opening files in other programs, or print tracking"],
   ["Group 5", "Several libraries open at once, and sending models between them"],
   ["Group 6", "Opening files in other programs (slicers, Meshmixer) and running tools such as MeshMill"],
   ["Group 7", "Details filled in from a Printables, Thingiverse, Thangs or MakerWorld link"],
@@ -131,7 +135,7 @@ export function About() {
     <section class="ls-section" id="about-versions">
       <h2>Versions</h2>
       <dl class="about-versions">${rows.map(([k, v]) => html`<div key=${k}><dt>${k}</dt><dd>${v}</dd></div>`)}</dl>
-      <p><a href=${RELEASES} target="_blank" rel="noopener noreferrer">All releases on GitHub</a></p>
+      <p><a href=${RELEASES} target="_blank" rel="noopener noreferrer">All releases on GitHub</a> · <button type="button" class="linkish" id="about-shortcuts" onClick=${showShortcuts}>Keyboard shortcuts</button> (or press ?)</p>
     </section>
     <section class="ls-section" id="about-changelog">
       <h2>What's changed</h2>

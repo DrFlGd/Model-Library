@@ -103,8 +103,8 @@ export function ModelDetails({ id, empty = null, ctx = { page: "browse" }, row =
     <${Cover} model=${m} cls="insp-thumb" />
     <div class="panel-fields" key=${nonce}>
       <${EditBox} id="details-name" cls="panel-name" label="Name" value=${m.name} off=${s.readOnly} onSave=${save("name")} />
-      <${EditBox} id="details-authors" label="Authors" caption="Authors" placeholder="Authors, separated by commas" value=${m.authors.join(", ")} off=${s.readOnly} onSave=${save("authors")} />
-      <${EditBox} id="details-tags" label="Tags" caption="Tags" placeholder="Tags, separated by commas" value=${(m.tags || []).join(", ")} off=${s.readOnly} onSave=${save("tags")} />
+      <${EditBox} id="details-authors" suggest="authors" label="Authors" caption="Authors" placeholder="Authors, separated by commas" value=${m.authors.join(", ")} off=${s.readOnly} onSave=${save("authors")} />
+      <${EditBox} id="details-tags" suggest="tags" label="Tags" caption="Tags" placeholder="Tags, separated by commas" value=${(m.tags || []).join(", ")} off=${s.readOnly} onSave=${save("tags")} />
       ${m.tags?.length ? html`<div class="edit-row tag-links-row"><span></span><${TagLinks} tags=${m.tags} id="details-tag-links" /></div>` : null}
       ${m.collections?.length ? html`<div class="edit-row tag-links-row"><span></span><${CollectionLinks} list=${m.collections} id="details-collections" /></div>` : null}
     </div>

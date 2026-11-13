@@ -14,7 +14,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::UNIX_EPOCH;
 
 pub const UNSORTED: &str = "Unsorted";
-const CACHE_FORMAT: u64 = 2; // Preview summaries include source metadata and explicit cover mode.
+// 2: preview summaries include source metadata and explicit cover mode.
+// 3: a generated preview used as the cover carries thumb_modified.
+const CACHE_FORMAT: u64 = 3;
 
 #[derive(Clone, Debug)]
 pub struct Model {
@@ -118,6 +120,9 @@ fn read_model(lib: &Library, dir: &Path, schema: Option<&Schema>, cats: &[String
     }
     if summary["cover"].is_null() && crate::thumb::has(dir) {
         summary["cover"] = json!(crate::thumb::THUMB);
+        // a model with nothing to picture loose (all in a ZIP): the card shows
+        // the generated preview, which changes when it's made again
+        summary["thumb_modified"] = json!(model::modified(&dir.join(crate::thumb::THUMB)));
     }
     let id = side["id"]
         .as_str()
@@ -461,6 +466,31 @@ impl Index {
         Some(self.models[i].v.clone())
     }
 
+    /// Every author, tag and licence in the library, most used first, for the
+    /// suggestions shown as you type them.
+    pub fn values(&self) -> Value {
+        let mut authors: HashMap<&str, usize> = HashMap::new();
+        let mut tags: HashMap<&str, usize> = HashMap::new();
+        let mut licences: HashMap<&str, usize> = HashMap::new();
+        for m in &self.models {
+            for a in m.v["authors"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+                *authors.entry(a).or_default() += 1;
+            }
+            for t in m.v["tags"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+                *tags.entry(t).or_default() += 1;
+            }
+            if let Some(l) = m.v["license"].as_str().map(str::trim).filter(|l| !l.is_empty()) {
+                *licences.entry(l).or_default() += 1;
+            }
+        }
+        let list = |m: HashMap<&str, usize>| {
+            let mut v: Vec<(&str, usize)> = m.into_iter().filter(|(k, _)| !k.trim().is_empty()).collect();
+            v.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| fold(a.0).cmp(&fold(b.0))));
+            v.into_iter().map(|(k, _)| k.to_string()).collect::<Vec<_>>()
+        };
+        json!({ "authors": list(authors), "tags": list(tags), "licences": list(licences) })
+    }
+
     /// Counts and the category tree of each schema.
     pub fn overview(&self) -> Value {
         let schemas: Vec<Value> = self
@@ -632,7 +662,8 @@ impl Index {
                 .into_iter()
                 .flatten()
                 .filter_map(Value::as_str)),
-            "schema" => m.v["schema"].as_str().is_some_and(|s| {
+            // `category:` is the word the app uses; `schema:` still works
+            "schema" | "category" => m.v["schema"].as_str().is_some_and(|s| {
                 fold(s) == want
                     || self
                         .schema(s)
@@ -1022,6 +1053,13 @@ mod tests {
             ix.query("all", "", "name", 0, 50, &[])["facets"]["authors"][0],
             json!({ "value": "Jo Smith", "count": 2 })
         );
+        // category: is the app's word for schema:
+        assert_eq!(
+            names(ix.query("all", "category:warg tyrant", "name", 0, 50, &[])),
+            ["Hive Tyrant"]
+        );
+        // every author, most used first, for suggestions
+        assert_eq!(ix.values()["authors"][0], "Jo Smith");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

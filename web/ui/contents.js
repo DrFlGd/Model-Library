@@ -63,6 +63,16 @@ export function sortChildren(rows, by) {
     : by === "newest" ? (a, b) => Number(b.modified || b.mtime || 0) - Number(a.modified || a.mtime || 0) : () => 0;
   return [...rows].sort((a, b) => Number(b.folder) - Number(a.folder) || cmp(a, b) || a.name.localeCompare(b.name, undefined, { numeric: true }));
 }
+/** Every file under `folder`, depth first in the order the folder tree shows them
+ *  (folders first, then files, sorted by `by`): what Previous and Next step through. */
+export function filesInOrder(files, by, folder = "", archive = null) {
+  const out = [];
+  for (const r of sortChildren(childrenOf(files, folder, archive), by)) {
+    if (r.folder) out.push(...filesInOrder(files, by, r.rel, archive));
+    else out.push(r);
+  }
+  return out;
+}
 export function Breadcrumb({ model, shown }) {
   const p = keyParts(shown), crumbs = [{ key: "d:", name: model.name }];
   const folder = p.kind === "folder" ? p.file : parentPath(p.file);

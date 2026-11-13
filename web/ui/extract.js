@@ -57,7 +57,7 @@ export function compressAction(model) {
   // only for loose files and folders: not for files inside an archive, nor an archive on its own
   if (!files.length || files.every((f) => f && isArchive(f))) return null;
   const reason = writable() !== true ? writable() : false;
-  return { id: "compress-files", label: "Compress to ZIP…", icon: "folder", disabled: reason,
+  return { id: "compress-files", label: "Compress to ZIP…", icon: "archive", disabled: reason,
     run: () => ui.set({ dialog: { type: "archive-model", id: model.id, action: "compress", files: files.filter(Boolean), name: `${extractionName(keys.filter((k) => keyParts(k).kind !== "entry"))}.zip`, entries: entries.length } }) };
 }
 
@@ -66,7 +66,7 @@ function extractArchiveAction(model) {
   const keys = fileSel.get().picked;
   const p = keys.length === 1 ? keyParts(keys[0]) : null;
   if (!p || p.kind !== "file" || !isArchive(p.file)) return null;
-  return { id: "extract-archive", label: "Extract archive…", icon: "folder", disabled: writable() !== true ? writable() : false,
+  return { id: "extract-archive", label: "Extract archive…", icon: "inbox", disabled: writable() !== true ? writable() : false,
     run: () => ui.set({ dialog: { type: "archive-model", id: model.id, action: "extract", file: p.file } }) };
 }
 

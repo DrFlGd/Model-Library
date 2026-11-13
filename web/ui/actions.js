@@ -125,8 +125,8 @@ export function usePageKeys(fn) {
 export const typing = (e) => !!e.target.closest?.("input, textarea, select, [contenteditable='true']");
 const onControl = (e) => !!e.target.closest?.("button, a[href], summary");
 
-/** The window's keys: Ctrl+Z undoes, "/" goes to the page's search box, the rest
- *  goes to the page. */
+/** The window's keys: Ctrl+Z undoes, "/" goes to the page's search box, "?" shows
+ *  the keyboard shortcuts (shortcuts.js lists them all), the rest goes to the page. */
 export function onWindowKey(e) {
   const s = ui.get();
   if (s.menu && e.key === "Escape") { closeMenu(); return; }
@@ -140,6 +140,11 @@ export function onWindowKey(e) {
   if (key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey) {
     const box = document.querySelector("[data-search]");
     if (box) { e.preventDefault(); box.focus(); box.select?.(); }
+    return;
+  }
+  if (key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    ui.set({ dialog: { type: "shortcuts" } });
     return;
   }
   if ((key === "Enter" || key === " ") && onControl(e)) return;
@@ -224,7 +229,12 @@ async function copyText(text) {
   }
 }
 
-/** Everything that can be done to models, in the order shown everywhere. `ctx.page`:
+// what a model holds, from the index's summary (shown when it isn't known)
+const hasArchive = (m) => !m.files?.kinds || (m.files.kinds.archive || 0) > 0;
+const looseFiles = (m) => !m.files?.kinds || (m.files.count || 0) > (m.files.kinds.archive || 0);
+
+/** Everything that can be done to models, in the order shown everywhere (the red
+ *  Delete last, after a divider, as on a category's or a collection's menu). `ctx.page`:
  *  "browse", "model" (the model's own page) or "dupes"; `ctx.collection`: the
  *  collection shown, if any. */
 export const MODEL_ACTIONS = [
@@ -240,20 +250,21 @@ export const MODEL_ACTIONS = [
     run: (ms) => ui.set({ dialog: { type: "collect", models: ms } }) },
   { id: "uncollect", label: (ms, c) => `Remove from ${c.collection.name}`, icon: "close", more: true, enabled: writable,
     applies: (ms, c) => !!c.collection?.name, run: (ms, c) => removeFromCollection(ms, c.collection) },
-  { id: "delete", label: (ms) => ms.length === 1 ? "Delete model…" : "Delete models…", icon: "trash", danger: true, more: true, enabled: writable,
-    run: (ms) => ui.set({ dialog: { type: "delete-models", models: ms } }) },
   { id: "star", label: (ms) => (allStarred(ms) ? "Remove star" : "Star"), button: (ms) => (allStarred(ms) ? "Starred" : "Star"),
     pressed: allStarred, icon: "star", key: "S", enabled: writable, run: star },
   { id: "folder", label: "Show in folder", icon: "folder", applies: (ms) => ms.length === 1 && isDesktop(), run: (ms) => showModelFolder(ms[0]) },
-  { id: "zip-compress", label: "Compress to ZIP…", icon: "folder", more: true, enabled: writable, applies: (ms) => ms.length === 1,
+  // only what applies: Compress when there are loose files, Extract when there's an archive
+  { id: "zip-compress", label: "Compress to ZIP…", icon: "archive", more: true, enabled: writable, applies: (ms) => ms.length === 1 && looseFiles(ms[0]),
     run: (ms) => ui.set({ dialog: { type: "archive-model", id: ms[0].id, action: "compress" } }) },
-  { id: "zip-extract", label: "Extract archive…", icon: "folder", more: true, enabled: writable, applies: (ms) => ms.length === 1,
+  { id: "zip-extract", label: "Extract archive…", icon: "inbox", more: true, enabled: writable, applies: (ms) => ms.length === 1 && hasArchive(ms[0]),
     run: (ms) => ui.set({ dialog: { type: "archive-model", id: ms[0].id, action: "extract" } }) },
   { id: "preview", label: "Make a new preview", icon: "image", more: true, enabled: writable, run: remakePreviews },
   { id: "auto-cover", label: "Use automatic preview", icon: "refresh", more: true, enabled: writable,
     applies: (ms) => ms.length === 1 && !!ms[0].files?.explicit_cover, run: restoreAutomaticPreview },
   { id: "copy-path", label: "Copy folder path", icon: "copy", more: true, applies: (ms) => ms.length === 1,
     run: (ms) => copyText(`${ui.get().library?.path}/${ms[0].rel}`).then(() => toast("Copied the folder's path.")) },
+  { id: "delete", label: (ms) => ms.length === 1 ? "Delete model…" : "Delete models…", icon: "trash", danger: true, more: true, enabled: writable,
+    run: (ms) => ui.set({ dialog: { type: "delete-models", models: ms } }) },
 ];
 
 const shown = (actions, targets, c) => actions.filter((a) => !a.applies || a.applies(targets, c));
@@ -263,13 +274,15 @@ const labelOf = (a, targets, c, as) => { const l = (as === "button" && a.button)
 /** Actions as menu items. */
 export function menuItems(actions, targets, c = {}) {
   const list = shown(actions, targets, c);
-  const main = list.filter((a) => !a.more);
-  const more = list.filter((a) => a.more);
+  const main = list.filter((a) => !a.more && !a.danger);
+  const more = list.filter((a) => a.more && !a.danger);
+  const danger = list.filter((a) => a.danger);
   const item = (a) => {
     const ok = enabledOf(a, targets, c);
     return { id: a.id, label: labelOf(a, targets, c), icon: a.icon, filled: a.pressed?.(targets, c), key: a.key, danger: a.danger, disabled: ok === true ? false : ok, run: () => a.run(targets, c) };
   };
-  return [...main.map(item), ...(more.length && main.length ? [{ sep: true }] : []), ...more.map(item)];
+  const sep = (before, after) => (before.length && after.length ? [{ sep: true }] : []);
+  return [...main.map(item), ...sep(main, more), ...more.map(item), ...sep([...main, ...more], danger), ...danger.map(item)];
 }
 
 /** Run the action a key stands for (E, M, S…), if it applies and can be used now. */

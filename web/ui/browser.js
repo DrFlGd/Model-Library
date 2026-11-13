@@ -130,15 +130,26 @@ function Tick({ m, on, items }) {
     onClick=${(e) => { e.stopPropagation(); choose({ ctrlKey: true }, m, items); }} onDblClick=${(e) => e.stopPropagation()} />`;
 }
 
-/** Where a card's model is filed, below the place shown (`trim`: how many
- *  subcategories the page's place already says); none on Unsorted itself. */
-function placeLine(m, trim, unsorted) {
-  if (!m.schema) return unsorted ? null : "Unsorted";
-  const rest = (m.path || []).slice(trim);
-  return rest.length ? rest.join(" › ") : null;
+/** Where a model is filed, category first ("Home and garden › Kitchen"). */
+function fullPlace(m, overview) {
+  if (!m.schema) return "Unsorted";
+  return [overview?.schemas?.find((x) => x.id === m.schema)?.name, ...(m.path || [])].filter(Boolean).join(" › ");
 }
 
-function Card({ m, selected, fav, items, onMenu, where }) {
+/** Where a card's model is filed, leaving out what the page already says: inside
+ *  a category, the category and the subcategories shown (`place`); none on
+ *  Unsorted itself. Pages across categories (All models, Starred, a collection)
+ *  give the whole place. */
+function placeLine(m, place, unsorted, overview) {
+  if (!m.schema) return unsorted ? null : "Unsorted";
+  if (place && m.schema === place.schema.id) {
+    const rest = (m.path || []).slice(place.path.length);
+    return rest.length ? rest.join(" › ") : null;
+  }
+  return fullPlace(m, overview) || null;
+}
+
+function Card({ m, selected, fav, items, onMenu, where, full }) {
   return html`<div class="card" role="option" tabindex="0" data-model=${m.id} aria-selected=${selected ? "true" : "false"}
     onClick=${(e) => choose(e, m, items)} onDblClick=${() => openModel(m)} onContextMenu=${(e) => onMenu(e, m)}>
     <${Cover} model=${m} />
@@ -147,19 +158,19 @@ function Card({ m, selected, fav, items, onMenu, where }) {
     <span class="card-name" title=${m.name}>${m.name}</span>
     <span class="card-meta">
       ${m.authors?.length ? html`<span class="card-author" title=${m.authors.join(", ")}>${m.authors.join(", ")}</span>` : null}
-      ${where ? html`<span class="card-location" title=${m.path?.join(" › ") || where}>${where}</span>` : null}
+      ${where ? html`<span class="card-location" title=${full || where}>${where}</span>` : null}
     </span>
   </div>`;
 }
 
-function Row({ m, selected, fav, items, onMenu, where }) {
+function Row({ m, selected, fav, items, onMenu, where, full }) {
   return html`<div class="row" role="option" tabindex="0" data-model=${m.id} aria-selected=${selected ? "true" : "false"}
     onClick=${(e) => choose(e, m, items)} onDblClick=${() => openModel(m)} onContextMenu=${(e) => onMenu(e, m)}>
     <${Tick} m=${m} on=${selected} items=${items} />
     <${Cover} model=${m} cls="thumb-sm" />
     <span class="row-name">${m.name}${fav ? html` <span class="badge-star" title="Starred">${Icon.star(12, true)}</span>` : null}</span>
     <span class="row-author">${m.authors.join(", ")}</span>
-    <span class="row-cat" title=${m.path?.join(" › ") || null}>${where || ""}</span>
+    <span class="row-cat" title=${full || null}>${where || ""}</span>
     <span class="row-added">${(m.added || "").slice(0, 10)}</span>
     <span class="row-size">${size(m.files?.bytes || 0)}</span>
   </div>`;
@@ -213,6 +224,31 @@ function ListHead({ sort }) {
 
 /** Search filters in the search text (author:jo, tag:"big one"). */
 const filterOf = (key, value) => `${key}:${/\s/.test(value) ? `"${value}"` : value}`;
+
+/** The typed filters, each with an example from this library, for the ? at the end
+ *  of the search box. `add(key, value)` puts one in the search. */
+function filterItems(scope, overview, facets, add) {
+  const place = placeOf(scope, overview);
+  const schemas = overview?.schemas || [];
+  const schema = place?.schema || (schemas.length === 1 ? schemas[0] : null);
+  const sub = (place ? place.node.children : null)?.[0]?.value || schemas.find((x) => x.tree?.length)?.tree[0]?.value;
+  const item = (key, example, what) => ({ id: `filter-${key}`, label: filterOf(key, example), sub: what, run: () => add(key, example) });
+  const items = [
+    { head: "Add a filter to the search" },
+    item("author", facets.authors?.[0]?.value || "jo", "Made by this author"),
+    item("tag", facets.tags?.[0]?.value || "presupported", "Has this tag"),
+  ];
+  const filed = scope !== "unsorted";
+  if (filed && !place && schemas.length) items.push(item("category", schemas[0].name, "Filed in this category"));
+  if (filed && sub) items.push(item("in", sub, "Filed in a subcategory with this name"));
+  items.push(item("kind", "slicer", "Has files of this kind: model, slicer, image, doc, video or archive"));
+  if (overview?.collections?.length) items.push(item("collection", overview.collections[0].name, "In this collection"));
+  for (const f of schema?.fields || []) {
+    const example = String(f.choices || "").split(",").map((x) => x.trim()).find(Boolean) || (f.type === "number" ? "1" : f.label.toLowerCase());
+    items.push(item(f.key, example, `${schema.name}'s ${f.label}`));
+  }
+  return items;
+}
 function filtersIn(q) {
   const out = [];
   for (const m of q.matchAll(/(?:^|\s)(author|tag):("[^"]*"|\S+)/g)) out.push([m[1], m[2].replace(/^"|"$/g, "")]);
@@ -266,6 +302,20 @@ export function Browser() {
     const f = filterOf(key, value);
     const on = filtersIn(s.q).some(([k, v]) => k === key && v === value);
     ui.set({ q: on ? s.q.replace(f, " ").replace(/\s+/g, " ").trim() : `${s.q} ${f}`.trim() });
+  };
+  // a filter from the ? menu: added to the search, its value selected so typing replaces it
+  const addFilter = (key, value) => {
+    const f = filterOf(key, value);
+    const q = `${text.trim()} ${f}`.trim();
+    setText(q);
+    ui.set({ q });
+    requestAnimationFrame(() => {
+      const box = document.getElementById("search");
+      if (!box) return;
+      box.focus();
+      const end = box.value.length;
+      box.setSelectionRange(end - f.length + key.length + 1 + (f.endsWith('"') ? 1 : 0), end - (f.endsWith('"') ? 1 : 0));
+    });
   };
   const onMenu = (e, m) => {
     let sel = picked;
@@ -338,9 +388,11 @@ export function Browser() {
   const selection = filesPicking || (picked.length ? { count: `${picked.length} ${picked.length === 1 ? "model" : "models"} selected`, onClear: () => ui.set({ picked: [] }),
     items: menuItems(MODEL_ACTIONS, picked, CTX), buttons: 3 } : null);
   return html`<${CommandBar} id="browse-head" up=${head.up} title=${head.title} count=${count} more=${categoryMenu(scope, s.overview)} selection=${selection}
-      search=${html`<label class="search small toolbar-search"><span class="visually-hidden">Search this place</span>
-          <input id="search" data-search type="search" value=${text} placeholder="Search names, authors, tags… or author:jo" autocomplete="off" spellcheck="false"
-            title="Search (/). Typed filters: author:jo tag:presupported" onInput=${(e) => setText(e.target.value)} /></label>`}
+      search=${html`<label class="search small toolbar-search with-help"><span class="visually-hidden">Search this place</span>
+          <input id="search" data-search type="search" value=${text} placeholder="Search names, authors, tags…" autocomplete="off" spellcheck="false"
+            title="Search (/). ? lists the filters, such as author:jo" onInput=${(e) => setText(e.target.value)} />
+          <button type="button" class="ghost search-help" id="search-help" title="Search filters" aria-label="Search filters" aria-haspopup="menu"
+            onClick=${(e) => openMenu(e.currentTarget, filterItems(scope, s.overview, (direct && whole?.scope === scope ? whole.facets : null) || facets, addFilter))}>?</button></label>`}
       tools=${html`${subs.length ? html`<${ViewSwitch} id="cat-show" label="Show" views=${SHOW} value=${s.q ? "models" : show} onChange=${(v) => setPref({ catShow: { ...catShow, [scope]: v } })} />` : null}
         <${ViewSwitch} id="layout-switch" views=${VIEWS} value=${s.layout === "list" ? "list" : "grid"} onChange=${(v) => setPref({ layout: v })} />
         <${SortMenu} id="sort" options=${SORTS} value=${s.sort} onChange=${(v) => setPref({ sort: v })} />`} />
@@ -350,6 +402,7 @@ export function Browser() {
       <div class="browse-scroll">
         <${SearchNote} q=${s.q} found=${fresh ? `${fresh.total} found in ${name}${subs.length ? " and its subcategories" : ""}` : ""} wider=${wider} onClear=${() => { setText(""); ui.set({ q: "" }); }} />
         ${result?.error ? html`<p class="warn-note" role="alert">${result.error}</p>` : null}
+        ${scope === "unsorted" && items.length && !s.library?.read_only ? html`<p class="place-note" id="unsorted-note">These have no category yet: select them and choose Move to category… (M), or sort them on <a href=${routeHash("import")}>Import</a>.</p>` : null}
         ${direct ? html`<div class="subcat-tiles" id="subcat-tiles" aria-label="Subcategories">${subs.map((n) => html`<${SubTile} key=${n.value} schema=${place.schema} path=${[...place.path, n.value]} node=${n} rev=${s.rev} />`)}</div>
           ${items.length ? html`<h2 class="here-head" id="here-head">Here in ${name}</h2>` : null}
           ${result && !place.node.count ? html`<div class="empty" id="no-results">${emptyNote}</div>` : null}` : null}
@@ -357,7 +410,7 @@ export function Browser() {
         ${s.layout === "list" && items.length ? html`<${ListHead} sort=${s.sort} />` : null}
         <div class=${`results ${s.layout === "list" ? "list-view" : "grid-view"}${picked.length > 1 ? " picking" : ""}`} role="listbox" aria-multiselectable="true" aria-label="Models">
           ${items.map((m) => html`<${View} key=${m.id} m=${m} items=${items} selected=${s.picked.includes(m.id)} fav=${s.favs.includes(m.id)} onMenu=${onMenu}
-            where=${placeLine(m, place && m.schema === place.schema.id ? place.path.length : 0, scope === "unsorted")} />`)}
+            where=${placeLine(m, place, scope === "unsorted", s.overview)} full=${fullPlace(m, s.overview)} />`)}
         </div>
         ${result && result.total > items.length ? html`<button type="button" class="ghost more-btn" onClick=${() => setLimit(limit + PAGE)}>Show more (${result.total - items.length} left)</button>` : null}
       </div>

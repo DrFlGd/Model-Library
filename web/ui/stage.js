@@ -9,7 +9,7 @@ import { TypeTag, fileType, isArchive } from "./filetypes.js";
 import { isDesktop, openModelFile, openArchiveEntry } from "./library.js";
 import { MESH, Stage3D, Pictures, Documents, Videos } from "./parts.js";
 import { fileSel, keyParts, pick, view } from "./filesel.js";
-import { Contents, Breadcrumb, parentKey, parentPath, isFolderKey, useArchive, childrenOf, sortChildren } from "./contents.js";
+import { Contents, Breadcrumb, parentKey, isFolderKey, useArchive, filesInOrder } from "./contents.js";
 
 export function WorkspaceStage({ src, model, files, contextActions }) {
   const shown = useStore(fileSel, (s) => s.shown) || "d:";
@@ -21,8 +21,10 @@ export function WorkspaceStage({ src, model, files, contextActions }) {
   const name = p.entry || p.file;
   const current = { file: p.file, entry: p.entry || undefined };
   const f = p.kind === "entry" ? entries?.find((e) => e.name === p.entry) : files.find((f) => f.rel === p.file);
-  // Only siblings in the currently filtered variant participate in stepping.
-  const siblings = sortChildren(childrenOf(p.kind === "entry" ? entries : files, parentPath(name), p.kind === "entry" ? archive : null), by).filter((r) => !r.folder);
+  // Previous and Next step through every file of the variant shown (or of the
+  // archive the shown entry is in), across folders, in the folder tree's order;
+  // archives themselves are opened, not stepped onto.
+  const siblings = filesInOrder(p.kind === "entry" ? entries : files, by, "", p.kind === "entry" ? archive : null).filter((r) => p.kind === "entry" || !isArchive(r.name));
   const step = (delta) => {
     const index = siblings.findIndex((r) => r.key === shown);
     if (index >= 0 && siblings.length > 1) view(siblings[(index + delta + siblings.length) % siblings.length].key);

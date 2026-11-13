@@ -425,11 +425,10 @@ export function EditPicked({ models }) {
   return html`<${Dialog} title=${`Edit ${models.length} models`} id="bulk-dialog" onSubmit=${submit} busy=${busy} error=${error} submitLabel="Save">
     <p class="muted">Only what you fill in changes; the rest of each model's details stay as they are.</p>
     <div class="form-two">
-      <label class="field-block"><span>Add tags</span><input id="bulk-tags-add" type="text" placeholder="tag one, tag two" value=${form.tags_add} onInput=${set("tags_add")} /></label>
-      <label class="field-block"><span>Remove tags</span><input id="bulk-tags-remove" type="text" list="bulk-tag-list" placeholder=${tags.slice(0, 3).join(", ")} value=${form.tags_remove} onInput=${set("tags_remove")} />
-        <datalist id="bulk-tag-list">${tags.map((t) => html`<option value=${t} key=${t} />`)}</datalist></label>
-      <label class="field-block"><span>Authors</span><input id="bulk-authors" type="text" placeholder="Replaces theirs; separate several with commas" value=${form.authors} onInput=${set("authors")} /></label>
-      <label class="field-block"><span>Licence</span><input id="bulk-license" type="text" value=${form.license} onInput=${set("license")} /></label>
+      <label class="field-block"><span>Add tags</span><input id="bulk-tags-add" type="text" data-suggest="tags" autocomplete="off" placeholder="tag one, tag two" value=${form.tags_add} onInput=${set("tags_add")} /></label>
+      <label class="field-block"><span>Remove tags</span><input id="bulk-tags-remove" type="text" data-suggest="tags" data-values=${JSON.stringify(tags)} autocomplete="off" placeholder=${tags.slice(0, 3).join(", ")} value=${form.tags_remove} onInput=${set("tags_remove")} /></label>
+      <label class="field-block"><span>Authors</span><input id="bulk-authors" type="text" data-suggest="authors" autocomplete="off" placeholder="Replaces theirs; separate several with commas" value=${form.authors} onInput=${set("authors")} /></label>
+      <label class="field-block"><span>Licence</span><input id="bulk-license" type="text" data-suggest="licences" autocomplete="off" value=${form.license} onInput=${set("license")} /></label>
       <label class="field-block"><span>3D colour</span><${ColourSelect} id="bulk-colour" value=${form.render_colour === "none" ? null : form.render_colour} keep="Leave as it is" none="None (the library's preview colour)"
         onChange=${(v) => setForm({ ...form, render_colour: v === null ? "none" : v })} /></label>
     </div>

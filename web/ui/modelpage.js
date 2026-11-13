@@ -169,6 +169,8 @@ function ModelWorkspace({ model, names, narrow, onModelChange }) {
     setVariant(undefined); ui.set({ mobilePanel: null });
     const main = model.main;
     reset(src, main ? main.entry ? `z:${main.file}!${main.entry}` : `f:${main.file}` : "d:");
+    // leaving: the next page mustn't start on this model's file (or ask for its archive)
+    return () => reset(null);
   }, [model.id]);
   useLayoutEffect(() => {
     const s = fileSel.get();

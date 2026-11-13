@@ -1023,10 +1023,12 @@ async def ui_pass(pg):
     await pg.click("#browse-head.selecting #bar-more")
     more = await labels_of(pg, "#context-menu .menu-label")
     await pg.keyboard.press("Escape")
+    # the archive actions only show when they apply (review 6, item 5); Delete is last (item 4)
+    arch = [x for x in menu if x in ("Compress to ZIP…", "Extract archive…")]
     check("the command bar and the right-click menu have the same actions, in the same order",
           row == ["Open", "Edit details…", "Move to category…"] and bar_count == "1 model selected"
-          and menu == ["Open", "Edit details…", "Move to category…", "Star", "Show in folder", "Add to collection…", "Delete model…", "Compress to ZIP…", "Extract archive…", "Make a new preview", "Copy folder path"]
-          and more == ["Star", "Show in folder", "Add to collection…", "Delete model…", "Compress to ZIP…", "Extract archive…", "Make a new preview", "Copy folder path"], (row, bar_count, menu, more))
+          and menu == ["Open", "Edit details…", "Move to category…", "Star", "Show in folder", "Add to collection…", *arch, "Make a new preview", "Copy folder path", "Delete model…"]
+          and more == ["Star", "Show in folder", "Add to collection…", *arch, "Make a new preview", "Copy folder path", "Delete model…"], (row, bar_count, menu, more))
 
     # 34. keys: arrows and Shift, Ctrl+A, Esc, E, M, S, Ctrl+Z
     n = int((await count(pg)).split()[0])
@@ -2371,9 +2373,10 @@ async def group4(pg):
     await pg.wait_for_selector("#archive-cache-size")
     held = await pg.inner_text("#archive-cache-size")
     await pg.click("#archive-cache-empty")
-    await pg.wait_for_function("() => document.querySelector('#archive-cache-size')?.textContent === 'Empty'", timeout=30000)
+    await pg.wait_for_function("() => document.querySelector('#archive-cache-size')?.textContent === 'Nothing unpacked'", timeout=30000)
     left = [d for d in (home / "data/archive-cache").glob("*") if (d / "done").is_file()]
-    check("Settings shows the opened archives' size and Empty clears them", held != "Empty" and not left, (held, left))
+    gone = await pg.locator("#archive-cache-empty").count() == 0
+    check("Settings shows the opened archives' size and Empty clears them (then hides)", held != "Nothing unpacked" and not left and gone, (held, left, gone))
 
 
 async def group3(pg):
@@ -2772,6 +2775,174 @@ async def group5(pg):
     await api(pg, "library_scan", {"full": False})
 
 
+async def group6(pg):
+    """Fixes from the review of 0.5.22 (docs/PLAN.md, "0.5.23")."""
+    model_folder("Household/Kitchen/Stepper (Tess Ter)", {"a.stl": cube(4), "Arms/left.stl": cube(3), "Arms/right.stl": cube(3), "Legs/leg.stl": cube(2), "readme.txt": "steps"})
+    model_folder("Household/Kitchen/Stepper two (Tess Ter)", {"b.stl": cube(4)})
+    await api(pg, "library_scan", {"full": False})
+    ids = {m["name"]: m["id"] for m in (await api(pg, "models_query", {"scope": "all", "q": "stepper", "limit": 5}))["items"]}
+    stepper, second = ids["Stepper"], ids["Stepper two"]
+    card = ".card:has(.card-name:text-is('Stepper'))"
+
+    # 1. a card away from its category's pages names the category first
+    await pg.goto(B + "#/browse/all")
+    await pg.reload()
+    await search(pg, "stepper")
+    where = await pg.inner_text(f"{card} .card-location")
+    check("a card in All models says which category it's in, then the subcategory", where == "Household › Kitchen", where)
+
+    # 14. authors, tags and licences suggest what's in the library, whatever the case typed
+    values = await api(pg, "library_values")
+    await pg.click(card)
+    await open_tab(pg, "details")
+    await pg.click("#details-authors")
+    await pg.keyboard.press("End")
+    await pg.keyboard.type(", jo smith")
+    await pg.wait_for_selector("#suggest-list")
+    offered = await labels_of(pg, "#suggest-list li")
+    await pg.keyboard.press("ArrowDown")
+    await pg.keyboard.press("Enter")
+    taken = await pg.input_value("#details-authors")
+    listed = await pg.locator("#suggest-list").count()
+    await pg.keyboard.press("Escape")  # no list now: the box is put back, nothing saved
+    kept = await pg.input_value("#details-authors")
+    check("typing an author offers the library's own spelling, and Enter takes it",
+          "Jo Smith" in values["authors"] and offered[:1] == ["Jo Smith"] and taken == "Tess Ter, Jo Smith" and listed == 0 and kept == "Tess Ter", (offered, taken, kept))
+    await pg.click(card)
+    await pg.keyboard.press("e")
+    await pg.wait_for_selector("#edit-tags")
+    await pg.click("#edit-tags")
+    await pg.keyboard.type("presupp")
+    await pg.wait_for_selector("#suggest-list")
+    tags = await labels_of(pg, "#suggest-list li")
+    await pg.keyboard.press("Escape")
+    open_still = await pg.locator("#edit-model-dialog, form.dialog").count()
+    await pg.keyboard.press("Escape")
+    await pg.wait_for_selector("form.dialog", state="detached")
+    check("tags are suggested in Edit details…, and Esc closes the list before the dialog", "presupported" in tags and open_still >= 1, (tags, open_still))
+
+    # 16. Add to collection explains the dash only when a row has one
+    made = await api(pg, "collection_create", {"name": "Dash test", "ids": [stepper]})
+    await pg.goto(B + "#/browse/all")
+    await pg.reload()
+    await search(pg, "stepper")
+    await pg.click(card)
+    await pg.click(".card:has(.card-name:text-is('Stepper two'))", modifiers=["Control"])
+    await pg.keyboard.press("c")
+    await pg.wait_for_selector("#collect-dialog .collect-list")
+    dash = await pg.locator("#collect-dash-note").count()
+    await pg.keyboard.press("Escape")
+    await api(pg, "collections_change", {"changes": [{"id": made["id"], "add": [second]}]})
+    await pg.keyboard.press("c")
+    await pg.wait_for_selector("#collect-dialog .collect-list")
+    no_dash = await pg.locator("#collect-dash-note").count()
+    await pg.keyboard.press("Escape")
+    await api(pg, "collection_delete", {"id": made["id"]})
+    await clear_selection(pg)
+    check("Add to collection says what a dash means only when a row has one", dash == 1 and no_dash == 0, (dash, no_dash))
+
+    # 13. the ? in the search box lists the filters; picking one adds it with its value selected
+    await pg.goto(B + "#/browse/all")
+    await pg.reload()
+    await count(pg)
+    await pg.click("#search-help")
+    await pg.wait_for_selector("#context-menu")
+    filters = await pg.eval_on_selector_all("#context-menu .menu-item", "els => els.map(e => e.dataset.action)")
+    await pg.click('#context-menu [data-action="filter-kind"]')
+    await pg.wait_for_function("() => document.querySelector('#browse-count')?.dataset.q === 'kind:slicer'")
+    chosen = await pg.evaluate("(() => { const b = document.activeElement; return b.id === 'search' ? b.value.slice(b.selectionStart, b.selectionEnd) : null; })()")
+    await search(pg, "")
+    check("the search box's ? lists the filters, and picking one adds it with its value ready to change",
+          all(f in filters for f in ["filter-author", "filter-tag", "filter-category", "filter-in", "filter-kind"]) and chosen == "slicer", (filters, chosen))
+
+    # 12. Unsorted says what to do with what's in it
+    model_folder("Unsorted/Note test", {"note.stl": cube(2)})
+    await api(pg, "library_scan", {"full": False})
+    await pg.goto(B + "#/browse/unsorted")
+    await pg.reload()
+    await pg.wait_for_selector("#unsorted-note")
+    note = await pg.inner_text("#unsorted-note")
+    shutil.rmtree(library / "Unsorted/Note test", ignore_errors=True)
+    await api(pg, "library_scan", {"full": False})
+    check("Unsorted says to use Move to category… or Import", "Move to category… (M)" in note and "Import" in note, note)
+
+    # 7. the main button is the same height on every page, so the bar doesn't jump
+    heights = {}
+    for page, ready in [("browse/all", "#browse-count"), ("import", "#import-sort"), ("health", "#health-check"), ("duplicates", "#dupes-find")]:
+        await pg.goto(B + f"#/{page}")
+        await pg.wait_for_selector(ready)
+        await pg.wait_for_timeout(300)
+        heights[page] = await pg.evaluate("document.querySelector('#main-root .cmdbar').getBoundingClientRect().height")
+    check("the top bar is the same height on Import, Health check and Duplicates as elsewhere", len(set(heights.values())) == 1, heights)
+
+    # 9. a model's page starts with the category panel folded; unfolded there, it stays so on model pages
+    await pg.goto(B + f"#/model/{stepper}")
+    await pg.wait_for_selector("#model-page")
+    await pg.wait_for_selector("#category-panel")
+    folded = await pg.locator("#category-panel.folded").count()
+    await pg.keyboard.press("[")  # [ is the file list's here
+    await pg.wait_for_selector("#file-panel.collapsed")
+    still = await pg.locator("#category-panel.folded").count()
+    await pg.keyboard.press("[")
+    await pg.wait_for_selector("#file-panel:not(.collapsed)")
+    await pg.click("#category-panel-open")
+    await pg.wait_for_selector("#category-panel:not(.folded)")
+    await pg.reload()
+    await pg.wait_for_selector("#category-panel")
+    stays = await pg.locator("#category-panel:not(.folded)").count()
+    await pg.click("#category-panel-close")
+    await pg.wait_for_selector("#category-panel.folded")
+    await pg.goto(B + "#/browse/schema/household")
+    await pg.wait_for_selector("#category-panel")
+    own = await pg.locator("#category-panel:not(.folded)").count()
+    check("a model's page starts with the category panel folded ([ folds its files), remembered apart from a category's pages",
+          folded == 1 and still == 1 and stays == 1 and own == 1, (folded, still, stays, own))
+
+    # 6. Previous and Next go through every file of the model, across its folders
+    await pg.goto(B + f"#/model/{stepper}")
+    await pg.wait_for_selector(".tree-btn.shown[data-file]")
+    seen = []
+    for _ in range(6):
+        shown = await pg.get_attribute(".tree-btn.shown[data-file]", "data-file")
+        seen.append(shown)
+        await pg.click("#workspace-stage [aria-label='Next file']")
+        await pg.wait_for_function("f => (document.querySelector('.tree-btn.shown[data-file]')?.dataset.file || f) !== f", arg=shown)
+    check("Next steps through every file of the model across its folders, then back to the first",
+          len(set(seen[:5])) == 5 and seen[5] == seen[0] and {"Arms/left.stl", "Legs/leg.stl", "readme.txt"} <= set(seen), seen)
+
+    # 10. the menu is made wider by dragging its edge, and keeps that width
+    await pg.goto(B + "#/browse/all")
+    await count(pg)
+    before = await pg.evaluate("document.querySelector('.sidebar').getBoundingClientRect().width")
+    h = await pg.locator("#menu-resize").bounding_box()
+    await pg.mouse.move(h["x"] + 4, h["y"] + 200)
+    await pg.mouse.down()
+    await pg.mouse.move(h["x"] + 84, h["y"] + 200, steps=4)
+    await pg.mouse.up()
+    await pg.reload()
+    await count(pg)
+    after = await pg.evaluate("document.querySelector('.sidebar').getBoundingClientRect().width")
+    await pg.dblclick("#menu-resize")
+    await pg.wait_for_function("w => document.querySelector('.sidebar').getBoundingClientRect().width === w", arg=before)
+    check("the menu is made wider by dragging its edge and stays that wide; a double-click puts it back", abs(after - before - 80) <= 2, (before, after))
+
+    # 15. ? shows the keyboard shortcuts, and About links to them
+    await pg.keyboard.press("?")
+    await pg.wait_for_selector("#shortcuts-dialog")
+    heads = await labels_of(pg, "#shortcuts-dialog h3")
+    await pg.keyboard.press("Escape")
+    await pg.wait_for_selector("#shortcuts-dialog", state="detached")
+    await pg.goto(B + "#/about")
+    await pg.click("#about-shortcuts")
+    await pg.wait_for_selector("#shortcuts-dialog")
+    await pg.screenshot(path=str(out / "62-shortcuts.png"))
+    await pg.keyboard.press("Escape")
+    check("? shows the keyboard shortcuts, grouped by page, and About links to them",
+          heads[:4] == ["Everywhere", "Models (All models, Unsorted, Starred, categories, collections)", "A model's page", "Import"], heads)
+    for name in ["Stepper", "Stepper two"]:
+        shutil.rmtree(library / f"Household/Kitchen/{name} (Tess Ter)", ignore_errors=True)
+    await api(pg, "library_scan", {"full": False})
+
 async def main():
     server = start_server()
     try:
@@ -2832,6 +3003,7 @@ async def main():
             await group4(pg)
             await review5(pg)
             await group5(pg)
+            await group6(pg)
 
             # 3. renaming the library
             await pg.click('.sidebar a[href="#/settings"]')

@@ -553,8 +553,8 @@ function Details({ s, sel, ix, overview, names, counts }) {
   return html`<div class="sw-details" id="sort-details" data-item=${item.id} key=${item.id}>
     <div class="panel-fields">
       <${EditBox} cls="panel-name" id="details-name" label="Name" title="Name (E or F2)" value=${item.name} off=${!!item.done} onSave=${save("name")} />
-      <${EditBox} id="details-author" label="Authors" caption="Authors" placeholder="Authors, separated by commas" value=${item.author} off=${!!item.done} onSave=${save("author")} />
-      <${EditBox} id="details-tags" label="Tags" caption="Tags" placeholder="Tags, separated by commas" value=${item.tags} off=${!!item.done} onSave=${save("tags")} />
+      <${EditBox} id="details-author" suggest="authors" label="Authors" caption="Authors" placeholder="Authors, separated by commas" value=${item.author} off=${!!item.done} onSave=${save("author")} />
+      <${EditBox} id="details-tags" suggest="tags" label="Tags" caption="Tags" placeholder="Tags, separated by commas" value=${item.tags} off=${!!item.done} onSave=${save("tags")} />
     </div>
     ${!item.done && above.length ? html`<p class="sw-level" id="sort-level" title="Click a folder above it to make that folder the model instead, with everything in it">
       <span class="field-label">Model folder</span>
@@ -747,7 +747,7 @@ export function ImportPage() {
           <button type="button" class="ghost" id="sort-fold" onClick=${() => sorter.set({ open: Object.fromEntries(se.folders.filter((f) => f.parent).map((f) => [f.path, false])) })}>Fold all</button></span>`
           : view !== "category" ? html`<${SortMenu} id="sort-by" options=${SORT_BY} value=${sortBy} onChange=${setSortBy} />` : null}
         <${ViewSwitch} views=${VIEWS} value=${view} onChange=${(k) => setPref({ sortView: k })} />` : null}
-      primary=${html`<button type="button" class=${empty ? "primary" : "ghost"} id="import-sort" disabled=${busy} onClick=${() => pickAndAdd(true)}>${Icon.folder(15)} Sort a folder…</button>`}
+      primary=${html`<button type="button" class=${empty ? "primary compact" : "ghost"} id="import-sort" disabled=${busy} onClick=${() => pickAndAdd(true)}>${Icon.folder(15)} Sort a folder…</button>`}
       more=${{ id: "import-more", items: moreItems, title: "Import a folder or file, import folders as categories, read again or start again" }}
       selection=${work && what ? { count: `${what} selected`, onClear: () => sorter.set({ picked: [], anchor: null }), items: () => barItems(sorter.get(), sel, ix, overview), buttons: 2 } : null} />
   <div class="sort-layout">
