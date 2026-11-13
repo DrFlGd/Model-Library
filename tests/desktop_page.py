@@ -2777,11 +2777,12 @@ async def group5(pg):
 
 async def group6(pg):
     """Fixes from the review of 0.5.22 (docs/PLAN.md, "0.5.23")."""
-    model_folder("Household/Kitchen/Stepper (Tess Ter)", {"a.stl": cube(4), "Arms/left.stl": cube(3), "Arms/right.stl": cube(3), "Legs/leg.stl": cube(2), "readme.txt": "steps"})
-    model_folder("Household/Kitchen/Stepper two (Tess Ter)", {"b.stl": cube(4)})
+    # two models with their own model.json, so their ids last (adding one to a collection doesn't change it)
+    side = lambda i, name, tags: json.dumps({"format": 1, "id": f"mstepper0000{i}", "name": name, "authors": [{"name": "Tess Ter"}], "tags": tags, "schema": "household", "path": ["Kitchen"]})
+    model_folder("Household/Kitchen/Stepper (Tess Ter)", {"model.json": side(1, "Stepper", []), "a.stl": cube(4), "Arms/left.stl": cube(3), "Arms/right.stl": cube(3), "Legs/leg.stl": cube(2), "readme.txt": "steps"})
+    model_folder("Household/Kitchen/Stepper two (Tess Ter)", {"model.json": side(2, "Stepper two", ["Big print"]), "b.stl": cube(4)})
     await api(pg, "library_scan", {"full": False})
-    ids = {m["name"]: m["id"] for m in (await api(pg, "models_query", {"scope": "all", "q": "stepper", "limit": 5}))["items"]}
-    stepper, second = ids["Stepper"], ids["Stepper two"]
+    stepper, second = "mstepper00001", "mstepper00002"
     card = ".card:has(.card-name:text-is('Stepper'))"
 
     # 1. a card away from its category's pages names the category first
@@ -2812,14 +2813,14 @@ async def group6(pg):
     await pg.keyboard.press("e")
     await pg.wait_for_selector("#edit-tags")
     await pg.click("#edit-tags")
-    await pg.keyboard.type("presupp")
+    await pg.keyboard.type("BIG")
     await pg.wait_for_selector("#suggest-list")
     tags = await labels_of(pg, "#suggest-list li")
     await pg.keyboard.press("Escape")
     open_still = await pg.locator("#edit-model-dialog, form.dialog").count()
     await pg.keyboard.press("Escape")
     await pg.wait_for_selector("form.dialog", state="detached")
-    check("tags are suggested in Edit details…, and Esc closes the list before the dialog", "presupported" in tags and open_still >= 1, (tags, open_still))
+    check("tags are suggested in Edit details…, and Esc closes the list before the dialog", "Big print" in tags and open_still >= 1, (tags, open_still))
 
     # 16. Add to collection explains the dash only when a row has one
     made = await api(pg, "collection_create", {"name": "Dash test", "ids": [stepper]})
