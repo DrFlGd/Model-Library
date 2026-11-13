@@ -2888,6 +2888,7 @@ async def group6(pg):
     await pg.wait_for_selector("#file-panel:not(.collapsed)")
     await pg.click("#category-panel-open")
     await pg.wait_for_selector("#category-panel:not(.folded)")
+    await pg.wait_for_timeout(600)  # settings are saved a moment after a change
     await pg.reload()
     await pg.wait_for_selector("#category-panel")
     stays = await pg.locator("#category-panel:not(.folded)").count()
@@ -2920,6 +2921,7 @@ async def group6(pg):
     await pg.mouse.down()
     await pg.mouse.move(h["x"] + 84, h["y"] + 200, steps=4)
     await pg.mouse.up()
+    await pg.wait_for_timeout(600)  # settings are saved a moment after a change
     await pg.reload()
     await count(pg)
     after = await pg.evaluate("document.querySelector('.sidebar').getBoundingClientRect().width")
