@@ -1,0 +1,12 @@
+    Updating crates.io index
+     Locking 500 packages to highest compatible versions
+      Adding base64 v0.22.1 (available: v0.23.1)
+      Adding generic-array v0.14.7 (available: v0.14.9)
+      Adding sevenz-rust2 v0.24.2 (available: v0.25.0)
+      Adding sha2 v0.10.9 (available: v0.11.1)
+      Adding toml v0.8.2 (available: v0.8.23)
+      Adding toml_datetime v0.6.3 (available: v0.6.11)
+      Adding toml_edit v0.20.2 (available: v0.20.7)
+      Adding zip v2.6.1 (available: v9.5.1)
+   Compiling modlib-core v0.5.24 (D:\a\Model-Library\Model-Library\desktop\core)
+    Finished `release` profile [optimized] target(s) in 1m 07s

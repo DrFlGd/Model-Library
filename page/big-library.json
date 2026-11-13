@@ -1,0 +1,8 @@
+{
+ "models": 10000,
+ "first_ms": 2148,
+ "reopen_ms": 1073,
+ "reopen_read": 0,
+ "search_us": 5293,
+ "search_hits": 635
+}

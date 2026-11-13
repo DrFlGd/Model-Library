@@ -1,0 +1,16 @@
+{
+ "report": {
+  "platform": "desktop",
+  "title": "Model Library",
+  "library": {
+   "path": "C:\\Users\\runneradmin\\Model Library",
+   "_library": true,
+   "_library/schemas": true,
+   "Unsorted": true,
+   "library.json": true
+  },
+  "settings_path": "C:\\Users\\runneradmin\\Model Library",
+  "theme": "night"
+ },
+ "failures": []
+}
