@@ -81,7 +81,7 @@ pub fn quick(path: &Path, size: u64) -> std::io::Result<(String, bool)> {
 }
 
 /// A file's SHA-256, read in chunks; stops when `cancel` is set.
-fn sha256(
+pub(crate) fn sha256(
     path: &Path,
     cancel: &AtomicBool,
     on_bytes: &mut dyn FnMut(u64),
@@ -122,7 +122,7 @@ pub fn same_prints(a: &[(u64, PathBuf)], b: &[(u64, PathBuf)]) -> bool {
 
 /// The files of a model folder that duplicates are judged by: 3D, slicer and
 /// archive files (`_media/` aside), as (path in the folder, size, modified in ms).
-fn main_files(dir: &Path) -> Vec<(String, u64, u64)> {
+pub(crate) fn main_files(dir: &Path) -> Vec<(String, u64, u64)> {
     fn walk(dir: &Path, prefix: &str, out: &mut Vec<(String, u64, u64)>) {
         let Ok(rd) = std::fs::read_dir(dir) else {
             return;

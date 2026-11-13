@@ -1,5 +1,5 @@
 // The browse view: one place of the library (all models, Unsorted, Starred,
-// or a schema and some of its categories), searched in the core, shown as a
+// a collection, or a schema and some of its categories), searched in the core, shown as a
 // grid or a list, with the selected model's details beside it. Selecting works
 // as everywhere (docs/PLAN.md, "UI pass design"): click, Ctrl or Cmd-click,
 // Shift-click, tick boxes, Ctrl+A, Esc and the arrow keys; right-click gives the
@@ -19,6 +19,7 @@ import { fileSel, clear as clearFiles } from "./filesel.js";
 import { useFileSelection } from "./extract.js";
 import { UnsortedPreview } from "./unsorted-preview.js";
 import { CatIcon, iconOf } from "./caticons.js";
+import { collectionOf, collectionItems } from "./collections.js";
 
 /** Open a model's own page. */
 const openModel = (m) => { location.hash = routeHash(`model:${m.id}`); };
@@ -26,7 +27,7 @@ const openModel = (m) => { location.hash = routeHash(`model:${m.id}`); };
 const PAGE = 300;
 const SORTS = [["name", "Name"], ["added", "Recently added"], ["size", "Largest first"]];
 const VIEWS = [["grid", "Grid", "grid"], ["list", "List", "list"]];
-const CTX = { page: "browse" };
+const BROWSE = { page: "browse" };
 
 /** The place's title for the command bar: its name large (with its icon), the
  *  categories above it as small links. */
@@ -34,6 +35,8 @@ function titleOf(scope, overview) {
   if (scope === "all") return { title: "All models" };
   if (scope === "unsorted") return { title: "Unsorted" };
   if (scope === "favs") return { title: "Starred" };
+  const c = collectionOf(scope, overview);
+  if (c) return { title: html`<h1 class="crumbs" title=${c.name || "Collection"}>${Icon.bookmark(20)}<span class="crumbs-name">${c.name || "Collection"}</span></h1>` };
   const [id, ...values] = scope.slice(7).split("/").map(decodeURIComponent);
   const schema = overview?.schemas?.find((s) => s.id === id);
   const crumbs = [[schema?.name || id, []], ...values.map((v, i) => [v, values.slice(0, i + 1)])];
@@ -49,12 +52,17 @@ function placeName(scope, overview) {
   if (scope === "all") return "All models";
   if (scope === "unsorted") return "Unsorted";
   if (scope === "favs") return "Starred";
+  const c = collectionOf(scope, overview);
+  if (c) return c.name || "this collection";
   const [id, ...values] = scope.slice(7).split("/").map(decodeURIComponent);
   return values.length ? values[values.length - 1] : overview?.schemas?.find((s) => s.id === id)?.name || id;
 }
 
-/** The category shown: one menu, the same at every level and on the sidebar. */
-function categoryMenu(scope) {
+/** The category shown: one menu, the same at every level and on the sidebar
+ *  (a collection's: Rename and Delete, as on its menu row). */
+function categoryMenu(scope, overview) {
+  const c = collectionOf(scope, overview);
+  if (c?.name) return { id: "collection-menu", title: "Collection: rename or delete", items: () => collectionItems(c) };
   if (!scope.startsWith("schema:")) return null;
   const [id, ...values] = scope.slice(7).split("/").map(decodeURIComponent);
   return { id: "category-menu", title: `${values.length ? "Subcategory" : "Category"}: add, edit, rename or remove`, items: () => categoryItems(id, values) };
@@ -214,6 +222,8 @@ function filtersIn(q) {
 export function Browser() {
   const s = useStore(ui, (st) => ({ route: st.route, q: st.q, sort: st.sort, layout: st.layout, selection: st.selection, picked: st.picked, rev: st.catalogRev, favs: st.favs, overview: st.overview, library: st.library, navOpen: st.navOpen }));
   const scope = s.route.slice(7);
+  const coll = collectionOf(scope, s.overview);
+  const CTX = coll?.name ? { ...BROWSE, collection: coll } : BROWSE;
   const catShow = useStore(ui, (st) => st.catShow);
   const place = placeOf(scope, s.overview);
   const subs = place?.node.children || [];
@@ -269,7 +279,7 @@ export function Browser() {
     const l = letter(e);
     if (e.key === "Enter") { if (sel.length === 1) { e.preventDefault(); openModel(sel[0]); } return; }
     if (e.key === "F2") { if (sel.length === 1) { e.preventDefault(); const ok = writable(); if (ok === true) editDetails(sel, true); else toast(ok); } return; }
-    if (l === "e" || l === "m" || l === "s") { if (sel.length) { e.preventDefault(); runKey(MODEL_ACTIONS, l.toUpperCase(), sel, CTX); } return; }
+    if (l === "e" || l === "m" || l === "s" || l === "c") { if (sel.length) { e.preventDefault(); runKey(MODEL_ACTIONS, l.toUpperCase(), sel, CTX); } return; }
     if (selectAllKey(e)) { e.preventDefault(); ui.set({ picked: ids, anchor: ids[0] || null, selection: ids[ids.length - 1] || null }); return; }
     if (e.key === "Escape") { if (fileSel.get().picked.length && scope === "unsorted") clearFiles(); else if (sel.length) ui.set({ picked: [] }); return; }
     if (e.key === "ContextMenu") {
@@ -316,6 +326,8 @@ export function Browser() {
   const total = direct ? place.node.count : result?.total;
   const count = html`<span class="page-count" id="browse-count" data-q=${result ? result.q : null} data-scope=${result ? result.scope : null}>${result ? `${total} ${total === 1 ? "model" : "models"}` : ""}</span>`;
   const emptyNote = s.q ? `Nothing in ${name} matches that search.` : scope === "favs" ? "Nothing starred yet: star a model to keep it here."
+    : coll?.gone ? "That collection isn't in the library any more."
+    : coll ? "Nothing in this collection yet. Select models anywhere and press C, or right-click them and choose Add to collection…"
     : scope === "unsorted" ? "No models here yet."
     : html`No models here yet. Drop model files or folders on this window to add them here, or use <a href=${routeHash("import")}>Import</a>.`;
   const wider = s.q && scope !== "all" ? html`<a href=${routeHash("browse:all")} id="search-everywhere">Search all models</a>` : null;
@@ -325,7 +337,7 @@ export function Browser() {
         onTag=${(v) => toggleFilter("tag", v)} tagsOn=${active.filter(([k]) => k === "tag").map(([, v]) => v)} />`} />`;
   const selection = filesPicking || (picked.length ? { count: `${picked.length} ${picked.length === 1 ? "model" : "models"} selected`, onClear: () => ui.set({ picked: [] }),
     items: menuItems(MODEL_ACTIONS, picked, CTX), buttons: 3 } : null);
-  return html`<${CommandBar} id="browse-head" up=${head.up} title=${head.title} count=${count} more=${categoryMenu(scope)} selection=${selection}
+  return html`<${CommandBar} id="browse-head" up=${head.up} title=${head.title} count=${count} more=${categoryMenu(scope, s.overview)} selection=${selection}
       search=${html`<label class="search small toolbar-search"><span class="visually-hidden">Search this place</span>
           <input id="search" data-search type="search" value=${text} placeholder="Search names, authors, tags… or author:jo" autocomplete="off" spellcheck="false"
             title="Search (/). Typed filters: author:jo tag:presupported" onInput=${(e) => setText(e.target.value)} /></label>`}

@@ -865,3 +865,49 @@ Where round 2 stands (2026-10-25): groups 1–4, the Inspector rails layout and 
 Ideas suggested on 14 October, waiting for Jerred to choose and order them (each gets a design here before code): print tracking (printed date, printer, settings, photo, rating, a To print list); collections (one model in many lists without moving files); "fits my printer" (size measured at import, a bed-size filter); a library health check (missing or changed files, model.json not matching its folder, empty models); saved searches and richer filters (file type, size, date added, has a presupported variant); installer code signing and update in place.
 
 Smaller gaps still open: previews can't pick a variant inside an archive; videos inside archives don't play; no 3D view for G-code; and from the Inspector rails notes, Ctrl+K commands and a History tab on a model. Phase 6 (Docker with sign-in) stays on hold until Jerred says the UI is ready.
+
+## Collections and the health check (Jerred, 12 November 2026)
+
+Jerred chose two of the 14 October ideas: collections and a library health check, then a UI and usability review with the features still missing.
+
+### Collections design (0.5.22)
+
+A collection is a named list of models: one model can be in any number of them, and its files don't move. Categories still decide where a model's folder is; collections are for lists that cut across them ("Christmas gifts", "Army list", "Print next").
+
+- **Stored in the library**, one file per collection: `_library/collections/<id>.json` with `{ "id": "c…", "name": …, "models": [model ids], "created": … }`. One file each, so two computers syncing the library rarely touch the same file. Starred stays as it is (the list in `library.json`).
+- **Lasting ids.** Adding a model writes its model.json first if it has none, as Star does, so the id doesn't change when the folder moves. When a model's id does change (its first model.json, Move to category…), collections follow it as Starred does.
+- **The menu** has a **Collections** section under Categories: each collection with its count, the same right-click menu as its page (Rename…, Delete collection…), "None yet." when there are none, and **New collection…** under it, as with categories.
+- **A collection's page** (`#/browse/collection/<id>`) is a place like any other: search, chips, sort, grid or list, the place summary, the same model actions. Its ⋯ menu has Rename… and Delete collection…. With models selected there is also **Remove from collection**.
+- **Add to collection…** is a model action (key C) everywhere models are: the selection bar, the right-click menu, a model's page. Its dialog lists the collections with tick boxes (ticked: every selected model is in it; a dash: some are), a box to make a new one, and Save. Undo is in the message.
+- **A model's details** show its collections as links (the details panel and the model page's Details tab), under Tags.
+- **Delete collection…** removes the list, never the models, and Undo in the message puts it back.
+- Search can narrow to a collection with `collection:"Collection name"` (`in:` already means a subcategory). (Not built: dragging cards onto a collection.)
+
+### Health check design (0.5.22)
+
+A page that looks over the whole library for things that have gone wrong, mostly from changes made outside the app or on a NAS, and offers a fix where one is safe. Nothing is deleted without asking, and the fixes that change model.json are journalled, so Undo works from the message and from Home.
+
+- **Where:** **Health check** in the menu, under Duplicates. The bar's main button is **Check now**; a box under it, **Also read every 3D, slicer and archive file**, makes it slow but finds damaged files. The check is a job with progress and Stop. The last result is kept on this computer (`<data dir>/health/<library id>.json`) with when it ran, so the page shows it again; a fix takes what it fixed off the list.
+- **What it looks for**, most serious first. Each group says what it means in a line, lists the models (each a link to its page) and has its fix as a button for the whole group, plus Show in folder per row:
+  1. **Files that may be damaged** (only when reading every file): a file whose size and date match what was recorded but whose contents don't. Fix: *It's fine* records it as it is now.
+  2. **Files that have gone**: recorded in a model's model.json (by Duplicates or an earlier check) but no longer there. Fix: *Forget them*.
+  3. **Files that can't be read** (only when reading every file), including archives that don't open. No fix; Show in folder.
+  4. **model.json that can't be read** (not JSON, or not an object). Fix: *Start a new one*, keeping the old one beside it as `model.json.broken`.
+  5. **Models sharing an id**: a model folder copied by hand. Fix: *Give the copies their own id* (the one whose model.json says it belongs where it is keeps the id; otherwise the first by path).
+  6. **Empty models**: a model folder with no files. Fix: *Delete…*, the usual recoverable Delete model.
+  7. **Cover picture missing**: model.json names a cover that isn't there. Fix: *Use automatic preview*.
+  8. **Lists naming models that are gone**: Starred or a collection lists a model id the library doesn't have. Fix: *Take them off the lists* (asks first: if a drive is missing, those models may come back).
+  9. **Models without a model.json**: folders dropped in by hand. Fix: *Write their model.json*, so their details travel with them and their ids last.
+  10. **Paths too long for some Windows programs**: the full path of a file is over 250 characters. No fix in the app (a model folder's name comes from its category's template); Show in folder.
+  11. **Names Windows can't use**: a file or folder name with `< > : " / \ | ? *`, a control character, a trailing space or dot, or a reserved name (CON, NUL, COM1…), usually from a library made on a NAS or another system. Show in folder.
+  12. **Leftovers from stopped copies**: the app's own hidden staging folders and half-written files (`.importing-…`, `.extract-…`, `.archive-stage-…`, `.model-transfer-…`, `*.tmp-…`). Fix: *Remove them* (asks first). Not listed while a change is unfinished (Home's Recent changes can still resume it).
+- A model folder moved by hand into another category isn't listed: the library watcher already updates its model.json.
+- Read-only library: the check runs, the fixes are off.
+
+### Collections and health check notes (0.5.22)
+
+What was built, and where it differs from the designs above.
+
+- **Collections** are as designed. Add to collection… sits under More (⋯ and the right-click menu, key C) rather than as a button, to keep the bars short; on a collection's page, Remove from <name> is in the same place. Delete collection doesn't ask: it removes only the list and Undo puts it back. The core keeps them in `collections.rs`; `models_query` takes the collections for the `coll:<id>` scope and the `collection:` filter; the overview lists them with how many of their models are in the library; `model_get` lists a model's collections. Ids are followed wherever stars are (Move to category, a first model.json, the health check's fixes).
+- **Health check**: the fix for leftovers is **Move them to Unsorted** (into `Unsorted/Leftovers from stopped copies/`), not Remove: an `.importing-…` folder can hold the only copy of a file when an import was stopped part way, so nothing is deleted from this page. Leftovers an unfinished change still needs are never listed. Rows have no Show in folder of their own: a model row selects the model (its details and the usual right-click actions, including Show in folder), double-click opens it. Damaged files: *Mark as fine*. Each kind keeps at most 500 items in the saved result; the page says when there are more. The deep check reads every main file whole (SHA-256), checks an STL's length against its triangle count (or a text STL's `endsolid`), opens 3MF files as ZIPs and lists archives (a locked one isn't a problem); it records hashes it didn't have in model.json, as Duplicates does, which also speeds up the next duplicates search.
+- **Safety net found while building it:** writing a model's first model.json (Star, Edit details, Add to collection, the check's fixes) used to replace a model.json that couldn't be read; now `model::update` keeps it beside the new one as `model.json.broken` (`model::keep_broken`).

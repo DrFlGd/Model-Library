@@ -12,6 +12,7 @@ import { RenameNode, EditSchema, DeleteSchema, DeleteSubcategory, MergeCategorie
 import { ExtractDialog } from "./extract.js";
 import { AddFilesDialog, SendFilesDialog, DeleteModelsDialog } from "./fileops.js";
 import { ArchiveDialog } from "./archive-actions.js";
+import { CollectDialog, NameCollection } from "./collections.js";
 import { COLOURS, MORE_COLOURS, GRAY, ColourSelect, remakePreview } from "./colours.js";
 
 export const FIELD_TYPES = [["text", "Text"], ["number", "Number"], ["choice", "Choice"], ["yes-no", "Yes or no"], ["date", "Date"]];
@@ -335,6 +336,8 @@ function MainDialog() {
   if (dialog.type === "add-model-files") return html`<${AddFilesDialog} model=${dialog.model} sources=${dialog.sources} />`;
   if (dialog.type === "delete-models") return html`<${DeleteModelsDialog} models=${dialog.models} />`;
   if (dialog.type === "new-schema") return html`<${NewSchema} />`;
+  if (dialog.type === "collect") return html`<${CollectDialog} models=${dialog.models} />`;
+  if (dialog.type === "name-collection") return html`<${NameCollection} collection=${dialog.collection || null} />`;
   if (dialog.type === "move-models") return html`<${MoveModels} models=${dialog.models} />`;
   if (dialog.type === "choose-icon") return html`<${ChooseIcon} schemaId=${dialog.schemaId} path=${dialog.path} />`;
   if (dialog.type === "add-subcategory") return html`<${AddSubcategory} schemaId=${dialog.schemaId} path=${dialog.path} />`;

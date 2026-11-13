@@ -503,11 +503,12 @@ impl Index {
         limit: usize,
         favs: &[String],
     ) -> Value {
-        self.query_at(scope, q, sort, offset, limit, favs, false)
+        self.query_at(scope, q, sort, offset, limit, favs, &[], false)
     }
 
-    /// [`Index::query`]; `direct`: in a category, only the models filed at that
-    /// level, not in its subcategories.
+    /// [`Index::query`]; `colls`: the library's collections (scope `coll:<id>`
+    /// and the `collection:` filter); `direct`: in a category, only the models
+    /// filed at that level, not in its subcategories.
     #[allow(clippy::too_many_arguments)]
     pub fn query_at(
         &self,
@@ -517,6 +518,7 @@ impl Index {
         offset: usize,
         limit: usize,
         favs: &[String],
+        colls: &[Value],
         direct: bool,
     ) -> Value {
         let t = std::time::Instant::now();
@@ -528,12 +530,23 @@ impl Index {
             .map(|p| fold(&crate::api::percent_decode(p)))
             .collect();
         let (words, filters) = parse_query(q);
+        let in_coll: HashSet<String> = match place {
+            "coll" => colls
+                .iter()
+                .find(|c| c["id"].as_str() == Some(sub))
+                .map(crate::collections::members)
+                .unwrap_or_default()
+                .into_iter()
+                .collect(),
+            _ => HashSet::new(),
+        };
         let mut hits: Vec<&Model> = self
             .models
             .iter()
             .filter(|m| match place {
                 "unsorted" => m.v["schema"].is_null(),
                 "favs" => favs.iter().any(|f| f == m.id()),
+                "coll" => in_coll.contains(m.id()),
                 "schema" => {
                     let depth = m.v["path"].as_array().map_or(0, Vec::len);
                     m.v["schema"] == json!(schema_id)
@@ -550,7 +563,15 @@ impl Index {
                     .iter()
                     .all(|w| m.words.iter().any(|mw| mw.starts_with(w.as_str())))
             })
-            .filter(|m| filters.iter().all(|(k, v)| self.matches_filter(m, k, v)))
+            .filter(|m| {
+                filters.iter().all(|(k, v)| match k.as_str() {
+                    "collection" => colls.iter().any(|c| {
+                        fold(c["name"].as_str().unwrap_or("")).starts_with(v.as_str())
+                            && c["models"].as_array().is_some_and(|ms| ms.iter().any(|x| x.as_str() == Some(m.id())))
+                    }),
+                    _ => self.matches_filter(m, k, v),
+                })
+            })
             .collect();
         match sort {
             "added" => hits.sort_by(|a, b| b.v["added"].as_str().cmp(&a.v["added"].as_str())),
@@ -973,6 +994,18 @@ mod tests {
             names(ix.query("favs", "", "name", 0, 50, &["mloose".into()])),
             ["Loose"]
         );
+        // a collection: its own page, and the collection: filter anywhere
+        let carnifex = ix.query("all", "carnifex", "name", 0, 1, &[])["items"][0]["id"].clone();
+        let colls = [json!({ "id": "c1", "name": "Print next", "models": ["mloose", carnifex] })];
+        assert_eq!(
+            names(ix.query_at("coll:c1", "", "name", 0, 50, &[], &colls, false)),
+            ["Carnifex", "Loose"]
+        );
+        assert_eq!(
+            names(ix.query_at("all", "collection:\"print n\" kind:slicer", "name", 0, 50, &[], &colls, false)),
+            ["Carnifex"]
+        );
+        assert!(names(ix.query_at("coll:c2", "", "name", 0, 50, &[], &colls, false)).is_empty());
         let r = ix.query("all", "", "name", 2, 2, &[]);
         assert_eq!(r["total"], 6);
         // the size of every hit, not just the page shown

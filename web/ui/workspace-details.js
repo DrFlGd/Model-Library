@@ -8,6 +8,7 @@ import { api, saveDetails, recorded } from "./library.js";
 import { Cover, PlaceLinks, TagLinks } from "./details.js";
 import { FieldInput } from "./dialogs.js";
 import { ColourSelect, remakePreview } from "./colours.js";
+import { CollectionLinks } from "./collections.js";
 
 export function detailsDraft(model) {
   const d = model.details || {};
@@ -192,6 +193,7 @@ export function WorkspaceDetails({ model, onModelChange }) {
     <label class="field-block"><span>Source</span><input type="url" placeholder="https://…" value=${form.source} disabled=${readOnly} onInput=${change("source")} /></label>
     <label class="field-block"><span>Tags</span><input id="workspace-edit-tags" type="text" placeholder="tag one, tag two" value=${form.tags} disabled=${readOnly} onInput=${change("tags")} /></label>
     ${tagList.length ? html`<div class="tag-links-row"><${TagLinks} tags=${tagList} id="workspace-tag-links" /></div>` : null}
+    ${model.collections?.length ? html`<div class="field-block"><span>Collections</span><${CollectionLinks} list=${model.collections} id="workspace-collections" /></div>` : null}
     ${(schema?.fields || []).map((field) => html`<label class="field-block" key=${field.key}><span>${field.label}</span>
       <${FieldInput} field=${field} value=${fields[field.key]} onChange=${(value) => updateField(field.key, value)} /></label>`)}
     ${images.length ? html`<label class="field-block"><span>Cover picture</span><select value=${form.cover} disabled=${readOnly} onChange=${change("cover")}>

@@ -1,5 +1,5 @@
 // The menu on the left: the library's places, each category (with its icon),
-// and settings. The category being browsed shows its subcategory tree in a
+// the collections, and settings. The category being browsed shows its subcategory tree in a
 // panel beside the menu, which folds to a strip (docs/PLAN.md, "Group 2 design",
 // R5); in narrow windows the menu is a drawer and the tree unfolds in it instead.
 // Right-click a category for the same Category menu as its page, which also adds
@@ -12,6 +12,7 @@ import { Icon } from "./icons.js";
 import { CatIcon, iconOf } from "./caticons.js";
 import { openMenu } from "./actions.js";
 import { categoryItems } from "./categories.js";
+import { collectionItems } from "./collections.js";
 import { NavHead, ThemeButton, useMedia, useNavFolded } from "./chrome.js";
 
 const NARROW = "(max-width: 900px)";
@@ -153,8 +154,13 @@ export function Sidebar() {
           ${unfolded ? html`<${TreeRows} schema=${sc} nodes=${sc.tree} values=${[]} depth=${1} current=${s.route} open=${s.open} />` : null}`;
       })}</ul>` : html`<p class="muted nav-note">None yet.</p>`}
       ${s.library && !s.library.read_only ? html`<button type="button" class="ghost nav-add" id="new-schema" onClick=${() => ui.set({ dialog: { type: "new-schema" }, navOpen: false })}>${Icon.plus(14)} New category…</button>` : null}
+      <p class="nav-head">Collections</p>
+      ${ov?.collections?.length ? html`<ul class="nav-list" id="collection-list">${ov.collections.map((c) => html`<${NavLink} key=${c.id} route=${`browse:coll:${c.id}`} label=${c.name}
+          icon="bookmark" count=${c.count} current=${s.route} menu=${() => collectionItems(c)} />`)}</ul>` : html`<p class="muted nav-note">None yet.</p>`}
+      ${s.library && !s.library.read_only ? html`<button type="button" class="ghost nav-add" id="new-collection" onClick=${() => ui.set({ dialog: { type: "name-collection" }, navOpen: false })}>${Icon.plus(14)} New collection…</button>` : null}
       <ul class="nav-list nav-foot">
         <${NavLink} route="duplicates" label="Duplicates" icon="stack" current=${s.route} />
+        <${NavLink} route="health" label="Health check" icon="pulse" current=${s.route} />
         <${NavLink} route="settings" label="Settings" icon="cog" current=${s.route} />
         <${NavLink} route="about" label="About" icon="info" current=${s.route} />
         <${ThemeButton} />
